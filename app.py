@@ -2,7 +2,7 @@ import os
 import requests
 import yaml
 import random
-import sqlite3 # Pour la base de données
+import sqlite3
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 from openai import OpenAI
@@ -13,9 +13,7 @@ app = Flask(__name__)
 def init_db():
     conn = sqlite3.connect('photos.db')
     c = conn.cursor()
-    # Table pour éviter les doublons
     c.execute('''CREATE TABLE IF NOT EXISTS sent_photos (url TEXT PRIMARY KEY)''')
-    # NOUVELLE Table pour mémoriser la suggestion actuelle avant publication
     c.execute('''CREATE TABLE IF NOT EXISTS current_session (
                     chat_id INTEGER PRIMARY KEY, 
                     last_url TEXT, 
@@ -65,6 +63,46 @@ def get_session(chat_id):
     conn.close()
     return res
 
+# --- Logique Instagram Business API ---
+
+def publish_to_instagram(image_url, caption):
+    token = os.environ.get('IG_ACCESS_TOKEN')
+    ig_id = os.environ.get('INSTAGRAM_BUSINESS_ID')
+    
+    if not token or not ig_id:
+        return False, "Variables d'environnement Instagram manquantes sur Render."
+
+    try:
+        # 1. Création du conteneur média (Media Container)
+        post_url = f"https://graph.facebook.com/v19.0/{ig_id}/media"
+        payload = {
+            'image_url': image_url,
+            'caption': caption,
+            'access_token': token
+        }
+        r_container = requests.post(post_url, data=payload)
+        container_data = r_container.json()
+        container_id = container_data.get('id')
+        
+        if not container_id:
+            error_msg = container_data.get('error', {}).get('message', 'Erreur inconnue')
+            return False, f"Erreur Meta (Container) : {error_msg}"
+
+        # 2. Publication du conteneur
+        publish_url = f"https://graph.facebook.com/v19.0/{ig_id}/media_publish"
+        r_publish = requests.post(publish_url, data={
+            'creation_id': container_id,
+            'access_token': token
+        })
+        
+        if r_publish.status_code == 200:
+            return True, "Succès"
+        else:
+            return False, f"Erreur Meta (Publish) : {r_publish.json()}"
+            
+    except Exception as e:
+        return False, str(e)
+
 # --- Logique de l'Agent ---
 
 def get_photo_from_galerie(galerie_nom):
@@ -103,10 +141,9 @@ def generate_ai_caption(image_url, galerie_nom):
         
         CONSIGNES DE STYLE :
         1. Titre sobre (Minuscules avec Majuscule au début). Pas de symboles type ###.
-        2. Texte doctrinal : Analyse la composition, l'ombre, le silence. Parle de la condition humaine ou du rythme urbain.
+        2. Texte doctrinal : Analyse la composition, l'ombre, le silence.
         3. HASHTAGS : Utilise cette base : {config.get('hashtags', '')}. 
            - Ajoute toujours 2 hashtags spécifiques à la ville (ex: #Street{galerie_nom} #Explore{galerie_nom}).
-           - Si la photo est très contrastée, ajoute #Chiaroscuro.
         """
         
         response = client.chat.completions.create(
@@ -150,8 +187,6 @@ def send_suggestion(chat_id, galerie_nom):
         return
 
     caption = generate_ai_caption(image_url, galerie_nom)
-    
-    # ÉTAPE 1 : On enregistre la session (URL + Texte) pour pouvoir publier plus tard
     save_session(chat_id, image_url, caption)
     
     payload = {
@@ -172,34 +207,45 @@ def send_suggestion(chat_id, galerie_nom):
 @app.route("/telegram-webhook", methods=['POST'])
 def telegram_webhook():
     data = request.json
+    token = os.environ.get('TELEGRAM_TOKEN')
+    
     if "message" in data:
         send_galerie_menu(data["message"]["chat"]["id"])
     elif "callback_query" in data:
         chat_id = data["callback_query"]["message"]["chat"]["id"]
         action = data["callback_query"]["data"]
-        token = os.environ.get('TELEGRAM_TOKEN')
+        callback_id = data["callback_query"]["id"]
+        
         requests.post(f"https://api.telegram.org/bot{token}/answerCallbackQuery", 
-                      json={"callback_query_id": data["callback_query"]["id"]})
+                      json={"callback_query_id": callback_id})
 
         if action == "menu":
             send_galerie_menu(chat_id)
         elif action.startswith("select_"):
-            galerie_nom = action.split("_")[1]
-            send_suggestion(chat_id, galerie_nom)
+            send_suggestion(chat_id, action.split("_")[1])
         elif action == "publish":
-            # On récupère ce qu'on a mis en mémoire
             session = get_session(chat_id)
             if session:
                 url, caption = session
-                # Pour l'instant on confirme juste, le code de publication arrive à l'étape suivante
                 requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                              json={"chat_id": chat_id, "text": f"Session récupérée. Prêt pour l'étape 2 (Publication réelle).\nPhoto : {url}"})
+                              json={"chat_id": chat_id, "text": "⏳ Publication sur Instagram en cours..."})
+                
+                success, msg = publish_to_instagram(url, caption)
+                
+                if success:
+                    mark_photo_as_sent(url)
+                    text = "🚀 **Publié avec succès sur Instagram !**"
+                else:
+                    text = f"❌ **Échec de la publication**\nDétails : {msg}"
+                
+                requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
+                              json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"})
             
     return jsonify({"status": "ok"})
 
 @app.route("/")
 def index():
-    return "Agent David Ahmed - Étape 1 Mémoire Active"
+    return "Agent David Ahmed - Étape 2 (Publication Active)"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
