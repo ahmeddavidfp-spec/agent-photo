@@ -8,23 +8,22 @@ from openai import OpenAI
 
 app = Flask(__name__)
 
-# 1. Charger la configuration
 def load_config():
     try:
         with open("config.yaml", "r") as f:
             return yaml.safe_load(f)
     except Exception as e:
-        print(f"Erreur lecture config: {e}")
+        print(f"ERREUR Config: {e}")
         return {"site_url": "https://www.davidahmed.me", "galeries": ["barcelone"]}
 
-# 2. Scanner une galerie spécifique
 def get_photo_from_galerie(galerie_nom):
     try:
         config = load_config()
         url = f"{config.get('site_url')}/{galerie_nom}"
+        print(f"DEBUG: Scan de la galerie {url}")
         
         headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, 'html.parser')
         
         images = soup.find_all('img')
@@ -37,13 +36,14 @@ def get_photo_from_galerie(galerie_nom):
                 elif src.startswith('/'):
                     image_urls.append(f"{config.get('site_url')}{src}")
         
+        print(f"DEBUG: {len(image_urls)} images trouvées.")
         return random.choice(image_urls) if image_urls else None
     except Exception as e:
-        print(f"Erreur scan {galerie_nom}: {e}")
+        print(f"ERREUR Scan: {e}")
         return None
 
-# 3. Générer la légende avec analyse visuelle
 def generate_ai_caption(image_url, galerie_nom):
+    print(f"DEBUG: Lancement analyse OpenAI pour {image_url}")
     api_key = os.environ.get("OPENAI_API_KEY")
     try:
         client = OpenAI(api_key=api_key)
@@ -52,10 +52,9 @@ def generate_ai_caption(image_url, galerie_nom):
         instructions = f"""
         Tu es David Ahmed, photographe de rue. 
         Bio : {config.get('photographer_bio', '')}
-        Style : Noir et blanc, instant suspendu, silence urbain.
-        
-        MISSION : Analyse cette photo prise à {galerie_nom} pour Instagram.
-        STRUCTURE : Titre en MAJUSCULES, texte doctrinal profond (2-3 paragraphes), hashtags.
+        Style : Noir et blanc, instant suspendu.
+        Rédige un post Instagram profond (Titre MAJUSCULES, 2-3 paragraphes, hashtags).
+        Ville : {galerie_nom}
         """
         
         response = client.chat.completions.create(
@@ -67,85 +66,85 @@ def generate_ai_caption(image_url, galerie_nom):
                     {"type": "image_url", "image_url": {"url": image_url, "detail": "low"}}
                 ],
             }],
-            max_tokens=800
+            max_tokens=800,
+            timeout=30 # On laisse du temps à l'IA
         )
+        print("DEBUG: Analyse OpenAI réussie.")
         return response.choices[0].message.content
     except Exception as e:
+        print(f"ERREUR OpenAI: {e}")
         return f"SILENCE.\nL'instant suspendu à {galerie_nom}.\n#streetphotography"
 
-# 4. Envoyer le menu des galeries
 def send_galerie_menu(chat_id):
     config = load_config()
     galeries = config.get('galeries', [])
     token = os.environ.get('TELEGRAM_TOKEN')
     
-    # Création des boutons (2 par ligne)
     keyboard = []
     for i in range(0, len(galeries), 2):
         row = [{"text": g.capitalize(), "callback_data": f"select_{g}"} for g in galeries[i:i+2]]
         keyboard.append(row)
     
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": "Quelle galerie souhaites-tu explorer, David ?",
         "reply_markup": {"inline_keyboard": keyboard}
     }
-    requests.post(url, json=payload)
+    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json=payload)
 
-# 5. Envoyer la suggestion après choix
 def send_suggestion(chat_id, galerie_nom):
+    print(f"DEBUG: Préparation de la suggestion pour {galerie_nom}")
     token = os.environ.get('TELEGRAM_TOKEN')
-    image_url = get_photo_from_galerie(galerie_nom)
     
+    image_url = get_photo_from_galerie(galerie_nom)
     if not image_url:
         requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                      json={"chat_id": chat_id, "text": f"Aucune photo trouvée dans {galerie_nom}."})
+                      json={"chat_id": chat_id, "text": "Aucune photo trouvée."})
         return
 
-    ai_caption = generate_ai_caption(image_url, galerie_nom)
+    caption = generate_ai_caption(image_url, galerie_nom)
     
     payload = {
         "chat_id": chat_id,
         "photo": image_url,
-        "caption": ai_caption,
+        "caption": caption,
         "parse_mode": "Markdown",
         "reply_markup": {
             "inline_keyboard": [
                 [{"text": "✅ Publier", "callback_data": "publish"},
-                 {"text": "🔄 Autre (Même ville)", "callback_data": f"select_{galerie_nom}"}],
-                [{"text": "⬅️ Changer de ville", "callback_data": "menu"}]
+                 {"text": "🔄 Autre", "callback_data": f"select_{galerie_nom}"}],
+                [{"text": "⬅️ Menu", "callback_data": "menu"}]
             ]
         }
     }
-    requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", json=payload)
+    r = requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", json=payload)
+    print(f"DEBUG: Envoi Telegram status: {r.status_code}")
 
 @app.route("/telegram-webhook", methods=['POST'])
 def telegram_webhook():
     data = request.json
-    token = os.environ.get('TELEGRAM_TOKEN')
-    
     if "message" in data:
         send_galerie_menu(data["message"]["chat"]["id"])
-        
     elif "callback_query" in data:
         chat_id = data["callback_query"]["message"]["chat"]["id"]
         action = data["callback_query"]["data"]
         
+        # On répond à Telegram pour enlever le petit sablier sur le bouton
+        token = os.environ.get('TELEGRAM_TOKEN')
+        requests.post(f"https://api.telegram.org/bot{token}/answerCallbackQuery", 
+                      json={"callback_query_id": data["callback_query"]["id"]})
+
         if action == "menu":
             send_galerie_menu(chat_id)
         elif action.startswith("select_"):
-            galerie_nom = action.replace("select_", "")
+            galerie_nom = action.split("_")[1]
             send_suggestion(chat_id, galerie_nom)
-        else:
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                          json={"chat_id": chat_id, "text": f"Action enregistrée : {action}"})
-        
+            
     return jsonify({"status": "ok"})
 
 @app.route("/")
 def index():
-    return "Agent Photo David avec Menu actif"
+    return "Agent prêt."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
