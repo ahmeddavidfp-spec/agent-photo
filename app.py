@@ -118,11 +118,16 @@ def send_suggestion():
     requests.post(url, json=payload)
 
 @app.route("/telegram-webhook", methods=['POST'])
-def telegram_webhook():
-    data = request.json
-    if "message" in data:
-        send_suggestion()
-    elif "callback_query" in data:
+    def telegram_webhook():
+        data = request.json
+        print(f"DEBUG: Requête reçue de Telegram: {data}") # Ceci va s'afficher dans Render
+        
+        if "message" in data:
+            print("DEBUG: Déclenchement de send_suggestion...")
+            send_suggestion()
+            print("DEBUG: send_suggestion terminé.")
+            
+        elif "callback_query" in data:
         action = data["callback_query"]["data"]
         token = os.environ.get('TELEGRAM_TOKEN')
         chat_id = data["callback_query"]["message"]["chat"]["id"]

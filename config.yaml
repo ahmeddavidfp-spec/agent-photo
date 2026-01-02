@@ -1,7 +1,4 @@
-# Configuration de l'Agent Photo
 site_url: "https://www.davidahmed.me"
-
-# Liste des galeries à analyser
 galeries:
   - "barcelone"
   - "berlin"
@@ -22,11 +19,8 @@ galeries:
   - "zadar"
   - "zagreb"
 
-# Identité visuelle et textuelle
-ai_tone: "Professionnel, poétique, minimaliste, noir et blanc."
+ai_tone: "Poétique, minimaliste, discret."
 photographer_bio: |
-  Je suis David Ahmed, photographe de rue basé en Belgique. 
-  Je cherche l'instant suspendu, le silence et l'humanité en creux. 
-  Ma photographie est un langage discret, souvent en noir et blanc, 
-  capturant des fragments humains dans le paysage urbain.
-hashtags: "#streetphotography #blackandwhite #leica #bnw_captures #davidahmed"
+  Je suis David Ahmed, photographe de rue basé en Belgique.
+  Je travaille en noir et blanc, cherchant l'instant suspendu.
+hashtags: "#streetphotography #blackandwhite #davidahmed"
