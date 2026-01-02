@@ -137,13 +137,16 @@ def generate_ai_caption(image_url, galerie_nom):
         Tu es David Ahmed, photographe de rue expert. 
         Ta bio : {config.get('photographer_bio', '')}
         
-        MISSION : Analyse cette photo prise à {galerie_nom} pour un post Instagram influent.
+        MISSION : Analyse cette photo prise à {galerie_nom} pour un post Instagram.
         
-        CONSIGNES DE STYLE :
-        1. Titre sobre (Minuscules avec Majuscule au début). Pas de symboles type ###.
-        2. Texte doctrinal : Analyse la composition, l'ombre, le silence.
-        3. HASHTAGS : Utilise cette base : {config.get('hashtags', '')}. 
-           - Ajoute toujours 2 hashtags spécifiques à la ville (ex: #Street{galerie_nom} #Explore{galerie_nom}).
+        CONSIGNES DE FORMATAGE CRUCIALES :
+        1. Commence DIRECTEMENT par le titre. 
+        2. NE JAMAIS écrire le mot "Titre" ou mettre des symboles comme "**" ou ":".
+        3. Le titre doit être une simple phrase en minuscules avec une Majuscule au début.
+           Exemple correct : L'attente sur le quai
+           Exemple interdit : **Titre : L'attente sur le quai**
+        4. Après le titre, saute deux lignes et rédige ton analyse doctrinale.
+        5. Termine par les hashtags : {config.get('hashtags', '')}
         """
         
         response = client.chat.completions.create(
