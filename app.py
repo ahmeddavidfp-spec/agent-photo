@@ -50,40 +50,48 @@ def get_random_photo():
         return None, None
 
 # 3. Générer une légende basée sur ta Bio et ton style
-def generate_ai_caption(galerie_nom):
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        return "L'instant suspendu. #streetphotography"
+def generate_ai_caption(image_url, galerie_nom):
+api_key = os.environ.get("OPENAI_API_KEY")
+if not api_key:
+    return "L'instant suspendu. #streetphotography"
 
-    try:
-        client = OpenAI(api_key=api_key)
-        config = load_config()
-        
-        instructions = f"""
-        Tu es l'assistant du photographe David Ahmed.
-        Bio du photographe : {config.get('photographer_bio', '')}
-        Ton recherché : {config.get('ai_tone', '')}
-        
-        Mission : Rédige une légende Instagram pour une photo prise à {galerie_nom}.
-        Structure impérative :
-        1. Un TITRE court en MAJUSCULES.
-        2. Une phrase poétique sur le silence, l'humanité ou l'ombre.
-        3. Les hashtags : {config.get('hashtags', '')}
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": instructions},
-                {"role": "user", "content": f"Génère la légende pour une photo de {galerie_nom}."}
-            ],
-            timeout=15
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        print(f"Erreur OpenAI : {e}")
-        return f"SILENCE.\nL'instant suspendu à {galerie_nom}.\n#streetphotography"
+try:
+    client = OpenAI(api_key=api_key)
+    config = load_config()
+    
+    instructions = f"""
+    Tu es l'expert en communication du photographe David Ahmed. 
+    Sa bio : {config.get('photographer_bio', '')}
+    Son style : Noir et blanc, humain en creux, silence urbain, instant suspendu.
 
+    MISSION : Analyse visuellement l'image fournie via l'URL et rédige un post Instagram profond.
+    
+    STRUCTURE DU POST :
+    1. UN TITRE EVOCATEUR (en majuscules).
+    2. UN TEXTE DOCTRINAL (2 à 3 paragraphes) : Analyse la lumière, la géométrie ou l'émotion de CETTE photo précise. Parle comme David : avec intuition et retenue.
+    3. UNE REFLEXION sur la ville de {galerie_nom}.
+    4. HASHTAGS : {config.get('hashtags', '')}
+    """
+    
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": instructions},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": f"Analyse cette photo issue de ma galerie {galerie_nom} pour mon Instagram :"},
+                    {"type": "image_url", "image_url": {"url": image_url}}
+                ],
+            }
+        ],
+        max_tokens=500
+    )
+    return response.choices[0].message.content
+except Exception as e:
+    print(f"Erreur OpenAI Vision : {e}")
+    return f"SILENCE.\nL'instant suspendu à {galerie_nom}.\n#streetphotography"
+    
 # 4. Envoyer la suggestion à Telegram
 def send_suggestion():
     token = os.environ.get('TELEGRAM_TOKEN')
