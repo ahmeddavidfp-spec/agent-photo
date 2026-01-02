@@ -1,0 +1,11 @@
+# Configuration de l'Agent Photo
+site_url: "https://www.davidahmed.me"
+
+# Liste des galeries à analyser (noms des sous-pages)
+galeries:
+  - "barcelone"
+  - "tokyo"
+
+# Paramètres de l'IA
+ai_tone: "professionnel, poétique et minimaliste"
+language: "fr"
