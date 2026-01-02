@@ -8,7 +8,7 @@ from openai import OpenAI
 
 app = Flask(__name__)
 
-# 1. Charger la configuration (Bio, Galeries, Ton)
+# 1. Charger la configuration
 def load_config():
     try:
         with open("config.yaml", "r") as f:
@@ -21,7 +21,7 @@ def load_config():
             "ai_tone": "professionnel, poétique et minimaliste"
         }
 
-# 2. Scanner une galerie aléatoire parmi ta liste
+# 2. Scanner une galerie
 def get_random_photo():
     try:
         config = load_config()
@@ -49,57 +49,49 @@ def get_random_photo():
         print(f"Erreur scan : {e}")
         return None, None
 
-# 3. Générer une légende basée sur ta Bio et ton style (Optimisé pour éviter les refus)
-        def generate_ai_caption(image_url, galerie_nom):
-            api_key = os.environ.get("OPENAI_API_KEY")
-            if not api_key:
-                return "L'instant suspendu. #streetphotography"
+# 3. Générer la légende (Définie AVANT d'être appelée)
+def generate_ai_caption(image_url, galerie_nom):
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        return "L'instant suspendu. #streetphotography"
+
+    try:
+        client = OpenAI(api_key=api_key)
+        config = load_config()
         
-            try:
-                client = OpenAI(api_key=api_key)
-                config = load_config()
-                
-                # On définit l'identité de David directement dans le prompt
-                instructions = f"""
-                Tu es David Ahmed, photographe de rue. 
-                Ta bio : {config.get('photographer_bio', '')}
-                Ton style : Noir et blanc, humain en creux, silence urbain, instant suspendu.
+        instructions = f"""
+        Tu es le photographe David Ahmed. 
+        Ta bio : {config.get('photographer_bio', '')}
+        Ton style : Noir et blanc, humain en creux, silence urbain, instant suspendu.
+
+        MISSION : Rédige un post Instagram profond en analysant cette photo prise à {galerie_nom}.
         
-                MISSION : Rédige un post Instagram profond en analysant cette photo.
-                
-                STRUCTURE DU POST :
-                1. UN TITRE EVOCATEUR (en majuscules).
-                2. UN TEXTE DOCTRINAL (2 à 3 paragraphes) : Analyse la lumière, la géométrie ou l'émotion. Parle avec intuition et retenue.
-                3. UNE REFLEXION sur la ville de {galerie_nom}.
-                4. HASHTAGS : {config.get('hashtags', '')}
-                """
-                
-                response = client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": instructions},
-                                {
-                                    "type": "image_url", 
-                                    "image_url": {
-                                        "url": image_url,
-                                        "detail": "low"  # Utilise moins de tokens et passe mieux les filtres
-                                    }
-                                }
-                            ],
-                        }
+        STRUCTURE DU POST :
+        1. UN TITRE EVOCATEUR (en majuscules).
+        2. UN TEXTE DOCTRINAL (2 à 3 paragraphes) : Analyse la lumière, la géométrie ou l'émotion.
+        3. UNE REFLEXION sur la ville de {galerie_nom}.
+        4. HASHTAGS : {config.get('hashtags', '')}
+        """
+        
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": instructions},
+                        {"type": "image_url", "image_url": {"url": image_url, "detail": "low"}}
                     ],
-                    max_tokens=800
-                )
-                return response.choices[0].message.content
-            except Exception as e:
-                print(f"Erreur OpenAI Vision : {e}")
-                return f"SILENCE.\nL'instant suspendu à {galerie_nom}.\n#streetphotography"
-                
-                
-# 4. Envoyer la suggestion à Telegram
+                }
+            ],
+            max_tokens=800
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f"Erreur OpenAI Vision : {e}")
+        return f"SILENCE.\nL'instant suspendu à {galerie_nom}.\n#streetphotography"
+
+# 4. Envoyer la suggestion
 def send_suggestion():
     token = os.environ.get('TELEGRAM_TOKEN')
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
@@ -108,25 +100,22 @@ def send_suggestion():
     
     if not image_url:
         image_url = "https://via.placeholder.com/600x400.png?text=Image+non+trouvee"
-        ai_caption = "Désolé David, je n'ai pas trouvé d'image dans tes galeries."
+        ai_caption = "Désolé David, je n'ai pas trouvé d'image."
     else:
-        # CORRECTION : On passe l'URL de l'image pour l'analyse visuelle
+        # Appel de la fonction définie juste au-dessus
         ai_caption = generate_ai_caption(image_url, galerie_nom)
 
     url = f"https://api.telegram.org/bot{token}/sendPhoto"
-    
     payload = {
         "chat_id": chat_id,
         "photo": image_url,
         "caption": ai_caption,
         "parse_mode": "Markdown",
         "reply_markup": {
-            "inline_keyboard": [
-                [
-                    {"text": "✅ Publier", "callback_data": "publish"},
-                    {"text": "🔄 Autre", "callback_data": "next"}
-                ]
-            ]
+            "inline_keyboard": [[
+                {"text": "✅ Publier", "callback_data": "publish"},
+                {"text": "🔄 Autre", "callback_data": "next"}
+            ]]
         }
     }
     requests.post(url, json=payload)
@@ -134,29 +123,22 @@ def send_suggestion():
 @app.route("/telegram-webhook", methods=['POST'])
 def telegram_webhook():
     data = request.json
-    print(f"DEBUG: Requête reçue de Telegram: {data}")
-    
     if "message" in data:
-        print("DEBUG: Déclenchement de send_suggestion...")
         send_suggestion()
-        print("DEBUG: send_suggestion terminé.")
-        
     elif "callback_query" in data:
         action = data["callback_query"]["data"]
-        token = os.environ.get('TELEGRAM_TOKEN')
-        chat_id = data["callback_query"]["message"]["chat"]["id"]
-        
         if action == "next":
             send_suggestion()
         else:
-            res_url = f"https://api.telegram.org/bot{token}/sendMessage"
-            requests.post(res_url, json={"chat_id": chat_id, "text": f"Action enregistrée : {action}"})
-        
+            token = os.environ.get('TELEGRAM_TOKEN')
+            chat_id = data["callback_query"]["message"]["chat"]["id"]
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
+                          json={"chat_id": chat_id, "text": f"Action enregistrée : {action}"})
     return jsonify({"status": "ok"})
 
 @app.route("/")
 def index():
-    return "Agent David Ahmed IA - Opérationnel"
+    return "Agent David Ahmed opérationnel"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
