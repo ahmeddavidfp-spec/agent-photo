@@ -15,18 +15,13 @@ def load_config():
             return yaml.safe_load(f)
     except Exception as e:
         print(f"Erreur lecture config: {e}")
-        return {
-            "site_url": "https://www.davidahmed.me",
-            "galeries": ["barcelone"],
-            "ai_tone": "professionnel, poétique et minimaliste"
-        }
+        return {"site_url": "https://www.davidahmed.me", "galeries": ["barcelone"]}
 
-# 2. Scanner une galerie
-def get_random_photo():
+# 2. Scanner une galerie spécifique
+def get_photo_from_galerie(galerie_nom):
     try:
         config = load_config()
-        galerie = random.choice(config.get('galeries', ['barcelone']))
-        url = f"{config.get('site_url')}/{galerie}"
+        url = f"{config.get('site_url')}/{galerie_nom}"
         
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers)
@@ -42,103 +37,115 @@ def get_random_photo():
                 elif src.startswith('/'):
                     image_urls.append(f"{config.get('site_url')}{src}")
         
-        if image_urls:
-            return random.choice(image_urls), galerie
-        return None, None
+        return random.choice(image_urls) if image_urls else None
     except Exception as e:
-        print(f"Erreur scan : {e}")
-        return None, None
+        print(f"Erreur scan {galerie_nom}: {e}")
+        return None
 
-# 3. Générer la légende (Définie AVANT d'être appelée)
+# 3. Générer la légende avec analyse visuelle
 def generate_ai_caption(image_url, galerie_nom):
     api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        return "L'instant suspendu. #streetphotography"
-
     try:
         client = OpenAI(api_key=api_key)
         config = load_config()
         
         instructions = f"""
-        Tu es le photographe David Ahmed. 
-        Ta bio : {config.get('photographer_bio', '')}
-        Ton style : Noir et blanc, humain en creux, silence urbain, instant suspendu.
-
-        MISSION : Rédige un post Instagram profond en analysant cette photo prise à {galerie_nom}.
+        Tu es David Ahmed, photographe de rue. 
+        Bio : {config.get('photographer_bio', '')}
+        Style : Noir et blanc, instant suspendu, silence urbain.
         
-        STRUCTURE DU POST :
-        1. UN TITRE EVOCATEUR (en majuscules).
-        2. UN TEXTE DOCTRINAL (2 à 3 paragraphes) : Analyse la lumière, la géométrie ou l'émotion.
-        3. UNE REFLEXION sur la ville de {galerie_nom}.
-        4. HASHTAGS : {config.get('hashtags', '')}
+        MISSION : Analyse cette photo prise à {galerie_nom} pour Instagram.
+        STRUCTURE : Titre en MAJUSCULES, texte doctrinal profond (2-3 paragraphes), hashtags.
         """
         
         response = client.chat.completions.create(
             model="gpt-4o",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": instructions},
-                        {"type": "image_url", "image_url": {"url": image_url, "detail": "low"}}
-                    ],
-                }
-            ],
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": instructions},
+                    {"type": "image_url", "image_url": {"url": image_url, "detail": "low"}}
+                ],
+            }],
             max_tokens=800
         )
         return response.choices[0].message.content
     except Exception as e:
-        print(f"Erreur OpenAI Vision : {e}")
         return f"SILENCE.\nL'instant suspendu à {galerie_nom}.\n#streetphotography"
 
-# 4. Envoyer la suggestion
-def send_suggestion():
+# 4. Envoyer le menu des galeries
+def send_galerie_menu(chat_id):
+    config = load_config()
+    galeries = config.get('galeries', [])
     token = os.environ.get('TELEGRAM_TOKEN')
-    chat_id = os.environ.get('TELEGRAM_CHAT_ID')
     
-    image_url, galerie_nom = get_random_photo()
+    # Création des boutons (2 par ligne)
+    keyboard = []
+    for i in range(0, len(galeries), 2):
+        row = [{"text": g.capitalize(), "callback_data": f"select_{g}"} for g in galeries[i:i+2]]
+        keyboard.append(row)
+    
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": "Quelle galerie souhaites-tu explorer, David ?",
+        "reply_markup": {"inline_keyboard": keyboard}
+    }
+    requests.post(url, json=payload)
+
+# 5. Envoyer la suggestion après choix
+def send_suggestion(chat_id, galerie_nom):
+    token = os.environ.get('TELEGRAM_TOKEN')
+    image_url = get_photo_from_galerie(galerie_nom)
     
     if not image_url:
-        image_url = "https://via.placeholder.com/600x400.png?text=Image+non+trouvee"
-        ai_caption = "Désolé David, je n'ai pas trouvé d'image."
-    else:
-        # Appel de la fonction définie juste au-dessus
-        ai_caption = generate_ai_caption(image_url, galerie_nom)
+        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
+                      json={"chat_id": chat_id, "text": f"Aucune photo trouvée dans {galerie_nom}."})
+        return
 
-    url = f"https://api.telegram.org/bot{token}/sendPhoto"
+    ai_caption = generate_ai_caption(image_url, galerie_nom)
+    
     payload = {
         "chat_id": chat_id,
         "photo": image_url,
         "caption": ai_caption,
         "parse_mode": "Markdown",
         "reply_markup": {
-            "inline_keyboard": [[
-                {"text": "✅ Publier", "callback_data": "publish"},
-                {"text": "🔄 Autre", "callback_data": "next"}
-            ]]
+            "inline_keyboard": [
+                [{"text": "✅ Publier", "callback_data": "publish"},
+                 {"text": "🔄 Autre (Même ville)", "callback_data": f"select_{galerie_nom}"}],
+                [{"text": "⬅️ Changer de ville", "callback_data": "menu"}]
+            ]
         }
     }
-    requests.post(url, json=payload)
+    requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", json=payload)
 
 @app.route("/telegram-webhook", methods=['POST'])
 def telegram_webhook():
     data = request.json
+    token = os.environ.get('TELEGRAM_TOKEN')
+    
     if "message" in data:
-        send_suggestion()
+        send_galerie_menu(data["message"]["chat"]["id"])
+        
     elif "callback_query" in data:
+        chat_id = data["callback_query"]["message"]["chat"]["id"]
         action = data["callback_query"]["data"]
-        if action == "next":
-            send_suggestion()
+        
+        if action == "menu":
+            send_galerie_menu(chat_id)
+        elif action.startswith("select_"):
+            galerie_nom = action.replace("select_", "")
+            send_suggestion(chat_id, galerie_nom)
         else:
-            token = os.environ.get('TELEGRAM_TOKEN')
-            chat_id = data["callback_query"]["message"]["chat"]["id"]
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
                           json={"chat_id": chat_id, "text": f"Action enregistrée : {action}"})
+        
     return jsonify({"status": "ok"})
 
 @app.route("/")
 def index():
-    return "Agent David Ahmed opérationnel"
+    return "Agent Photo David avec Menu actif"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
