@@ -13,7 +13,13 @@ app = Flask(__name__)
 def init_db():
     conn = sqlite3.connect('photos.db')
     c = conn.cursor()
+    # Table pour éviter les doublons
     c.execute('''CREATE TABLE IF NOT EXISTS sent_photos (url TEXT PRIMARY KEY)''')
+    # NOUVELLE Table pour mémoriser la suggestion actuelle avant publication
+    c.execute('''CREATE TABLE IF NOT EXISTS current_session (
+                    chat_id INTEGER PRIMARY KEY, 
+                    last_url TEXT, 
+                    last_caption TEXT)''')
     conn.commit()
     conn.close()
 
@@ -25,6 +31,8 @@ def load_config():
             return yaml.safe_load(f)
     except Exception as e:
         return {"site_url": "https://www.davidahmed.me", "galeries": ["barcelone"]}
+
+# --- Gestion de la Mémoire (DB) ---
 
 def is_photo_sent(url):
     conn = sqlite3.connect('photos.db')
@@ -41,6 +49,24 @@ def mark_photo_as_sent(url):
     conn.commit()
     conn.close()
 
+def save_session(chat_id, url, caption):
+    conn = sqlite3.connect('photos.db')
+    c = conn.cursor()
+    c.execute('''INSERT OR REPLACE INTO current_session (chat_id, last_url, last_caption) 
+                 VALUES (?, ?, ?)''', (chat_id, url, caption))
+    conn.commit()
+    conn.close()
+
+def get_session(chat_id):
+    conn = sqlite3.connect('photos.db')
+    c = conn.cursor()
+    c.execute('SELECT last_url, last_caption FROM current_session WHERE chat_id = ?', (chat_id,))
+    res = c.fetchone()
+    conn.close()
+    return res
+
+# --- Logique de l'Agent ---
+
 def get_photo_from_galerie(galerie_nom):
     try:
         config = load_config()
@@ -55,7 +81,6 @@ def get_photo_from_galerie(galerie_nom):
             src = img.get('src')
             if src:
                 full_url = src if src.startswith('http') else f"{config.get('site_url')}{src}"
-                # On ne garde que les photos pas encore envoyées
                 if not is_photo_sent(full_url):
                     image_urls.append(full_url)
         
@@ -70,7 +95,6 @@ def generate_ai_caption(image_url, galerie_nom):
         client = OpenAI(api_key=api_key)
         config = load_config()
         
-        # Instructions mises à jour : Pas de MAJUSCULES intégrales, pas de ###
         instructions = f"""
         Tu es David Ahmed, photographe de rue expert. 
         Ta bio : {config.get('photographer_bio', '')}
@@ -127,8 +151,8 @@ def send_suggestion(chat_id, galerie_nom):
 
     caption = generate_ai_caption(image_url, galerie_nom)
     
-    # On enregistre l'URL dans la DB pour ne plus la proposer
-    mark_photo_as_sent(image_url)
+    # ÉTAPE 1 : On enregistre la session (URL + Texte) pour pouvoir publier plus tard
+    save_session(chat_id, image_url, caption)
     
     payload = {
         "chat_id": chat_id,
@@ -162,12 +186,20 @@ def telegram_webhook():
         elif action.startswith("select_"):
             galerie_nom = action.split("_")[1]
             send_suggestion(chat_id, galerie_nom)
+        elif action == "publish":
+            # On récupère ce qu'on a mis en mémoire
+            session = get_session(chat_id)
+            if session:
+                url, caption = session
+                # Pour l'instant on confirme juste, le code de publication arrive à l'étape suivante
+                requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
+                              json={"chat_id": chat_id, "text": f"Session récupérée. Prêt pour l'étape 2 (Publication réelle).\nPhoto : {url}"})
             
     return jsonify({"status": "ok"})
 
 @app.route("/")
 def index():
-    return "Agent David Ahmed - DB active"
+    return "Agent David Ahmed - Étape 1 Mémoire Active"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
