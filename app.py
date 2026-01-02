@@ -25,7 +25,6 @@ def load_config():
 def get_random_photo():
     try:
         config = load_config()
-        # Choix aléatoire d'une galerie (Barcelone ou Tokyo)
         galerie = random.choice(config.get('galeries', ['barcelone']))
         url = f"{config.get('site_url')}/{galerie}"
         
@@ -60,7 +59,6 @@ def generate_ai_caption(galerie_nom):
         client = OpenAI(api_key=api_key)
         config = load_config()
         
-        # On injecte ta bio et tes hashtags dans le prompt
         instructions = f"""
         Tu es l'assistant du photographe David Ahmed.
         Bio du photographe : {config.get('photographer_bio', '')}
@@ -118,16 +116,16 @@ def send_suggestion():
     requests.post(url, json=payload)
 
 @app.route("/telegram-webhook", methods=['POST'])
-    def telegram_webhook():
-        data = request.json
-        print(f"DEBUG: Requête reçue de Telegram: {data}") # Ceci va s'afficher dans Render
+def telegram_webhook():
+    data = request.json
+    print(f"DEBUG: Requête reçue de Telegram: {data}")
+    
+    if "message" in data:
+        print("DEBUG: Déclenchement de send_suggestion...")
+        send_suggestion()
+        print("DEBUG: send_suggestion terminé.")
         
-        if "message" in data:
-            print("DEBUG: Déclenchement de send_suggestion...")
-            send_suggestion()
-            print("DEBUG: send_suggestion terminé.")
-            
-        elif "callback_query" in data:
+    elif "callback_query" in data:
         action = data["callback_query"]["data"]
         token = os.environ.get('TELEGRAM_TOKEN')
         chat_id = data["callback_query"]["message"]["chat"]["id"]
@@ -145,5 +143,5 @@ def index():
     return "Agent David Ahmed IA - Opérationnel"
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
