@@ -72,17 +72,17 @@ def generate_ai_caption(image_url, galerie_nom):
         
         # Instructions mises à jour : Pas de MAJUSCULES intégrales, pas de ###
         instructions = f"""
-        Tu es David Ahmed, photographe de rue. 
-        Bio : {config.get('photographer_bio', '')}
-        Style : Noir et blanc, instant suspendu.
+        Tu es David Ahmed, photographe de rue expert. 
+        Ta bio : {config.get('photographer_bio', '')}
         
-        MISSION : Analyse cette photo prise à {galerie_nom} pour Instagram.
+        MISSION : Analyse cette photo prise à {galerie_nom} pour un post Instagram influent.
         
-        CONSIGNES DE FORMATAGE :
-        1. Le titre doit être en Minuscules avec une Majuscule au début (ex: Le silence des rues).
-        2. NE JAMAIS utiliser de symboles Markdown comme ### ou ** pour le titre.
-        3. Rédige 2-3 paragraphes doctrinaux et profonds.
-        4. Termine par les hashtags : {config.get('hashtags', '')}
+        CONSIGNES DE STYLE :
+        1. Titre sobre (Minuscules avec Majuscule au début). Pas de symboles type ###.
+        2. Texte doctrinal : Analyse la composition, l'ombre, le silence. Parle de la condition humaine ou du rythme urbain.
+        3. HASHTAGS : Utilise cette base : {config.get('hashtags', '')}. 
+           - Ajoute toujours 2 hashtags spécifiques à la ville (ex: #Street{galerie_nom} #Explore{galerie_nom}).
+           - Si la photo est très contrastée, ajoute #Chiaroscuro.
         """
         
         response = client.chat.completions.create(
