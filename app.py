@@ -3,7 +3,7 @@ import requests
 import yaml
 import random
 import sqlite3
-import time  # Importation pour la gestion du délai de traitement Meta
+import time  
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 from openai import OpenAI
@@ -30,6 +30,21 @@ def load_config():
             return yaml.safe_load(f)
     except Exception as e:
         return {"site_url": "https://www.davidahmed.me", "galeries": ["barcelone"]}
+
+# --- Logique de comptage des photos ---
+
+def get_photo_count(galerie_nom):
+    """Scanne la galerie pour compter le nombre total de photos présentes."""
+    try:
+        config = load_config()
+        url = f"{config.get('site_url')}/{galerie_nom}"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers, timeout=5)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        images = soup.find_all('img')
+        return len(images)
+    except:
+        return 0
 
 # --- Gestion de la Mémoire (DB) ---
 
@@ -74,7 +89,7 @@ def publish_to_instagram(image_url, caption):
         return False, "Variables d'environnement Instagram manquantes sur Render."
 
     try:
-        # 1. Création du conteneur média (Media Container)
+        # 1. Création du conteneur média
         post_url = f"https://graph.facebook.com/v19.0/{ig_id}/media"
         payload = {
             'image_url': image_url,
@@ -89,10 +104,8 @@ def publish_to_instagram(image_url, caption):
             error_msg = container_data.get('error', {}).get('message', 'Erreur inconnue')
             return False, f"Erreur Meta (Container) : {error_msg}"
 
-        # --- PAUSE TECHNIQUE ---
-        # On attend 10 secondes que Meta prépare l'image pour éviter l'erreur 9007
+        # PAUSE TECHNIQUE pour Meta
         time.sleep(10) 
-        # -----------------------
 
         # 2. Publication du conteneur
         publish_url = f"https://graph.facebook.com/v19.0/{ig_id}/media_publish"
@@ -130,7 +143,6 @@ def get_photo_from_galerie(galerie_nom):
         
         return random.choice(image_urls) if image_urls else None
     except Exception as e:
-        print(f"ERREUR Scan: {e}")
         return None
 
 def generate_ai_caption(image_url, galerie_nom):
@@ -138,23 +150,11 @@ def generate_ai_caption(image_url, galerie_nom):
     try:
         client = OpenAI(api_key=api_key)
         config = load_config()
-        
         instructions = f"""
-        Tu es David Ahmed, photographe de rue expert. 
-        Ta bio : {config.get('photographer_bio', '')}
-        
-        MISSION : Analyse cette photo prise à {galerie_nom} pour un post Instagram.
-        
-        CONSIGNES DE FORMATAGE CRUCIALES :
-        1. Commence DIRECTEMENT par le titre. 
-        2. NE JAMAIS écrire le mot "Titre" ou mettre des symboles comme "**" ou ":".
-        3. Le titre doit être une simple phrase en minuscules avec une Majuscule au début.
-           Exemple correct : L'attente sur le quai
-           Exemple interdit : **Titre : L'attente sur le quai**
-        4. Après le titre, saute deux lignes et rédige ton analyse doctrinale.
-        5. Termine par les hashtags : {config.get('hashtags', '')}
+        Tu es David Ahmed, photographe de rue expert. Bio: {config.get('photographer_bio', '')}
+        MISSION : Analyse cette photo prise à {galerie_nom}.
+        FORMAT : Titre direct sans '**', saute deux lignes, analyse doctrinale, hashtags: {config.get('hashtags', '')}
         """
-        
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[{
@@ -167,7 +167,7 @@ def generate_ai_caption(image_url, galerie_nom):
             max_tokens=800
         )
         return response.choices[0].message.content
-    except Exception as e:
+    except:
         return f"L'instant suspendu à {galerie_nom}.\n#streetphotography"
 
 def send_galerie_menu(chat_id):
@@ -175,8 +175,14 @@ def send_galerie_menu(chat_id):
     galeries = config.get('galeries', [])
     token = os.environ.get('TELEGRAM_TOKEN')
     keyboard = []
+    
+    # Construction du menu avec les compteurs
     for i in range(0, len(galeries), 2):
-        row = [{"text": g.capitalize(), "callback_data": f"select_{g}"} for g in galeries[i:i+2]]
+        row = []
+        for g in galeries[i:i+2]:
+            count = get_photo_count(g)
+            label = f"{g.capitalize()} ({count})"
+            row.append({"text": label, "callback_data": f"select_{g}"})
         keyboard.append(row)
     
     payload = {
@@ -192,7 +198,7 @@ def send_suggestion(chat_id, galerie_nom):
     
     if not image_url:
         requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                      json={"chat_id": chat_id, "text": f"Toutes les photos de {galerie_nom} ont déjà été suggérées !"})
+                      json={"chat_id": chat_id, "text": "Plus de photos disponibles."})
         return
 
     caption = generate_ai_caption(image_url, galerie_nom)
@@ -223,10 +229,9 @@ def telegram_webhook():
     elif "callback_query" in data:
         chat_id = data["callback_query"]["message"]["chat"]["id"]
         action = data["callback_query"]["data"]
-        callback_id = data["callback_query"]["id"]
         
         requests.post(f"https://api.telegram.org/bot{token}/answerCallbackQuery", 
-                      json={"callback_query_id": callback_id})
+                      json={"callback_query_id": data["callback_query"]["id"]})
 
         if action == "menu":
             send_galerie_menu(chat_id)
@@ -237,25 +242,17 @@ def telegram_webhook():
             if session:
                 url, caption = session
                 requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                              json={"chat_id": chat_id, "text": "⏳ Publication sur Instagram en cours..."})
-                
+                              json={"chat_id": chat_id, "text": "⏳ Publication en cours..."})
                 success, msg = publish_to_instagram(url, caption)
-                
-                if success:
-                    mark_photo_as_sent(url)
-                    text = "🚀 **Publié avec succès sur Instagram !**"
-                else:
-                    text = f"❌ **Échec de la publication**\nDétails : {msg}"
-                
+                text = "🚀 **Publié !**" if success else f"❌ **Échec**\n{msg}"
+                if success: mark_photo_as_sent(url)
                 requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
                               json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"})
             
     return jsonify({"status": "ok"})
 
 @app.route("/")
-def index():
-    return "Agent David Ahmed - Actif"
+def index(): return "Agent David Ahmed - Actif"
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
