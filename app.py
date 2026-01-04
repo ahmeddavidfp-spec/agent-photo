@@ -10,9 +10,16 @@ from openai import OpenAI
 
 app = Flask(__name__)
 
+# --- Configuration du Chemin de la Base de Données (Persistent Disk) ---
+# Si le dossier /data existe (Disk Render), on l'utilise. Sinon, dossier local.
+DB_PATH = '/data/photos.db' if os.path.exists('/data') else 'photos.db'
+
+def get_db_connection():
+    return sqlite3.connect(DB_PATH)
+
 # Initialisation de la base de données
 def init_db():
-    conn = sqlite3.connect('photos.db')
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS sent_photos (url TEXT PRIMARY KEY)''')
     c.execute('''CREATE TABLE IF NOT EXISTS current_session (
@@ -42,7 +49,6 @@ def get_galerie_stats(galerie_nom):
         response = requests.get(url, headers=headers, timeout=5)
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 1. Récupérer toutes les URLs d'images de la page
         images = soup.find_all('img')
         all_urls = []
         for img in images:
@@ -55,8 +61,7 @@ def get_galerie_stats(galerie_nom):
         if total_site == 0:
             return 0, 0
             
-        # 2. Vérifier combien parmi ces URLs sont déjà dans sent_photos
-        conn = sqlite3.connect('photos.db')
+        conn = get_db_connection()
         c = conn.cursor()
         placeholders = ','.join(['?'] * total_site)
         c.execute(f'SELECT COUNT(*) FROM sent_photos WHERE url IN ({placeholders})', all_urls)
@@ -70,7 +75,7 @@ def get_galerie_stats(galerie_nom):
 # --- Gestion de la Mémoire (DB) ---
 
 def is_photo_sent(url):
-    conn = sqlite3.connect('photos.db')
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute('SELECT 1 FROM sent_photos WHERE url = ?', (url,))
     result = c.fetchone()
@@ -78,14 +83,14 @@ def is_photo_sent(url):
     return result is not None
 
 def mark_photo_as_sent(url):
-    conn = sqlite3.connect('photos.db')
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute('INSERT OR IGNORE INTO sent_photos (url) VALUES (?)', (url,))
     conn.commit()
     conn.close()
 
 def save_session(chat_id, url, caption):
-    conn = sqlite3.connect('photos.db')
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute('''INSERT OR REPLACE INTO current_session (chat_id, last_url, last_caption) 
                  VALUES (?, ?, ?)''', (chat_id, url, caption))
@@ -93,7 +98,7 @@ def save_session(chat_id, url, caption):
     conn.close()
 
 def get_session(chat_id):
-    conn = sqlite3.connect('photos.db')
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute('SELECT last_url, last_caption FROM current_session WHERE chat_id = ?', (chat_id,))
     res = c.fetchone()
@@ -269,7 +274,7 @@ def telegram_webhook():
     return jsonify({"status": "ok"})
 
 @app.route("/")
-def index(): return "Agent David Ahmed - Actif"
+def index(): return "Agent David Ahmed - Actif avec Persistance Disk"
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
