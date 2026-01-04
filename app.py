@@ -31,20 +31,41 @@ def load_config():
     except Exception as e:
         return {"site_url": "https://www.davidahmed.me", "galeries": ["barcelone"]}
 
-# --- Logique de comptage des photos ---
+# --- Logique de calcul des statistiques (X/Y) ---
 
-def get_photo_count(galerie_nom):
-    """Scanne la galerie pour compter le nombre total de photos présentes."""
+def get_galerie_stats(galerie_nom):
+    """Calcule le ratio photos publiées / photos totales sur le site."""
     try:
         config = load_config()
         url = f"{config.get('site_url')}/{galerie_nom}"
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, timeout=5)
         soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # 1. Récupérer toutes les URLs d'images de la page
         images = soup.find_all('img')
-        return len(images)
+        all_urls = []
+        for img in images:
+            src = img.get('src')
+            if src:
+                full_url = src if src.startswith('http') else f"{config.get('site_url')}{src}"
+                all_urls.append(full_url)
+        
+        total_site = len(all_urls)
+        if total_site == 0:
+            return 0, 0
+            
+        # 2. Vérifier combien parmi ces URLs sont déjà dans sent_photos
+        conn = sqlite3.connect('photos.db')
+        c = conn.cursor()
+        placeholders = ','.join(['?'] * total_site)
+        c.execute(f'SELECT COUNT(*) FROM sent_photos WHERE url IN ({placeholders})', all_urls)
+        already_sent = c.fetchone()[0]
+        conn.close()
+        
+        return already_sent, total_site
     except:
-        return 0
+        return 0, 0
 
 # --- Gestion de la Mémoire (DB) ---
 
@@ -86,10 +107,9 @@ def publish_to_instagram(image_url, caption):
     ig_id = os.environ.get('INSTAGRAM_BUSINESS_ID')
     
     if not token or not ig_id:
-        return False, "Variables d'environnement Instagram manquantes sur Render."
+        return False, "Variables d'environnement manquantes."
 
     try:
-        # 1. Création du conteneur média
         post_url = f"https://graph.facebook.com/v19.0/{ig_id}/media"
         payload = {
             'image_url': image_url,
@@ -104,10 +124,8 @@ def publish_to_instagram(image_url, caption):
             error_msg = container_data.get('error', {}).get('message', 'Erreur inconnue')
             return False, f"Erreur Meta (Container) : {error_msg}"
 
-        # PAUSE TECHNIQUE pour Meta
-        time.sleep(10) 
+        time.sleep(10) # Pause pour le traitement Meta
 
-        # 2. Publication du conteneur
         publish_url = f"https://graph.facebook.com/v19.0/{ig_id}/media_publish"
         r_publish = requests.post(publish_url, data={
             'creation_id': container_id,
@@ -142,7 +160,7 @@ def get_photo_from_galerie(galerie_nom):
                     image_urls.append(full_url)
         
         return random.choice(image_urls) if image_urls else None
-    except Exception as e:
+    except:
         return None
 
 def generate_ai_caption(image_url, galerie_nom):
@@ -176,12 +194,11 @@ def send_galerie_menu(chat_id):
     token = os.environ.get('TELEGRAM_TOKEN')
     keyboard = []
     
-    # Construction du menu avec les compteurs
     for i in range(0, len(galeries), 2):
         row = []
         for g in galeries[i:i+2]:
-            count = get_photo_count(g)
-            label = f"{g.capitalize()} ({count})"
+            sent, total = get_galerie_stats(g)
+            label = f"{g.capitalize()} ({sent}/{total})"
             row.append({"text": label, "callback_data": f"select_{g}"})
         keyboard.append(row)
     
