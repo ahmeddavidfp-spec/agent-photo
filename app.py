@@ -3,6 +3,7 @@ import requests
 import yaml
 import random
 import sqlite3
+import time  # Importation pour la gestion du délai de traitement Meta
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 from openai import OpenAI
@@ -87,6 +88,11 @@ def publish_to_instagram(image_url, caption):
         if not container_id:
             error_msg = container_data.get('error', {}).get('message', 'Erreur inconnue')
             return False, f"Erreur Meta (Container) : {error_msg}"
+
+        # --- PAUSE TECHNIQUE ---
+        # On attend 10 secondes que Meta prépare l'image pour éviter l'erreur 9007
+        time.sleep(10) 
+        # -----------------------
 
         # 2. Publication du conteneur
         publish_url = f"https://graph.facebook.com/v19.0/{ig_id}/media_publish"
@@ -248,7 +254,7 @@ def telegram_webhook():
 
 @app.route("/")
 def index():
-    return "Agent David Ahmed - Étape 2 (Publication Active)"
+    return "Agent David Ahmed - Actif"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
