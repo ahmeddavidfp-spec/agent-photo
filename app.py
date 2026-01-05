@@ -11,7 +11,6 @@ from openai import OpenAI
 app = Flask(__name__)
 
 # --- Configuration du Chemin de la Base de Données (Persistent Disk) ---
-# Si le dossier /data existe (Disk Render), on l'utilise. Sinon, dossier local.
 DB_PATH = '/data/photos.db' if os.path.exists('/data') else 'photos.db'
 
 def get_db_connection():
@@ -41,7 +40,6 @@ def load_config():
 # --- Logique de calcul des statistiques (X/Y) ---
 
 def get_galerie_stats(galerie_nom):
-    """Calcule le ratio photos publiées / photos totales sur le site."""
     try:
         config = load_config()
         url = f"{config.get('site_url')}/{galerie_nom}"
@@ -129,7 +127,7 @@ def publish_to_instagram(image_url, caption):
             error_msg = container_data.get('error', {}).get('message', 'Erreur inconnue')
             return False, f"Erreur Meta (Container) : {error_msg}"
 
-        time.sleep(10) # Pause pour le traitement Meta
+        time.sleep(10) 
 
         publish_url = f"https://graph.facebook.com/v19.0/{ig_id}/media_publish"
         r_publish = requests.post(publish_url, data={
@@ -247,7 +245,24 @@ def telegram_webhook():
     token = os.environ.get('TELEGRAM_TOKEN')
     
     if "message" in data:
-        send_galerie_menu(data["message"]["chat"]["id"])
+        msg_obj = data["message"]
+        chat_id = msg_obj["chat"]["id"]
+        
+        # --- LOGIQUE DE MODIFICATION DU TEXTE ---
+        # Si David répond (Reply) à un message de photo avec du texte
+        if "reply_to_message" in msg_obj and "text" in msg_obj:
+            new_text = msg_obj["text"]
+            session = get_session(chat_id)
+            if session:
+                last_url, _ = session
+                save_session(chat_id, last_url, new_text) # On met à jour le texte en base
+                requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
+                              json={"chat_id": chat_id, "text": "✅ **Texte mis à jour !**\nClique sur Publier pour valider.", "parse_mode": "Markdown"})
+                return jsonify({"status": "ok"})
+
+        # Sinon, on affiche le menu classique
+        send_galerie_menu(chat_id)
+
     elif "callback_query" in data:
         chat_id = data["callback_query"]["message"]["chat"]["id"]
         action = data["callback_query"]["data"]
@@ -274,7 +289,7 @@ def telegram_webhook():
     return jsonify({"status": "ok"})
 
 @app.route("/")
-def index(): return "Agent David Ahmed - Actif avec Persistance Disk"
+def index(): return "Agent David Ahmed - Actif"
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
