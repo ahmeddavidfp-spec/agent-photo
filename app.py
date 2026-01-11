@@ -171,11 +171,25 @@ def generate_ai_caption(image_url, galerie_nom):
     try:
         client = OpenAI(api_key=api_key)
         config = load_config()
+        
+        # Construction du lien vers la galerie spécifique
+        site_url = config.get('site_url', 'https://www.davidahmed.me').rstrip('/')
+        galerie_link = f"{site_url}/{galerie_nom}"
+
         instructions = f"""
-        Tu es David Ahmed, photographe de rue expert. Bio: {config.get('photographer_bio', '')}
-        MISSION : Analyse cette photo prise à {galerie_nom}.
-        FORMAT : Titre direct sans '**', saute deux lignes, analyse doctrinale, hashtags: {config.get('hashtags', '')}
+        Tu es David Ahmed. Bio: {config.get('photographer_bio', '')}
+        MISSION : Analyse cette photo prise à {galerie_nom} pour un post Instagram.
+        TON : {config.get('ai_tone', '')}
+
+        DIRECTIVES DE STRUCTURE :
+        1. TITRE : Court, sans symboles.
+        2. DESCRIPTION : Texte à la première personne, style cinématographique. Max 400 caractères.
+        3. LIEN WEB : Ajoute obligatoirement cette ligne après la description : "Série complète : {galerie_link}"
+        4. HASHTAGS : Analyse précisément le contenu visuel. Choisis les 8 hashtags les plus PERTINENTS parmi cette liste uniquement : {config.get('hashtags', '')}
+        
+        STRICT : Pas d'émojis. Phrases courtes. Pas de hashtags dans la description, uniquement à la fin.
         """
+        
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[{
@@ -185,11 +199,11 @@ def generate_ai_caption(image_url, galerie_nom):
                     {"type": "image_url", "image_url": {"url": image_url, "detail": "low"}}
                 ],
             }],
-            max_tokens=800
+            max_tokens=500
         )
         return response.choices[0].message.content
     except:
-        return f"L'instant suspendu à {galerie_nom}.\n#streetphotography"
+        return f"L'instant suspendu à {galerie_nom}.\nSérie complète : https://www.davidahmed.me/{galerie_nom}\n#streetphotography"
 
 def send_galerie_menu(chat_id):
     config = load_config()
@@ -248,19 +262,16 @@ def telegram_webhook():
         msg_obj = data["message"]
         chat_id = msg_obj["chat"]["id"]
         
-        # --- LOGIQUE DE MODIFICATION DU TEXTE ---
-        # Si David répond (Reply) à un message de photo avec du texte
         if "reply_to_message" in msg_obj and "text" in msg_obj:
             new_text = msg_obj["text"]
             session = get_session(chat_id)
             if session:
                 last_url, _ = session
-                save_session(chat_id, last_url, new_text) # On met à jour le texte en base
+                save_session(chat_id, last_url, new_text)
                 requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
                               json={"chat_id": chat_id, "text": "✅ **Texte mis à jour !**\nClique sur Publier pour valider.", "parse_mode": "Markdown"})
                 return jsonify({"status": "ok"})
 
-        # Sinon, on affiche le menu classique
         send_galerie_menu(chat_id)
 
     elif "callback_query" in data:
