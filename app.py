@@ -56,20 +56,52 @@ def publish_to_instagram(image_url, caption):
     except: return False, "Erreur Instagram"
 
 def publish_to_threads(image_url, caption):
-    # On utilise le nouveau token Threads
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
+    
+    if not token or not th_id:
+        return False, "Configuration Threads incomplète sur Render."
+
     try:
-        r = requests.post(f"https://graph.threads.net/v1.0/{th_id}/threads", 
-                          data={'image_url': image_url, 'text': caption, 'access_token': token})
-        res = r.json()
-        c_id = res.get('id')
-        if not c_id: return False, f"Threads : {res.get('error', {}).get('message', 'Erreur')}"
-        time.sleep(15) 
-        r_pub = requests.post(f"https://graph.threads.net/v1.0/{th_id}/threads_publish", 
-                              data={'creation_id': c_id, 'access_token': token})
-        return r_pub.status_code == 200, "OK"
-    except: return False, "Erreur Threads"
+        # Étape 1 : Création du conteneur
+        # Forcer les paramètres dans l'URL pour plus de stabilité avec l'API Threads
+        creation_url = f"https://graph.threads.net/v1.0/{th_id}/threads"
+        params = {
+            'image_url': image_url,
+            'text': caption,
+            'access_token': token
+        }
+        
+        r = requests.post(creation_url, params=params, timeout=30)
+        res_data = r.json()
+        
+        if 'id' not in res_data:
+            error_detail = res_data.get('error', {})
+            msg = error_detail.get('message', 'Erreur inconnue')
+            code = error_detail.get('code', 'Pas de code')
+            return False, f"Meta Step 1 : {msg} (Code: {code})"
+            
+        container_id = res_data['id']
+        
+        # Attente de 25 secondes (Threads est plus lent à traiter les images que IG)
+        time.sleep(25) 
+
+        # Étape 2 : Publication du conteneur
+        publish_url = f"https://graph.threads.net/v1.0/{th_id}/threads_publish"
+        pub_params = {
+            'creation_id': container_id,
+            'access_token': token
+        }
+        
+        r_pub = requests.post(publish_url, params=pub_params, timeout=30)
+        
+        if r_pub.status_code == 200:
+            return True, "OK"
+        else:
+            return False, f"Meta Step 2 : {r_pub.text}"
+            
+    except Exception as e:
+        return False, f"Erreur technique : {str(e)}"
 
 # --- IA ---
 def generate_ai_caption(image_url, galerie_nom):
