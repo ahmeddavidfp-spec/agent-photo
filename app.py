@@ -60,7 +60,6 @@ def publish_to_threads(image_url, caption):
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
     
-    # Nettoyage URL et Sécurité 500 car. pour Threads
     clean_url = image_url.split('?')[0]
     if len(caption) > 495:
         caption = caption[:492] + "..."
@@ -96,16 +95,16 @@ def generate_ai_caption(image_url, galerie_nom):
     instructions = f"""Tu es David Ahmed. Bio: {config.get('photographer_bio', '')}
     MISSION : Analyse cette photo à {galerie_nom}. TON : {config.get('ai_tone', '')}
     FORMAT : 
-    1. TITRE EN MAJUSCULES (SANS SYMBOLES)
+    1. TITRE EN MAJUSCULES (SANS SYMBOLES, SANS ASTÉRISQUES, SANS GRAS)
     2. Description cinématographique courte (MAX 250 car.)
     3. Phrase: "Série complète disponible sur : {galerie_link}"
     4. Exactement 5 hashtags pertinents (choisis les plus impactants).
-    STRICT : Pas d'émojis. Pas de Markdown. Maximum 5 hashtags."""
+    STRICT : Pas d'émojis. Pas de Markdown. Pas d'astérisques (*). Maximum 5 hashtags."""
     
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": [{"type": "text", "text": instructions}, {"type": "image_url", "image_url": {"url": image_url}}]}],
-        max_tokens=500, temperature=0.8
+        max_tokens=500, temperature=0.7
     )
     return response.choices[0].message.content
 
@@ -115,23 +114,42 @@ def generate_ai_caption(image_url, galerie_nom):
 def telegram_webhook():
     data = request.json
     token = os.environ.get('TELEGRAM_TOKEN')
+    
     if "message" in data:
         send_galerie_menu(data["message"]["chat"]["id"])
+        
     elif "callback_query" in data:
         chat_id = data["callback_query"]["message"]["chat"]["id"]
         action = data["callback_query"]["data"]
         session = get_session(chat_id)
         
-        if action == "menu": send_galerie_menu(chat_id)
-        elif action.startswith("select_"): send_suggestion(chat_id, action.split("_")[1])
+        if action == "menu": 
+            send_galerie_menu(chat_id)
+            
+        elif action.startswith("select_"): 
+            send_suggestion(chat_id, action.split("_")[1])
+            
         elif action == "publish_all" and session:
             url, cap = session
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ Publication croisée..."})
+            
+            # --- VERROU ANTI-DOUBLON ---
+            conn = get_db_connection()
+            check = conn.execute('SELECT 1 FROM sent_photos WHERE url = ?', (url,)).fetchone()
+            conn.close()
+            
+            if check:
+                requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
+                              json={"chat_id": chat_id, "text": "⚠️ Déjà publié ou en cours !"})
+                return jsonify({"status": "ok"})
+            
+            # On marque tout de suite comme envoyé pour bloquer les répétitions de Telegram
+            mark_photo_as_sent(url)
+            # ---------------------------
+
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ Publication croisée en cours..."})
             
             ok_ig, err_ig = publish_to_instagram(url, cap)
             ok_th, err_th = publish_to_threads(url, cap)
-            
-            if ok_ig: mark_photo_as_sent(url)
             
             msg = f"📸 Instagram : {'✅ OK' if ok_ig else '❌ ' + str(err_ig)}\n"
             msg += f"🧵 Threads : {'✅ OK' if ok_th else '❌ ' + str(err_th)}"
