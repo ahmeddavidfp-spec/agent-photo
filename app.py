@@ -71,16 +71,18 @@ def publish_to_threads(image_url, caption):
             'image_url': clean_url,
             'text': caption,
             'access_token': token
-        }, timeout=40)
+        }, timeout=30) # Timeout requête plus court
         
         res = r.json()
         if 'id' not in res: return False, f"Step 1 : {res.get('error', {}).get('message')}"
             
         c_id = res['id']
-        time.sleep(25) 
+        
+        # RÉDUCTION DU TEMPS : 15s au lieu de 25s pour rester sous la limite Render
+        time.sleep(15) 
         
         pub_url = f"https://graph.threads.net/v1.0/{th_id}/threads_publish"
-        r_pub = requests.post(pub_url, data={'creation_id': c_id, 'access_token': token}, timeout=40)
+        r_pub = requests.post(pub_url, data={'creation_id': c_id, 'access_token': token}, timeout=30)
         return (True, "OK") if r_pub.status_code == 200 else (False, f"Step 2 : {r_pub.text}")
     except Exception as e:
         return False, str(e)
