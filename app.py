@@ -100,31 +100,40 @@ def publish_to_threads(image_url, caption):
 # --- ROUTE DE TEST DÉDIÉE ---
 @app.route("/test-threads")
 def test_threads_simple():
+    """Test direct : Uniquement du texte pour valider l'autorisation"""
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
     
-    # On utilise l'URL la plus basique possible
-    url = f"https://graph.threads.net/v1.0/{th_id}/threads?text=Coucou%20petite%20perruche%20🦜&media_type=TEXT&access_token={token}"
+    # URL de création de post Threads
+    url = f"https://graph.threads.net/v1.0/{th_id}/threads"
     
     try:
-        # Étape 1 : Création
-        r = requests.post(url)
+        # Étape 1 : Création du post texte 'Coucou petite perruche'
+        r = requests.post(url, data={
+            'media_type': 'TEXT',
+            'text': 'Coucou petite perruche 🦜',
+            'access_token': token
+        }, timeout=30)
         res = r.json()
         
         if 'id' not in res:
-            return f"❌ Erreur Étape 1 : {res} (Vérifie si l'URL de redirection est bien enregistrée sur Meta)"
+            return f"❌ Erreur Étape 1 : {res}"
             
         c_id = res['id']
-        time.sleep(5) 
+        time.sleep(2) # Très court pour du texte
         
-        # Étape 2 : Publication
-        pub_url = f"https://graph.threads.net/v1.0/{th_id}/threads_publish?creation_id={c_id}&access_token={token}"
-        r_pub = requests.post(pub_url)
+        # Étape 2 : Publication finale
+        pub_url = f"https://graph.threads.net/v1.0/{th_id}/threads_publish"
+        r_pub = requests.post(pub_url, data={
+            'creation_id': c_id,
+            'access_token': token
+        }, timeout=30)
         
         if r_pub.status_code == 200:
-            return f"✅ SUCCÈS ! La perruche est en ligne. (ID: {c_id})"
+            return "✅ SUCCÈS ! La petite perruche a décollé sur ton Threads."
         else:
             return f"❌ Erreur Étape 2 : {r_pub.text}"
+            
     except Exception as e:
         return f"⚠️ Bug technique : {str(e)}"
 
