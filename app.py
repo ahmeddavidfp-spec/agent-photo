@@ -55,50 +55,43 @@ def publish_to_instagram(image_url, caption):
         return True, "OK"
     except: return False, "Erreur Instagram"
 
+
+
 def publish_to_threads(image_url, caption):
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
     
     if not token or not th_id:
-        return False, "Configuration Threads incomplète sur Render."
+        return False, "Configuration Threads incomplète."
+
+    # NETTOYAGE Squarespace : On enlève tout ce qui est après .jpg
+    clean_url = image_url.split('?')[0]
 
     try:
-        # Étape 1 : Création du conteneur
-        # Forcer les paramètres dans l'URL pour plus de stabilité avec l'API Threads
         creation_url = f"https://graph.threads.net/v1.0/{th_id}/threads"
-        params = {
-            'image_url': image_url,
+        payload = {
+            'image_url': clean_url,
             'text': caption,
             'access_token': token
         }
         
-        r = requests.post(creation_url, params=params, timeout=30)
+        # On utilise clean_url ici
+        r = requests.post(creation_url, params=payload, timeout=40)
         res_data = r.json()
         
         if 'id' not in res_data:
             error_detail = res_data.get('error', {})
             msg = error_detail.get('message', 'Erreur inconnue')
-            code = error_detail.get('code', 'Pas de code')
+            code = error_detail.get('code', 'Sans code')
             return False, f"Meta Step 1 : {msg} (Code: {code})"
             
         container_id = res_data['id']
-        
-        # Attente de 25 secondes (Threads est plus lent à traiter les images que IG)
-        time.sleep(25) 
+        time.sleep(30) 
 
-        # Étape 2 : Publication du conteneur
         publish_url = f"https://graph.threads.net/v1.0/{th_id}/threads_publish"
-        pub_params = {
-            'creation_id': container_id,
-            'access_token': token
-        }
+        r_pub = requests.post(publish_url, params={'creation_id': container_id, 'access_token': token}, timeout=40)
         
-        r_pub = requests.post(publish_url, params=pub_params, timeout=30)
-        
-        if r_pub.status_code == 200:
-            return True, "OK"
-        else:
-            return False, f"Meta Step 2 : {r_pub.text}"
+        return (True, "OK") if r_pub.status_code == 200 else (False, f"Step 2 : {r_pub.text}")
             
     except Exception as e:
         return False, f"Erreur technique : {str(e)}"
