@@ -60,16 +60,29 @@ def publish_to_threads(image_url, caption):
     token = os.environ.get('IG_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
     try:
+        # Création du conteneur
         r = requests.post(f"https://graph.threads.net/v1.0/{th_id}/threads", 
                           data={'image_url': image_url, 'text': caption, 'access_token': token})
         res = r.json()
-        c_id = res.get('id')
-        if not c_id: return False, f"Threads : {res.get('error', {}).get('message', 'Erreur')}"
-        time.sleep(15) 
+        
+        if 'id' not in res:
+            # ICI : On récupère le vrai message de Meta
+            err_detail = res.get('error', {}).get('message', 'Détail inconnu')
+            return False, f"Meta dit : {err_detail}"
+            
+        c_id = res['id']
+        time.sleep(15) # Attente cruciale pour Threads
+        
+        # Publication
         r_pub = requests.post(f"https://graph.threads.net/v1.0/{th_id}/threads_publish", 
                               data={'creation_id': c_id, 'access_token': token})
-        return r_pub.status_code == 200, "OK"
-    except: return False, "Erreur Threads"
+        
+        if r_pub.status_code == 200:
+            return True, "OK"
+        else:
+            return False, f"Erreur finale : {r_pub.text}"
+    except Exception as e:
+        return False, f"Bug technique : {str(e)}"
 
 # --- IA ---
 def generate_ai_caption(image_url, galerie_nom):
