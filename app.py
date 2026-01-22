@@ -100,47 +100,33 @@ def publish_to_threads(image_url, caption):
 # --- ROUTE DE TEST DÉDIÉE ---
 @app.route("/test-threads")
 def test_threads_simple():
-    """Test ultime avec format JSON et Headers (méthode la plus stable)"""
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
     
-    if not token or not th_id:
-        return "❌ Erreur : Variables manquantes sur Render (THREADS_ACCESS_TOKEN ou THREADS_USER_ID)"
-
-    base_url = f"https://graph.threads.net/v1.0/{th_id}"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
+    # On utilise l'URL la plus basique possible
+    url = f"https://graph.threads.net/v1.0/{th_id}/threads?text=Coucou%20petite%20perruche%20🦜&media_type=TEXT&access_token={token}"
     
     try:
-        # Étape 1 : Création (Format JSON)
-        payload_step1 = {
-            "media_type": "TEXT",
-            "text": "Coucou petite perruche 🦜 (Test via JSON)"
-        }
+        # Étape 1 : Création
+        r = requests.post(url)
+        res = r.json()
         
-        r1 = requests.post(f"{base_url}/threads", json=payload_step1, headers=headers)
-        res1 = r1.json()
-        
-        if 'id' not in res1:
-            return f"❌ Erreur Étape 1 : {res1}"
+        if 'id' not in res:
+            return f"❌ Erreur Étape 1 : {res} (Vérifie si l'URL de redirection est bien enregistrée sur Meta)"
             
-        container_id = res1['id']
+        c_id = res['id']
         time.sleep(5) 
         
         # Étape 2 : Publication
-        payload_step2 = {"creation_id": container_id}
-        r2 = requests.post(f"{base_url}/threads_publish", json=payload_step2, headers=headers)
+        pub_url = f"https://graph.threads.net/v1.0/{th_id}/threads_publish?creation_id={c_id}&access_token={token}"
+        r_pub = requests.post(pub_url)
         
-        if r2.status_code == 200:
-            return f"✅ SUCCÈS ! Message publié. (ID: {container_id})"
+        if r_pub.status_code == 200:
+            return f"✅ SUCCÈS ! La perruche est en ligne. (ID: {c_id})"
         else:
-            return f"❌ Erreur Étape 2 : {r2.text}"
-            
+            return f"❌ Erreur Étape 2 : {r_pub.text}"
     except Exception as e:
         return f"⚠️ Bug technique : {str(e)}"
-
 
 
 # --- IA ---
