@@ -3,10 +3,9 @@ from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 from openai import OpenAI
 
-# Indispensable pour Gunicorn sur Render
 app = Flask(__name__)
 
-# --- Base de Données Persistante ---
+# --- Base de Données ---
 DB_PATH = '/data/photos.db' if os.path.exists('/data') else 'photos.db'
 
 def get_db_connection(): return sqlite3.connect(DB_PATH)
@@ -25,24 +24,24 @@ def load_config():
         with open("config.yaml", "r") as f: return yaml.safe_load(f)
     except: return {"site_url": "https://www.davidahmed.me", "galeries": ["barcelone"]}
 
-# --- Logique Statistiques X/Y ---
+# --- Statistiques ---
 def get_galerie_stats(galerie_nom):
     try:
         config = load_config()
         url = f"{config.get('site_url')}/{galerie_nom}"
-        response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
-        soup = BeautifulSoup(response.text, 'html.parser')
+        res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
+        soup = BeautifulSoup(res.text, 'html.parser')
         images = [img.get('src') for img in soup.find_all('img') if img.get('src')]
         all_urls = [src if src.startswith('http') else f"{config.get('site_url')}{src}" for src in images]
         if not all_urls: return 0, 0
         conn = get_db_connection()
         placeholders = ','.join(['?'] * len(all_urls))
-        already_sent = conn.execute(f'SELECT COUNT(*) FROM sent_photos WHERE url IN ({placeholders})', all_urls).fetchone()[0]
+        sent = conn.execute(f'SELECT COUNT(*) FROM sent_photos WHERE url IN ({placeholders})', all_urls).fetchone()[0]
         conn.close()
-        return already_sent, len(all_urls)
+        return sent, len(all_urls)
     except: return 0, 0
 
-# --- PUBLICATIONS ---
+# --- PUBLICATIONS (Séparées) ---
 def publish_to_instagram(image_url, caption):
     token = os.environ.get('IG_ACCESS_TOKEN')
     ig_id = os.environ.get('INSTAGRAM_BUSINESS_ID')
@@ -57,48 +56,20 @@ def publish_to_instagram(image_url, caption):
     except: return False, "Erreur Instagram"
 
 def publish_to_threads(image_url, caption):
-    token = os.environ.get('IG_ACCESS_TOKEN')
+    # On utilise le nouveau token Threads
+    token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
-    if not th_id: return False, "ID Threads manquant"
-
-    # URL officielle de l'API Threads
-    base_url = "https://graph.threads.net/v1.0"
-    
     try:
-        # Étape 1 : Création du conteneur
-        payload = {
-            'image_url': image_url,
-            'text': caption,
-            'access_token': token
-        }
-        r = requests.post(f"{base_url}/{th_id}/threads", data=payload, timeout=20)
-        
-        # Sécurité si Meta renvoie du vide
-        if not r.text:
-            return False, "Meta a renvoyé une réponse vide (Step 1)"
-            
+        r = requests.post(f"https://graph.threads.net/v1.0/{th_id}/threads", 
+                          data={'image_url': image_url, 'text': caption, 'access_token': token})
         res = r.json()
         c_id = res.get('id')
-        
-        if not c_id:
-            err = res.get('error', {}).get('message', 'Erreur inconnue')
-            return False, f"Threads (Conteneur) : {err}"
-            
-        # Attente pour traitement image
+        if not c_id: return False, f"Threads : {res.get('error', {}).get('message', 'Erreur')}"
         time.sleep(15) 
-        
-        # Étape 2 : Publication
-        r_pub = requests.post(f"{base_url}/{th_id}/threads_publish", 
-                              data={'creation_id': c_id, 'access_token': token}, 
-                              timeout=20)
-        
-        if r_pub.status_code == 200:
-            return True, "OK"
-        else:
-            return False, f"Threads (Publication) : {r_pub.text}"
-            
-    except Exception as e:
-        return False, f"Erreur réseau : {str(e)}"
+        r_pub = requests.post(f"https://graph.threads.net/v1.0/{th_id}/threads_publish", 
+                              data={'creation_id': c_id, 'access_token': token})
+        return r_pub.status_code == 200, "OK"
+    except: return False, "Erreur Threads"
 
 # --- IA ---
 def generate_ai_caption(image_url, galerie_nom):
