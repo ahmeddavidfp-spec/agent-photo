@@ -59,41 +59,35 @@ def publish_to_threads(image_url, caption):
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
     
-    if not token or not th_id:
-        return False, "Variables THREADS manquantes sur Render"
-
-    # NETTOYAGE : On retire le format Squarespace (?format=2500w)
+    # NETTOYAGE CRUCIAL : On force un lien image propre (.jpg) sans paramètres Squarespace
     clean_url = image_url.split('?')[0]
 
     try:
-        # Étape 1 : Création du conteneur
-        creation_url = f"https://graph.threads.net/v1.0/{th_id}/threads"
-        params = {
+        # Étape 1 : Création du conteneur image
+        url = f"https://graph.threads.net/v1.0/{th_id}/threads"
+        r = requests.post(url, data={
+            'media_type': 'IMAGE',
             'image_url': clean_url,
             'text': caption,
             'access_token': token
-        }
+        }, timeout=40)
         
-        r = requests.post(creation_url, params=params, timeout=40)
-        if not r.text: return False, "Meta a renvoyé une page vide (Step 1)"
+        res = r.json()
+        if 'id' not in res:
+            return False, f"Threads Step 1 : {res.get('error', {}).get('message')}"
             
-        res_data = r.json()
-        if 'id' not in res_data:
-            err = res_data.get('error', {}).get('message', 'Erreur inconnue')
-            return False, f"Meta (Step 1) : {err}"
-            
-        container_id = res_data['id']
+        c_id = res['id']
+        # On laisse 25 secondes à Threads pour bien télécharger la photo depuis ton site
         time.sleep(25) 
-
-        # Étape 2 : Publication
-        publish_url = f"https://graph.threads.net/v1.0/{th_id}/threads_publish"
-        r_pub = requests.post(publish_url, params={'creation_id': container_id, 'access_token': token}, timeout=40)
         
-        if r_pub.status_code == 200:
-            return True, "OK"
-        else:
-            return False, f"Meta (Step 2) : {r_pub.text}"
-            
+        # Étape 2 : Publication finale
+        pub_url = f"https://graph.threads.net/v1.0/{th_id}/threads_publish"
+        r_pub = requests.post(pub_url, data={
+            'creation_id': c_id,
+            'access_token': token
+        }, timeout=40)
+        
+        return (True, "OK") if r_pub.status_code == 200 else (False, f"Step 2 : {r_pub.text}")
     except Exception as e:
         return False, f"Bug technique : {str(e)}"
 
