@@ -4,8 +4,6 @@ from flask import Flask, request, jsonify
 from openai import OpenAI
 
 app = Flask(__name__)
-
-# --- Base de Données Persistante ---
 DB_PATH = '/data/photos.db' if os.path.exists('/data') else 'photos.db'
 
 def get_db_connection(): return sqlite3.connect(DB_PATH)
@@ -24,37 +22,24 @@ def load_config():
         with open("config.yaml", "r") as f: return yaml.safe_load(f)
     except: return {"site_url": "https://www.davidahmed.me", "galeries": ["barcelone"]}
 
-# --- Logique des Statistiques (X/Y) ---
-
+# --- LOGIQUE STATS X/Y ---
 def get_galerie_stats(galerie_nom):
     try:
         config = load_config()
         url = f"{config.get('site_url')}/{galerie_nom}"
         response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
         soup = BeautifulSoup(response.text, 'html.parser')
-        
-        images = soup.find_all('img')
-        all_urls = []
-        for img in images:
-            src = img.get('src')
-            if src:
-                full_url = src if src.startswith('http') else f"{config.get('site_url')}{src}"
-                all_urls.append(full_url)
-        
-        total_site = len(all_urls)
-        if total_site == 0: return 0, 0
-            
+        images = [img.get('src') for img in soup.find_all('img') if img.get('src')]
+        all_urls = [src if src.startswith('http') else f"{config.get('site_url')}{src}" for src in images]
+        if not all_urls: return 0, 0
         conn = get_db_connection()
-        placeholders = ','.join(['?'] * total_site)
+        placeholders = ','.join(['?'] * len(all_urls))
         already_sent = conn.execute(f'SELECT COUNT(*) FROM sent_photos WHERE url IN ({placeholders})', all_urls).fetchone()[0]
         conn.close()
-        
-        return already_sent, total_site
-    except:
-        return 0, 0
+        return already_sent, len(all_urls)
+    except: return 0, 0
 
 # --- PUBLICATIONS ---
-
 def publish_to_instagram(image_url, caption):
     token = os.environ.get('IG_ACCESS_TOKEN')
     ig_id = os.environ.get('INSTAGRAM_BUSINESS_ID')
@@ -66,31 +51,39 @@ def publish_to_instagram(image_url, caption):
         time.sleep(10)
         requests.post(f"https://graph.facebook.com/v19.0/{ig_id}/media_publish", data={'creation_id': c_id, 'access_token': token})
         return True, "OK"
-    except Exception as e: return False, str(e)
+    except: return False, "Erreur Instagram"
+
+def publish_to_threads(image_url, caption):
+    token = os.environ.get('IG_ACCESS_TOKEN')
+    th_id = os.environ.get('THREADS_USER_ID')
+    try:
+        r = requests.post(f"https://graph.threads.net/v1.0/{th_id}/threads", 
+                          data={'image_url': image_url, 'text': caption, 'access_token': token})
+        c_id = r.json().get('id')
+        if not c_id: return False, r.json()
+        time.sleep(10)
+        requests.post(f"https://graph.threads.net/v1.0/{th_id}/threads_publish", data={'creation_id': c_id, 'access_token': token})
+        return True, "OK"
+    except: return False, "Erreur Threads"
 
 # --- IA ---
-
 def generate_ai_caption(image_url, galerie_nom):
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     site_url = config.get('site_url', 'https://www.davidahmed.me').rstrip('/')
     galerie_link = f"{site_url}/{galerie_nom}"
-
     instructions = f"""Tu es David Ahmed. Bio: {config.get('photographer_bio', '')}
     MISSION : Analyse cette photo à {galerie_nom}. TON : {config.get('ai_tone', '')}
-    FORMAT : TITRE EN MAJUSCULES, description (MAX 350 car.), "Série complète disponible sur : {galerie_link}", puis 8 hashtags pertinents parmi : {config.get('hashtags', '')}
-    STRICT : Pas d'émojis. Pas de Markdown (pas de **)."""
-    
+    FORMAT : TITRE EN MAJUSCULES (SANS SYMBOLES), description cinématographique (MAX 350 car.), "Série complète disponible sur : {galerie_link}", puis 8 hashtags pertinents parmi : {config.get('hashtags', '')}
+    STRICT : Pas d'émojis. Pas de Markdown (pas de **). Vocabulaire varié."""
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": [{"type": "text", "text": instructions}, {"type": "image_url", "image_url": {"url": image_url}}]}],
-        max_tokens=500,
-        temperature=0.8
+        max_tokens=500, temperature=0.8
     )
     return response.choices[0].message.content
 
-# --- GESTION TELEGRAM ---
-
+# --- TELEGRAM ---
 def send_galerie_menu(chat_id):
     config = load_config()
     galeries = config.get('galeries', [])
@@ -100,12 +93,10 @@ def send_galerie_menu(chat_id):
         row = []
         for g in galeries[i:i+2]:
             sent, total = get_galerie_stats(g)
-            label = f"{g.capitalize()} ({sent}/{total})"
-            row.append({"text": label, "callback_data": f"select_{g}"})
+            row.append({"text": f"{g.capitalize()} ({sent}/{total})", "callback_data": f"select_{g}"})
         keyboard.append(row)
-    
-    payload = {"chat_id": chat_id, "text": "Quelle galerie souhaites-tu explorer, David ?", "reply_markup": {"inline_keyboard": keyboard}}
-    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json=payload)
+    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
+                  json={"chat_id": chat_id, "text": "Quelle galerie explorer ?", "reply_markup": {"inline_keyboard": keyboard}})
 
 def send_suggestion(chat_id, galerie_nom):
     token = os.environ.get('TELEGRAM_TOKEN')
@@ -113,32 +104,21 @@ def send_suggestion(chat_id, galerie_nom):
     url = f"{config.get('site_url')}/{galerie_nom}"
     soup = BeautifulSoup(requests.get(url).text, 'html.parser')
     images = [img.get('src') for img in soup.find_all('img') if img.get('src')]
+    valid_photos = [src if src.startswith('http') else f"{config.get('site_url')}{src}" for src in images]
     
-    valid_photos = []
-    for src in images:
-        full_url = src if src.startswith('http') else f"{config.get('site_url')}{src}"
-        conn = get_db_connection()
-        res = conn.execute('SELECT 1 FROM sent_photos WHERE url = ?', (full_url,)).fetchone()
-        conn.close()
-        if not res: valid_photos.append(full_url)
-
+    # Filtrer déjà envoyées
+    valid_photos = [u for u in valid_photos if not conn_check_sent(u)]
     if not valid_photos:
-        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "Plus de photos disponibles."})
+        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "Plus de photos."})
         return
-
-    image_url = random.choice(valid_photos)
-    caption = generate_ai_caption(image_url, galerie_nom)
-    save_session(chat_id, image_url, caption)
-
-    payload = {
-        "chat_id": chat_id, "photo": image_url, "caption": caption,
-        "reply_markup": {
-            "inline_keyboard": [
-                [{"text": "✅ Publier", "callback_data": "publish"}],
-                [{"text": "🔄 Autre", "callback_data": f"select_{galerie_nom}"}, {"text": "⬅️ Menu", "callback_data": "menu"}]
-            ]
-        }
-    }
+    
+    img_url = random.choice(valid_photos)
+    cap = generate_ai_caption(img_url, galerie_nom)
+    save_session(chat_id, img_url, cap)
+    payload = {"chat_id": chat_id, "photo": img_url, "caption": cap, "reply_markup": {"inline_keyboard": [
+        [{"text": "🚀 Publier Partout", "callback_data": "publish_all"}],
+        [{"text": "🔄 Autre", "callback_data": f"select_{galerie_nom}"}, {"text": "⬅️ Menu", "callback_data": "menu"}]
+    ]}}
     requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", json=payload)
 
 @app.route("/telegram-webhook", methods=['POST'])
@@ -146,22 +126,27 @@ def telegram_webhook():
     data = request.json
     token = os.environ.get('TELEGRAM_TOKEN')
     if "message" in data:
-        chat_id = data["message"]["chat"]["id"]
-        send_galerie_menu(chat_id)
+        send_galerie_menu(data["message"]["chat"]["id"])
     elif "callback_query" in data:
         chat_id = data["callback_query"]["message"]["chat"]["id"]
         action = data["callback_query"]["data"]
         session = get_session(chat_id)
-
         if action == "menu": send_galerie_menu(chat_id)
         elif action.startswith("select_"): send_suggestion(chat_id, action.split("_")[1])
-        elif action == "publish" and session:
+        elif action == "publish_all" and session:
             url, cap = session
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ Publication..."})
-            ok, msg = publish_to_instagram(url, cap)
-            if ok: mark_photo_as_sent(url)
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "🚀 Fait !" if ok else f"❌ {msg}"})
+            publish_to_instagram(url, cap)
+            publish_to_threads(url, cap)
+            mark_photo_as_sent(url)
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "🚀 En ligne !"})
     return jsonify({"status": "ok"})
+
+def conn_check_sent(url):
+    conn = get_db_connection()
+    res = conn.execute('SELECT 1 FROM sent_photos WHERE url = ?', (url,)).fetchone()
+    conn.close()
+    return res is not None
 
 def get_session(chat_id):
     conn = get_db_connection()
