@@ -24,7 +24,36 @@ def load_config():
         with open("config.yaml", "r") as f: return yaml.safe_load(f)
     except: return {"site_url": "https://www.davidahmed.me", "galeries": ["barcelone"]}
 
-# --- LOGIQUE DE PUBLICATION ---
+# --- Logique des Statistiques (X/Y) ---
+
+def get_galerie_stats(galerie_nom):
+    try:
+        config = load_config()
+        url = f"{config.get('site_url')}/{galerie_nom}"
+        response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        images = soup.find_all('img')
+        all_urls = []
+        for img in images:
+            src = img.get('src')
+            if src:
+                full_url = src if src.startswith('http') else f"{config.get('site_url')}{src}"
+                all_urls.append(full_url)
+        
+        total_site = len(all_urls)
+        if total_site == 0: return 0, 0
+            
+        conn = get_db_connection()
+        placeholders = ','.join(['?'] * total_site)
+        already_sent = conn.execute(f'SELECT COUNT(*) FROM sent_photos WHERE url IN ({placeholders})', all_urls).fetchone()[0]
+        conn.close()
+        
+        return already_sent, total_site
+    except:
+        return 0, 0
+
+# --- PUBLICATIONS ---
 
 def publish_to_instagram(image_url, caption):
     token = os.environ.get('IG_ACCESS_TOKEN')
@@ -39,7 +68,7 @@ def publish_to_instagram(image_url, caption):
         return True, "OK"
     except Exception as e: return False, str(e)
 
-# --- GÉNÉRATION DE LÉGENDE ---
+# --- IA ---
 
 def generate_ai_caption(image_url, galerie_nom):
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
@@ -48,8 +77,7 @@ def generate_ai_caption(image_url, galerie_nom):
     galerie_link = f"{site_url}/{galerie_nom}"
 
     instructions = f"""Tu es David Ahmed. Bio: {config.get('photographer_bio', '')}
-    MISSION : Agis en photographe et curateur. Analyse cette photo à {galerie_nom}. 
-    TON : {config.get('ai_tone', '')}
+    MISSION : Analyse cette photo à {galerie_nom}. TON : {config.get('ai_tone', '')}
     FORMAT : TITRE EN MAJUSCULES, description (MAX 350 car.), "Série complète disponible sur : {galerie_link}", puis 8 hashtags pertinents parmi : {config.get('hashtags', '')}
     STRICT : Pas d'émojis. Pas de Markdown (pas de **)."""
     
@@ -69,7 +97,11 @@ def send_galerie_menu(chat_id):
     token = os.environ.get('TELEGRAM_TOKEN')
     keyboard = []
     for i in range(0, len(galeries), 2):
-        row = [{"text": g.capitalize(), "callback_data": f"select_{g}"} for g in galeries[i:i+2]]
+        row = []
+        for g in galeries[i:i+2]:
+            sent, total = get_galerie_stats(g)
+            label = f"{g.capitalize()} ({sent}/{total})"
+            row.append({"text": label, "callback_data": f"select_{g}"})
         keyboard.append(row)
     
     payload = {"chat_id": chat_id, "text": "Quelle galerie souhaites-tu explorer, David ?", "reply_markup": {"inline_keyboard": keyboard}}
@@ -91,7 +123,7 @@ def send_suggestion(chat_id, galerie_nom):
         if not res: valid_photos.append(full_url)
 
     if not valid_photos:
-        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "Plus de photos disponibles dans cette galerie."})
+        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "Plus de photos disponibles."})
         return
 
     image_url = random.choice(valid_photos)
@@ -125,14 +157,12 @@ def telegram_webhook():
         elif action.startswith("select_"): send_suggestion(chat_id, action.split("_")[1])
         elif action == "publish" and session:
             url, cap = session
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ Publication en cours..."})
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ Publication..."})
             ok, msg = publish_to_instagram(url, cap)
             if ok: mark_photo_as_sent(url)
-            res_text = "🚀 Publié !" if ok else f"❌ Erreur : {msg}"
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": res_text})
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "🚀 Fait !" if ok else f"❌ {msg}"})
     return jsonify({"status": "ok"})
 
-# --- Fonctions Session ---
 def get_session(chat_id):
     conn = get_db_connection()
     res = conn.execute('SELECT last_url, last_caption FROM current_session WHERE chat_id = ?', (chat_id,)).fetchone()
