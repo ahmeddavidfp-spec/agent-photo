@@ -134,22 +134,24 @@ def telegram_webhook():
         elif action == "publish_all" and session:
             url, cap = session
             
-            # --- VERROU ANTI-DOUBLON ---
+            # 1. Vérification immédiate du verrou
             conn = get_db_connection()
             check = conn.execute('SELECT 1 FROM sent_photos WHERE url = ?', (url,)).fetchone()
             conn.close()
             
             if check:
                 requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                              json={"chat_id": chat_id, "text": "⚠️ Déjà publié ou en cours !"})
+                              json={"chat_id": chat_id, "text": "⚠️ Déjà publié !"})
                 return jsonify({"status": "ok"})
-            
-            # On marque tout de suite comme envoyé pour bloquer les répétitions de Telegram
-            mark_photo_as_sent(url)
-            # ---------------------------
 
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ Publication croisée en cours..."})
-            
+            # 2. On répond TOUT DE SUITE à Telegram pour libérer le worker
+            # Telegram verra un "200 OK" et arrêtera de renvoyer la requête
+            mark_photo_as_sent(url)
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
+                          json={"chat_id": chat_id, "text": "⏳ Publication lancée (Instagram + Threads)..."})
+
+            # 3. Exécution de la publication
+            # Note: Dans une version pro, on utiliserait un 'Thread' ou 'Celery' ici
             ok_ig, err_ig = publish_to_instagram(url, cap)
             ok_th, err_th = publish_to_threads(url, cap)
             
