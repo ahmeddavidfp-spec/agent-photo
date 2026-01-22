@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 from openai import OpenAI
 
-# LIGNE CRITIQUE : Ne pas supprimer ou renommer cette variable
+# Indispensable pour Gunicorn sur Render
 app = Flask(__name__)
 
 # --- Base de Données Persistante ---
@@ -110,7 +110,6 @@ def send_suggestion(chat_id, galerie_nom):
     images = [img.get('src') for img in soup.find_all('img') if img.get('src')]
     valid_photos = [src if src.startswith('http') else f"{config.get('site_url')}{src}" for src in images]
     
-    # Filtre envoyé
     conn = get_db_connection()
     sent = [row[0] for row in conn.execute('SELECT url FROM sent_photos').fetchall()]
     conn.close()
@@ -145,4 +144,34 @@ def telegram_webhook():
         elif action.startswith("select_"): send_suggestion(chat_id, action.split("_")[1])
         elif action == "publish_all" and session:
             url, cap = session
-            requests.post(f"https://api.telegram
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ Publication..."})
+            publish_to_instagram(url, cap)
+            ok_th, err_th = publish_to_threads(url, cap)
+            mark_photo_as_sent(url)
+            msg = "🚀 Instagram : OK\n" + ("🧵 Threads : OK" if ok_th else f"❌ Threads : {err_th}")
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg})
+    return jsonify({"status": "ok"})
+
+def get_session(chat_id):
+    conn = get_db_connection()
+    res = conn.execute('SELECT last_url, last_caption FROM current_session WHERE chat_id = ?', (chat_id,)).fetchone()
+    conn.close()
+    return res
+
+def save_session(chat_id, url, cap):
+    conn = get_db_connection()
+    conn.execute('INSERT OR REPLACE INTO current_session VALUES (?, ?, ?)', (chat_id, url, cap))
+    conn.commit()
+    conn.close()
+
+def mark_photo_as_sent(url):
+    conn = get_db_connection()
+    conn.execute('INSERT OR IGNORE INTO sent_photos VALUES (?)', (url,))
+    conn.commit()
+    conn.close()
+
+@app.route("/")
+def index(): return "Agent David Ahmed - Actif"
+
+if __name__ == "__main__":
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
