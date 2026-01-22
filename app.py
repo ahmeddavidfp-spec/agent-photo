@@ -41,7 +41,8 @@ def get_galerie_stats(galerie_nom):
         return sent, len(all_urls)
     except: return 0, 0
 
-# --- PUBLICATIONS (Séparées) ---
+# --- PUBLICATIONS ---
+
 def publish_to_instagram(image_url, caption):
     token = os.environ.get('IG_ACCESS_TOKEN')
     ig_id = os.environ.get('INSTAGRAM_BUSINESS_ID')
@@ -59,11 +60,12 @@ def publish_to_threads(image_url, caption):
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
     
-    # NETTOYAGE CRUCIAL : On force un lien image propre (.jpg) sans paramètres Squarespace
+    # Nettoyage URL et Sécurité 500 car. pour Threads
     clean_url = image_url.split('?')[0]
+    if len(caption) > 495:
+        caption = caption[:492] + "..."
 
     try:
-        # Étape 1 : Création du conteneur image
         url = f"https://graph.threads.net/v1.0/{th_id}/threads"
         r = requests.post(url, data={
             'media_type': 'IMAGE',
@@ -73,74 +75,33 @@ def publish_to_threads(image_url, caption):
         }, timeout=40)
         
         res = r.json()
-        if 'id' not in res:
-            return False, f"Threads Step 1 : {res.get('error', {}).get('message')}"
+        if 'id' not in res: return False, f"Step 1 : {res.get('error', {}).get('message')}"
             
         c_id = res['id']
-        # On laisse 25 secondes à Threads pour bien télécharger la photo depuis ton site
         time.sleep(25) 
         
-        # Étape 2 : Publication finale
         pub_url = f"https://graph.threads.net/v1.0/{th_id}/threads_publish"
-        r_pub = requests.post(pub_url, data={
-            'creation_id': c_id,
-            'access_token': token
-        }, timeout=40)
-        
+        r_pub = requests.post(pub_url, data={'creation_id': c_id, 'access_token': token}, timeout=40)
         return (True, "OK") if r_pub.status_code == 200 else (False, f"Step 2 : {r_pub.text}")
     except Exception as e:
-        return False, f"Bug technique : {str(e)}"
-
-# --- ROUTE DE TEST DÉDIÉE ---
-@app.route("/test-threads")
-def test_threads_simple():
-    """Test direct : Uniquement du texte pour valider l'autorisation"""
-    token = os.environ.get('THREADS_ACCESS_TOKEN')
-    th_id = os.environ.get('THREADS_USER_ID')
-    
-    # URL de création de post Threads
-    url = f"https://graph.threads.net/v1.0/{th_id}/threads"
-    
-    try:
-        # Étape 1 : Création du post texte 'Coucou petite perruche'
-        r = requests.post(url, data={
-            'media_type': 'TEXT',
-            'text': 'Coucou petite perruche 🦜',
-            'access_token': token
-        }, timeout=30)
-        res = r.json()
-        
-        if 'id' not in res:
-            return f"❌ Erreur Étape 1 : {res}"
-            
-        c_id = res['id']
-        time.sleep(2) # Très court pour du texte
-        
-        # Étape 2 : Publication finale
-        pub_url = f"https://graph.threads.net/v1.0/{th_id}/threads_publish"
-        r_pub = requests.post(pub_url, data={
-            'creation_id': c_id,
-            'access_token': token
-        }, timeout=30)
-        
-        if r_pub.status_code == 200:
-            return "✅ SUCCÈS ! La petite perruche a décollé sur ton Threads."
-        else:
-            return f"❌ Erreur Étape 2 : {r_pub.text}"
-            
-    except Exception as e:
-        return f"⚠️ Bug technique : {str(e)}"
-
+        return False, str(e)
 
 # --- IA ---
+
 def generate_ai_caption(image_url, galerie_nom):
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     galerie_link = f"{config.get('site_url').rstrip('/')}/{galerie_nom}"
+    
     instructions = f"""Tu es David Ahmed. Bio: {config.get('photographer_bio', '')}
     MISSION : Analyse cette photo à {galerie_nom}. TON : {config.get('ai_tone', '')}
-    FORMAT : TITRE EN MAJUSCULES (SANS SYMBOLES), description cinématographique (MAX 350 car.), "Série complète disponible sur : {galerie_link}", puis 8 hashtags pertinents parmi : {config.get('hashtags', '')}
-    STRICT : Pas d'émojis. Pas de Markdown. Vocabulaire varié."""
+    FORMAT : 
+    1. TITRE EN MAJUSCULES (SANS SYMBOLES)
+    2. Description cinématographique courte (MAX 250 car.)
+    3. Phrase: "Série complète disponible sur : {galerie_link}"
+    4. Exactement 5 hashtags pertinents (choisis les plus impactants).
+    STRICT : Pas d'émojis. Pas de Markdown. Maximum 5 hashtags."""
+    
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": [{"type": "text", "text": instructions}, {"type": "image_url", "image_url": {"url": image_url}}]}],
@@ -148,17 +109,43 @@ def generate_ai_caption(image_url, galerie_nom):
     )
     return response.choices[0].message.content
 
-# --- TELEGRAM ---
+# --- TELEGRAM & WEBHOOK ---
+
+@app.route("/telegram-webhook", methods=['POST'])
+def telegram_webhook():
+    data = request.json
+    token = os.environ.get('TELEGRAM_TOKEN')
+    if "message" in data:
+        send_galerie_menu(data["message"]["chat"]["id"])
+    elif "callback_query" in data:
+        chat_id = data["callback_query"]["message"]["chat"]["id"]
+        action = data["callback_query"]["data"]
+        session = get_session(chat_id)
+        
+        if action == "menu": send_galerie_menu(chat_id)
+        elif action.startswith("select_"): send_suggestion(chat_id, action.split("_")[1])
+        elif action == "publish_all" and session:
+            url, cap = session
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ Publication croisée..."})
+            
+            ok_ig, err_ig = publish_to_instagram(url, cap)
+            ok_th, err_th = publish_to_threads(url, cap)
+            
+            if ok_ig: mark_photo_as_sent(url)
+            
+            msg = f"📸 Instagram : {'✅ OK' if ok_ig else '❌ ' + str(err_ig)}\n"
+            msg += f"🧵 Threads : {'✅ OK' if ok_th else '❌ ' + str(err_th)}"
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg})
+            
+    return jsonify({"status": "ok"})
+
 def send_galerie_menu(chat_id):
     config = load_config()
     token = os.environ.get('TELEGRAM_TOKEN')
     keyboard = []
     galeries = config.get('galeries', [])
     for i in range(0, len(galeries), 2):
-        row = []
-        for g in galeries[i:i+2]:
-            sent, total = get_galerie_stats(g)
-            row.append({"text": f"{g.capitalize()} ({sent}/{total})", "callback_data": f"select_{g}"})
+        row = [{"text": f"{g.capitalize()} ({get_galerie_stats(g)[0]}/{get_galerie_stats(g)[1]})", "callback_data": f"select_{g}"} for g in galeries[i:i+2]]
         keyboard.append(row)
     requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
                   json={"chat_id": chat_id, "text": "Quelle galerie explorer ?", "reply_markup": {"inline_keyboard": keyboard}})
@@ -190,28 +177,6 @@ def send_suggestion(chat_id, galerie_nom):
             [{"text": "🔄 Autre", "callback_data": f"select_{galerie_nom}"}, {"text": "⬅️ Menu", "callback_data": "menu"}]
         ]}
     })
-
-@app.route("/telegram-webhook", methods=['POST'])
-def telegram_webhook():
-    data = request.json
-    token = os.environ.get('TELEGRAM_TOKEN')
-    if "message" in data:
-        send_galerie_menu(data["message"]["chat"]["id"])
-    elif "callback_query" in data:
-        chat_id = data["callback_query"]["message"]["chat"]["id"]
-        action = data["callback_query"]["data"]
-        session = get_session(chat_id)
-        if action == "menu": send_galerie_menu(chat_id)
-        elif action.startswith("select_"): send_suggestion(chat_id, action.split("_")[1])
-        elif action == "publish_all" and session:
-            url, cap = session
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ Publication..."})
-            publish_to_instagram(url, cap)
-            ok_th, err_th = publish_to_threads(url, cap)
-            mark_photo_as_sent(url)
-            msg = "🚀 Instagram : OK\n" + ("🧵 Threads : OK" if ok_th else f"❌ Threads : {err_th}")
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg})
-    return jsonify({"status": "ok"})
 
 def get_session(chat_id):
     conn = get_db_connection()
