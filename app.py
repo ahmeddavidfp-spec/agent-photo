@@ -55,8 +55,6 @@ def publish_to_instagram(image_url, caption):
         return True, "OK"
     except: return False, "Erreur Instagram"
 
-
-
 def publish_to_threads(image_url, caption):
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
@@ -65,7 +63,6 @@ def publish_to_threads(image_url, caption):
         return False, "Variables THREADS manquantes sur Render"
 
     # NETTOYAGE : On retire le format Squarespace (?format=2500w)
-    # Threads préfère les liens se terminant par une extension d'image
     clean_url = image_url.split('?')[0]
 
     try:
@@ -77,21 +74,16 @@ def publish_to_threads(image_url, caption):
             'access_token': token
         }
         
-        # On utilise 'params' pour Threads (plus stable en mode dev)
         r = requests.post(creation_url, params=params, timeout=40)
-        
-        # Sécurité si réponse vide
-        if not r.text:
-            return False, "Meta a renvoyé une page vide (Step 1)"
+        if not r.text: return False, "Meta a renvoyé une page vide (Step 1)"
             
         res_data = r.json()
-        
         if 'id' not in res_data:
             err = res_data.get('error', {}).get('message', 'Erreur inconnue')
             return False, f"Meta (Step 1) : {err}"
             
         container_id = res_data['id']
-        time.sleep(25) # Temps de traitement pour l'image
+        time.sleep(25) 
 
         # Étape 2 : Publication
         publish_url = f"https://graph.threads.net/v1.0/{th_id}/threads_publish"
@@ -105,7 +97,41 @@ def publish_to_threads(image_url, caption):
     except Exception as e:
         return False, f"Bug technique : {str(e)}"
 
-
+# --- ROUTE DE TEST DÉDIÉE ---
+@app.route("/test-threads")
+def test_threads_simple():
+    """Route pour tester uniquement le Token et l'ID Threads avec du texte simple"""
+    token = os.environ.get('THREADS_ACCESS_TOKEN')
+    th_id = os.environ.get('THREADS_USER_ID')
+    
+    url = f"https://graph.threads.net/v1.0/{th_id}/threads"
+    payload = {
+        'media_type': 'TEXT',
+        'text': 'Coucou petite perruche 🦜 (Test Debug)',
+        'access_token': token
+    }
+    
+    try:
+        # Étape 1 : Création
+        r = requests.post(url, data=payload)
+        res = r.json()
+        if 'id' not in res:
+            return f"❌ Erreur Étape 1 (Création) : {res}"
+            
+        c_id = res['id']
+        time.sleep(5) 
+        
+        # Étape 2 : Publication
+        pub_url = f"https://graph.threads.net/v1.0/{th_id}/threads_publish"
+        r_pub = requests.post(pub_url, data={'creation_id': c_id, 'access_token': token})
+        
+        if r_pub.status_code == 200:
+            return f"✅ SUCCÈS ! Le message est en ligne. (ID: {c_id})"
+        else:
+            return f"❌ Erreur Étape 2 (Publication) : {r_pub.text}"
+            
+    except Exception as e:
+        return f"⚠️ Bug technique : {str(e)}"
 
 # --- IA ---
 def generate_ai_caption(image_url, galerie_nom):
