@@ -5,7 +5,7 @@ from openai import OpenAI
 
 app = Flask(__name__)
 
-# --- Base de Données Persistante ---
+# --- Base de Données ---
 DB_PATH = '/data/photos.db' if os.path.exists('/data') else 'photos.db'
 
 def get_db_connection(): return sqlite3.connect(DB_PATH)
@@ -24,7 +24,7 @@ def load_config():
         with open("config.yaml", "r") as f: return yaml.safe_load(f)
     except: return {"site_url": "https://www.davidahmed.me", "galeries": ["barcelone"]}
 
-# --- PUBLICATIONS ---
+# --- LOGIQUE DE PUBLICATION ---
 
 def publish_to_instagram(image_url, caption):
     token = os.environ.get('IG_ACCESS_TOKEN')
@@ -53,7 +53,7 @@ def publish_to_threads(image_url, caption):
         return True, "OK"
     except Exception as e: return False, str(e)
 
-# --- GÉNÉRATION DE LÉGENDE AMÉLIORÉE ---
+# --- IA ---
 
 def generate_ai_caption(image_url, galerie_nom):
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
@@ -61,31 +61,92 @@ def generate_ai_caption(image_url, galerie_nom):
     site_url = config.get('site_url', 'https://www.davidahmed.me').rstrip('/')
     galerie_link = f"{site_url}/{galerie_nom}"
 
-    instructions = f"""Tu es David Ahmed, photographe de rue expert.
-    MISSION : Analyse cette photo à {galerie_nom} pour Instagram et Threads.
-    
-    STYLE ÉDITORIAL :
-    - Ton : Cinématographique, mélancolique, minimaliste.
-    - Vocabulaire : Évite les répétitions. Ne force pas les mots techniques si la scène ne s'y prête pas. 
-    - Focus : Décris l'émotion de l'instant, le silence, ou la géométrie sans être scolaire.
-    
-    STRUCTURE STRICTE :
-    1. TITRE : Court, en MAJUSCULES. JAMAIS de symboles comme '*' ou '_'.
-    2. TEXTE : À la première personne. MAX 350 caractères. Pas de Markdown.
-    3. CTA : "Série complète disponible sur : {galerie_link}"
-    4. HASHTAGS : Sélectionne les 6-8 plus adaptés au contenu visuel parmi : {config.get('hashtags', '')}
-    
-    IMPORTANT : Pas d'émojis. Rythme sec et poétique."""
+    instructions = f"""Tu es David Ahmed. Bio: {config.get('photographer_bio', '')}
+    MISSION : Agis en photographe et curateur. Analyse cette photo à {galerie_nom}. 
+    TON : {config.get('ai_tone', '')}
+    FORMAT : TITRE EN MAJUSCULES, description (MAX 350 car.), "Série complète disponible sur : {galerie_link}", puis 8 hashtags pertinents parmi : {config.get('hashtags', '')}
+    STRICT : Pas d'émojis. Pas de Markdown (pas de **)."""
     
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": [{"type": "text", "text": instructions}, {"type": "image_url", "image_url": {"url": image_url}}]}],
         max_tokens=500,
-        temperature=0.8 # Augmentation de la créativité pour éviter la répétition
+        temperature=0.8
     )
     return response.choices[0].message.content
 
-# --- GESTION WEBHOOK & SESSIONS ---
+# --- TELEGRAM LOGIC ---
+
+def send_galerie_menu(chat_id):
+    config = load_config()
+    galeries = config.get('galeries', [])
+    token = os.environ.get('TELEGRAM_TOKEN')
+    keyboard = []
+    for i in range(0, len(galeries), 2):
+        row = [{"text": g.capitalize(), "callback_data": f"select_{g}"} for g in galeries[i:i+2]]
+        keyboard.append(row)
+    
+    payload = {"chat_id": chat_id, "text": "Quelle galerie explorer ?", "reply_markup": {"inline_keyboard": keyboard}}
+    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json=payload)
+
+def send_suggestion(chat_id, galerie_nom):
+    token = os.environ.get('TELEGRAM_TOKEN')
+    config = load_config()
+    url = f"{config.get('site_url')}/{galerie_nom}"
+    soup = BeautifulSoup(requests.get(url).text, 'html.parser')
+    images = [img.get('src') for img in soup.find_all('img') if img.get('src')]
+    
+    # Filtrer les photos déjà envoyées
+    valid_photos = []
+    for src in images:
+        full_url = src if src.startswith('http') else f"{config.get('site_url')}{src}"
+        conn = get_db_connection()
+        res = conn.execute('SELECT 1 FROM sent_photos WHERE url = ?', (full_url,)).fetchone()
+        conn.close()
+        if not res: valid_photos.append(full_url)
+
+    if not valid_photos:
+        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "Plus de photos !"})
+        return
+
+    image_url = random.choice(valid_photos)
+    caption = generate_ai_caption(image_url, galerie_nom)
+    save_session(chat_id, image_url, caption)
+
+    payload = {
+        "chat_id": chat_id, "photo": image_url, "caption": caption,
+        "reply_markup": {
+            "inline_keyboard": [
+                [{"text": "🚀 Tout publier", "callback_data": "publish_all"}],
+                [{"text": "✅ Instagram", "callback_data": "publish_ig"}, {"text": "🧵 Threads", "callback_data": "publish_threads"}],
+                [{"text": "🔄 Autre", "callback_data": f"select_{galerie_nom}"}, {"text": "⬅️ Menu", "callback_data": "menu"}]
+            ]
+        }
+    }
+    requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", json=payload)
+
+@app.route("/telegram-webhook", methods=['POST'])
+def telegram_webhook():
+    data = request.json
+    token = os.environ.get('TELEGRAM_TOKEN')
+    if "message" in data:
+        chat_id = data["message"]["chat"]["id"]
+        send_galerie_menu(chat_id)
+    elif "callback_query" in data:
+        chat_id = data["callback_query"]["message"]["chat"]["id"]
+        action = data["callback_query"]["data"]
+        session = get_session(chat_id)
+
+        if action == "menu": send_galerie_menu(chat_id)
+        elif action.startswith("select_"): send_suggestion(chat_id, action.split("_")[1])
+        elif action == "publish_all" and session:
+            url, cap = session
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ Publication..."})
+            publish_to_instagram(url, cap)
+            publish_to_threads(url, cap)
+            mark_photo_as_sent(url)
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "🚀 Fait !"})
+    return jsonify({"status": "ok"})
 
 def get_session(chat_id):
     conn = get_db_connection()
@@ -105,4 +166,5 @@ def mark_photo_as_sent(url):
     conn.commit()
     conn.close()
 
-# (Le reste du code pour les menus et webhooks reste identique à ta structure fonctionnelle)
+if __name__ == "__main__":
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
