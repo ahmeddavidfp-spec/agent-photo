@@ -100,38 +100,48 @@ def publish_to_threads(image_url, caption):
 # --- ROUTE DE TEST DÉDIÉE ---
 @app.route("/test-threads")
 def test_threads_simple():
-    """Route pour tester uniquement le Token et l'ID Threads avec du texte simple"""
+    """Test ultime avec format JSON et Headers (méthode la plus stable)"""
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
     
-    url = f"https://graph.threads.net/v1.0/{th_id}/threads"
-    payload = {
-        'media_type': 'TEXT',
-        'text': 'Coucou petite perruche 🦜 (Test Debug)',
-        'access_token': token
+    if not token or not th_id:
+        return "❌ Erreur : Variables manquantes sur Render (THREADS_ACCESS_TOKEN ou THREADS_USER_ID)"
+
+    base_url = f"https://graph.threads.net/v1.0/{th_id}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
     }
     
     try:
-        # Étape 1 : Création
-        r = requests.post(url, data=payload)
-        res = r.json()
-        if 'id' not in res:
-            return f"❌ Erreur Étape 1 (Création) : {res}"
+        # Étape 1 : Création (Format JSON)
+        payload_step1 = {
+            "media_type": "TEXT",
+            "text": "Coucou petite perruche 🦜 (Test via JSON)"
+        }
+        
+        r1 = requests.post(f"{base_url}/threads", json=payload_step1, headers=headers)
+        res1 = r1.json()
+        
+        if 'id' not in res1:
+            return f"❌ Erreur Étape 1 : {res1}"
             
-        c_id = res['id']
+        container_id = res1['id']
         time.sleep(5) 
         
         # Étape 2 : Publication
-        pub_url = f"https://graph.threads.net/v1.0/{th_id}/threads_publish"
-        r_pub = requests.post(pub_url, data={'creation_id': c_id, 'access_token': token})
+        payload_step2 = {"creation_id": container_id}
+        r2 = requests.post(f"{base_url}/threads_publish", json=payload_step2, headers=headers)
         
-        if r_pub.status_code == 200:
-            return f"✅ SUCCÈS ! Le message est en ligne. (ID: {c_id})"
+        if r2.status_code == 200:
+            return f"✅ SUCCÈS ! Message publié. (ID: {container_id})"
         else:
-            return f"❌ Erreur Étape 2 (Publication) : {r_pub.text}"
+            return f"❌ Erreur Étape 2 : {r2.text}"
             
     except Exception as e:
         return f"⚠️ Bug technique : {str(e)}"
+
+
 
 # --- IA ---
 def generate_ai_caption(image_url, galerie_nom):
