@@ -28,8 +28,13 @@ def publish_to_facebook(image_url, caption):
     token = os.environ.get('FB_PAGE_ACCESS_TOKEN')
     page_id = "839551515911276"
     try:
-        url = f"https://graph.facebook.com/v21.0/{page_id}/feed"
-        r = requests.post(url, data={'link': image_url.split('?')[0], 'message': caption, 'access_token': token}, timeout=40)
+        # Methode robuste : publication de photo par URL
+        url = f"https://graph.facebook.com/v21.0/{page_id}/photos"
+        r = requests.post(url, data={
+            'url': image_url.split('?')[0],
+            'caption': caption,
+            'access_token': token
+        }, timeout=40)
         res = r.json()
         return (True, "OK") if 'id' in res else (False, res)
     except Exception as e: return False, str(e)
@@ -80,7 +85,38 @@ def generate_ai_caption(image_url, galerie_nom):
     )
     return response.choices[0].message.content
 
-# --- WEBHOOK TELEGRAM ---
+# --- MENUS AVEC COMPTEUR DANS LES BOUTONS ---
+
+def send_galerie_menu(chat_id):
+    config = load_config()
+    token = os.environ.get('TELEGRAM_TOKEN')
+    keyboard = []
+    
+    conn = get_db_connection()
+    sent_urls = [row[0] for row in conn.execute('SELECT url FROM sent_photos').fetchall()]
+    conn.close()
+
+    for g in config.get('galeries', []):
+        url = f"{config.get('site_url')}/{g}"
+        try:
+            # Compter les photos dans la galerie
+            soup = BeautifulSoup(requests.get(url, timeout=10).text, 'html.parser')
+            images = [img.get('src') for img in soup.find_all('img') if img.get('src')]
+            valid_photos = [src if src.startswith('http') else f"{config.get('site_url')}{src}" for src in images]
+            
+            total = len(valid_photos)
+            publiees = len([u for u in valid_photos if u in sent_urls])
+            
+            # Texte du bouton : "Vienne 5/10"
+            btn_text = f"{g.capitalize()} {publiees}/{total}"
+            keyboard.append([{"text": btn_text, "callback_data": f"select_{g}"}])
+        except:
+            keyboard.append([{"text": g.capitalize(), "callback_data": f"select_{g}"}])
+
+    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
+                  json={"chat_id": chat_id, "text": "Quelle galerie voulez-vous explorer ?", "reply_markup": {"inline_keyboard": keyboard}})
+
+# --- WEBHOOK & SESSIONS ---
 
 @app.route("/telegram-webhook", methods=['POST'])
 def telegram_webhook():
@@ -113,15 +149,6 @@ def telegram_webhook():
             
     return jsonify({"status": "ok"})
 
-# --- FONCTIONS AUXILIAIRES ---
-
-def send_galerie_menu(chat_id):
-    config = load_config()
-    token = os.environ.get('TELEGRAM_TOKEN')
-    keyboard = [[{"text": g.capitalize(), "callback_data": f"select_{g}"}] for g in config.get('galeries', [])]
-    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                  json={"chat_id": chat_id, "text": "Quelle galerie ?", "reply_markup": {"inline_keyboard": keyboard}})
-
 def send_suggestion(chat_id, galerie_nom):
     token = os.environ.get('TELEGRAM_TOKEN')
     config = load_config()
@@ -135,20 +162,18 @@ def send_suggestion(chat_id, galerie_nom):
         sent = [row[0] for row in conn.execute('SELECT url FROM sent_photos').fetchall()]
         conn.close()
         
-        total = len(valid_photos)
-        valid_photos = [u for u in valid_photos if u not in sent]
+        available = [u for u in valid_photos if u not in sent]
         
-        if not valid_photos:
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": f"Galerie vide ({total}/{total})"})
+        if not available:
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "Galerie terminée."})
             return
         
-        img_url = random.choice(valid_photos)
+        img_url = random.choice(available)
         cap = generate_ai_caption(img_url, galerie_nom)
         save_session(chat_id, img_url, cap)
         
-        compteur = f"📸 Photo ({total - len(valid_photos) + 1}/{total})"
         requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", json={
-            "chat_id": chat_id, "photo": img_url, "caption": f"{compteur}\n\n{cap}", 
+            "chat_id": chat_id, "photo": img_url, "caption": cap, 
             "reply_markup": {"inline_keyboard": [[{"text": "🚀 Publier", "callback_data": "publish_all"}],
                                                 [{"text": "🔄 Autre", "callback_data": f"select_{galerie_nom}"}, {"text": "⬅️ Menu", "callback_data": "menu"}]]}
         })
@@ -173,7 +198,7 @@ def mark_photo_as_sent(url):
     conn.close()
 
 @app.route("/")
-def index(): return "David Ahmed Photography Agent - OK"
+def index(): return "David Ahmed Agent - OK"
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
