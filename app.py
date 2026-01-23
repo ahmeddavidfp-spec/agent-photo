@@ -53,32 +53,49 @@ def publish_to_threads(image_url, caption):
         return (True, "OK") if r_pub.status_code == 200 else (False, r_pub.text)
     except Exception as e: return False, str(e)
 
-# --- IA STYLE ÉPURÉ ---
-
 # --- IA STYLE AFFINÉ ---
-
 def generate_ai_caption(image_url, galerie_nom):
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     galerie_link = f"{config.get('site_url').rstrip('/')}/{galerie_nom}"
     
-    # Instructions précises pour le formatage David
-    instructions = f"""Tu es David Ahmed, photographe. Rédige une légende élégante. 
-    FORMAT :
-    - Ligne 1 : Un titre descriptif (Casse normale, PAS tout en majuscules).
-    - Ligne 2 : Une courte description poétique.
-    - Ligne 4 : La phrase "Série complète sur {galerie_link}"
-    - Ligne 6 : 5 hashtags pertinents.
+    # Instructions ultra-précises pour une analyse de haut niveau
+    instructions = f"""Tu es David Ahmed, photographe d'art. Analyse cette photo issue de ta série "{galerie_nom}".
     
-    STRICT : PAS de chiffres, PAS d'astérisques, PAS de gras. 
-    Saute bien une ligne avant la série complète et avant les hashtags."""
+    TON STYLE : Minimaliste, cinématographique et élégant.
+    
+    STRUCTURE DU MESSAGE :
+    1. Un titre évocateur (Casse normale, pas de majuscules partout).
+    2. Une description courte (2 phrases max) qui parle de la lumière, de l'émotion ou de la texture.
+    
+    3. (Saut de ligne)
+    4. La phrase : "Série complète sur {galerie_link}"
+    
+    5. (Saut de ligne)
+    6. Exactement 5 hashtags (#) : 2 sur le lieu ({galerie_nom}), 2 sur la technique photo, 1 sur ton univers.
+    
+    CONTRAINTES : 
+    - PAS d'astérisques, PAS de gras, PAS de chiffres.
+    - Utilise un ton professionnel mais inspirant."""
     
     response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": [{"type": "text", "text": instructions}, {"type": "image_url", "image_url": {"url": image_url}}]}],
-        max_tokens=400, temperature=0.7
+        model="gpt-4o", # Utilisation du modèle vision le plus puissant
+        messages=[{
+            "role": "user", 
+            "content": [
+                {"type": "text", "text": instructions}, 
+                {"type": "image_url", "image_url": {"url": image_url, "detail": "high"}} # Analyse en haute définition
+            ]
+        }],
+        max_tokens=400, 
+        temperature=0.7 # Un peu de créativité
     )
     return response.choices[0].message.content
+
+
+
+
+
 # --- MENU DEUX COLONNES AVEC COMPTEUR ---
 
 def send_galerie_menu(chat_id):
