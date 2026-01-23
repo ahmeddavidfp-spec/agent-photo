@@ -97,14 +97,23 @@ def generate_ai_caption(image_url, galerie_nom):
     manual_hashtag = config.get('custom_hashtag', '')
     extra_tag = f"+ {manual_hashtag}" if manual_hashtag else ""
     
+    # Nouvelles instructions basées sur tes critères SEO et Clarté
     instructions = f"""Tu es David Ahmed, photographe d'art. Analyse cette photo de {galerie_nom}.
-    STRUCTURE :
-    1. Titre évocateur (MAJUSCULE au début, PAS de gras, PAS de **).
-    2. Analyse technique (2-3 phrases sur lumière/composition, PAS de gras).
-    3. (Saut de ligne)
-    4. Série complète sur : {galerie_link}
-    5. (Saut de ligne)
-    6. 5 hashtags variés {extra_tag}."""
+    
+    STRATÉGIE DE RÉDACTION :
+    1. LE CROCHET (Hook) : La première phrase (le titre) doit être percutante et contenir un mot-clé principal lié à la photographie ou au lieu.
+    2. LA VARIÉTÉ : Utilise un vocabulaire riche et des synonymes. Ne répète pas les mêmes termes.
+    3. LA CLARTÉ : Évite les phrases banales. Rédige 2 à 3 phrases descriptives et analytiques qui apprennent quelque chose à l'algorithme et à l'audience.
+    
+    STRUCTURE STRICTE :
+    - Ligne 1 : Ton Crochet (Hook).
+    - Ligne 2 : Analyse technique et poétique claire (2-3 phrases).
+    - (Saut de ligne)
+    - Série complète sur : {galerie_link}
+    - (Saut de ligne)
+    - 5 hashtags variés {extra_tag}.
+    
+    STRICT : PAS de gras (**), PAS de symboles de titre (###), PAS de texte tout en majuscules."""
     
     response = client.chat.completions.create(
         model="gpt-4o",
@@ -112,14 +121,14 @@ def generate_ai_caption(image_url, galerie_nom):
         max_tokens=500, temperature=0.7
     )
     
-   # --- NETTOYAGE ET FORMATAGE DE SÉCURITÉ FINAL ---
+    # --- NETTOYAGE ET FORMATAGE DE SÉCURITÉ FINAL ---
     raw_caption = response.choices[0].message.content
     
     # 1. Retrait des symboles Markdown (gras, titres)
     clean_caption = raw_caption.replace("**", "").replace("__", "")
     clean_caption = clean_caption.replace("### ", "").replace("## ", "").replace("# ", "")
     
-    # 2. Forcer la casse normale sur la première ligne (le titre)
+    # 2. Forcer la casse normale sur la première ligne (le titre/hook)
     lines = clean_caption.split('\n')
     if lines:
         # Nettoie les espaces et force : 1ère lettre Majuscule, le reste en minuscules
