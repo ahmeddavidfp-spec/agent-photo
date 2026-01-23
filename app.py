@@ -59,39 +59,29 @@ def generate_ai_caption(image_url, galerie_nom):
     config = load_config()
     galerie_link = f"{config.get('site_url').rstrip('/')}/{galerie_nom}"
     
-    # Instructions ultra-précises pour une analyse de haut niveau
-    instructions = f"""Tu es David Ahmed, photographe d'art. Analyse cette photo issue de ta série "{galerie_nom}".
+    # Récupération de ton hashtag manuel depuis la config (ex: #DavidAhmedPhoto)
+    manual_hashtag = config.get('custom_hashtag', '')
     
-    TON STYLE : Minimaliste, cinématographique et élégant.
+    instructions = f"""Tu es David Ahmed, photographe de rue. Analyse cette photo.
     
     STRUCTURE DU MESSAGE :
-    1. Un titre évocateur (Casse normale, pas de majuscules partout).
-    2. Une description courte (2 phrases max) qui parle de la lumière, de l'émotion ou de la texture.
+    1. Un titre évocateur (Commence par une MAJUSCULE, puis minuscules).
+    2. Une description courte mais pas nianian.
     
     3. (Saut de ligne)
-    4. La phrase : "Série complète sur {galerie_link}"
+    4. Série complète sur : {galerie_link}
     
     5. (Saut de ligne)
-    6. Exactement 5 hashtags (#) : 2 sur le lieu ({galerie_nom}), 2 sur la technique photo, 1 sur ton univers.
+    6. Exactement 5 hashtags (#) variés + {manual_hashtag}.
     
-    CONTRAINTES : 
-    - PAS d'astérisques, PAS de gras, PAS de chiffres.
-    - Utilise un ton professionnel mais inspirant."""
+    STRICT : PAS d'astérisques, PAS de gras, PAS de chiffres."""
     
     response = client.chat.completions.create(
-        model="gpt-4o", # Utilisation du modèle vision le plus puissant
-        messages=[{
-            "role": "user", 
-            "content": [
-                {"type": "text", "text": instructions}, 
-                {"type": "image_url", "image_url": {"url": image_url, "detail": "high"}} # Analyse en haute définition
-            ]
-        }],
-        max_tokens=400, 
-        temperature=0.7 # Un peu de créativité
+        model="gpt-4o",
+        messages=[{"role": "user", "content": [{"type": "text", "text": instructions}, {"type": "image_url", "image_url": {"url": image_url, "detail": "high"}}]}],
+        max_tokens=400, temperature=0.7
     )
     return response.choices[0].message.content
-
 
 
 
