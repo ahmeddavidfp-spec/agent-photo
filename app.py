@@ -55,13 +55,23 @@ def publish_to_threads(image_url, caption):
 
 # --- IA STYLE ÉPURÉ ---
 
+# --- IA STYLE AFFINÉ ---
+
 def generate_ai_caption(image_url, galerie_nom):
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     galerie_link = f"{config.get('site_url').rstrip('/')}/{galerie_nom}"
+    
+    # Instructions précises pour le formatage David
     instructions = f"""Tu es David Ahmed, photographe. Rédige une légende élégante. 
-    STRICT : PAS de chiffres, PAS d'astérisques, PAS de gras. Titre en MAJUSCULES ligne 1. 
-    Description poétique courte. Termine par : Série complète sur {galerie_link} + 5 hashtags."""
+    FORMAT :
+    - Ligne 1 : Un titre descriptif (Casse normale, PAS tout en majuscules).
+    - Ligne 2 : Une courte description poétique.
+    - Ligne 4 : La phrase "Série complète sur {galerie_link}"
+    - Ligne 6 : 5 hashtags pertinents.
+    
+    STRICT : PAS de chiffres, PAS d'astérisques, PAS de gras. 
+    Saute bien une ligne avant la série complète et avant les hashtags."""
     
     response = client.chat.completions.create(
         model="gpt-4o",
@@ -69,7 +79,6 @@ def generate_ai_caption(image_url, galerie_nom):
         max_tokens=400, temperature=0.7
     )
     return response.choices[0].message.content
-
 # --- MENU DEUX COLONNES AVEC COMPTEUR ---
 
 def send_galerie_menu(chat_id):
