@@ -99,8 +99,8 @@ def generate_ai_caption(image_url, galerie_nom):
     
     instructions = f"""Tu es David Ahmed, photographe d'art. Analyse cette photo de {galerie_nom}.
     STRUCTURE :
-    1. Titre évocateur (MAJUSCULE au début).
-    2. Analyse technique (2-3 phrases sur lumière/composition).
+    1. Titre évocateur (MAJUSCULE au début, PAS de gras, PAS de **).
+    2. Analyse technique (2-3 phrases sur lumière/composition, PAS de gras).
     3. (Saut de ligne)
     4. Série complète sur : {galerie_link}
     5. (Saut de ligne)
@@ -111,7 +111,13 @@ def generate_ai_caption(image_url, galerie_nom):
         messages=[{"role": "user", "content": [{"type": "text", "text": instructions}, {"type": "image_url", "image_url": {"url": image_url, "detail": "high"}}]}],
         max_tokens=500, temperature=0.7
     )
-    return response.choices[0].message.content
+    
+    raw_caption = response.choices[0].message.content
+    
+    # --- NETTOYAGE DE SÉCURITÉ ---
+    # On retire les doubles astérisques que l'IA ajoute parfois pour le gras
+    clean_caption = raw_caption.replace("**", "").replace("__", "")
+    return clean_caption
 
 # --- STATUT DES TOKENS ---
 def get_token_status():
