@@ -53,34 +53,36 @@ def publish_to_threads(image_url, caption):
         return (True, "OK") if r_pub.status_code == 200 else (False, r_pub.text)
     except Exception as e: return False, str(e)
 
-# --- IA STYLE AFFINÉ ---
+# --- IA ANALYSE EXPERT (Vision + Théorie de l'Art) ---
+
 def generate_ai_caption(image_url, galerie_nom):
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     galerie_link = f"{config.get('site_url').rstrip('/')}/{galerie_nom}"
-    
-    # On récupère le hashtag, mais on gère le cas où il est vide ou absent
     manual_hashtag = config.get('custom_hashtag', '')
-    # Si le hashtag existe, on prépare le texte, sinon on laisse vide
     extra_tag = f"+ {manual_hashtag}" if manual_hashtag else ""
     
-    instructions = f"""Tu es David Ahmed, photographe de rue. Analyse cette photo.
+    instructions = f"""Tu es David Ahmed, photographe d'art reconnu pour son style minimaliste et cinématographique. 
+    Analyse cette photo de la série {galerie_nom} avec un regard d'expert.
+    
     STRUCTURE DU MESSAGE :
-    1. Un titre évocateur (Commence par une MAJUSCULE, puis minuscules).
-    2. Une description courte mais pas nianian.
+    1. Un titre fort qui capture l'essence de la scène (Commence par une MAJUSCULE).
+    2. Une analyse technique et poétique (2-3 phrases max sur la lumière, la composition comme la règle des tiers, ou l'émotion).
+    
     3. (Saut de ligne)
     4. Série complète sur : {galerie_link}
+    
     5. (Saut de ligne)
-    6. Exactement 5 hashtags (#) variés {extra_tag}.
+    6. Exactement 5 hashtags (#) techniques et géographiques variés {extra_tag}.
+    
     STRICT : PAS d'astérisques, PAS de gras, PAS de chiffres."""
     
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": [{"type": "text", "text": instructions}, {"type": "image_url", "image_url": {"url": image_url, "detail": "high"}}]}],
-        max_tokens=400, temperature=0.7
+        max_tokens=500, temperature=0.7
     )
     return response.choices[0].message.content
-
 
 # --- STATUT DES TOKENS ---
 def get_token_status():
@@ -137,18 +139,24 @@ def telegram_webhook():
         if session and session[1] == "WAITING_FOR_MANUAL":
             save_session(chat_id, session[0], text)
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={
-                "chat_id": chat_id, 
-                "text": f"✅ Légende reçue !\n\nQue voulez-vous faire ?", 
-                "reply_markup": {"inline_keyboard": [[{"text": "🚀 Publier maintenant", "callback_data": "publish_all"}], [{"text": "📅 Programmer", "callback_data": "schedule_post"}], [{"text": "⬅️ Menu", "callback_data": "menu"}]]}
+                "chat_id": chat_id, "text": f"✅ Légende reçue !\n\nQue voulez-vous faire ?", 
+                "reply_markup": {"inline_keyboard": [[{"text": "🚀 Publier", "callback_data": "publish_all"}], [{"text": "📍 Lieu", "callback_data": "add_location"}, {"text": "📅 Programmer", "callback_data": "schedule_post"}]]}
+            })
+
+        # Gestion de la LOCALISATION
+        elif session and session[1] == "WAITING_FOR_LOCATION":
+            img_url, old_cap = session[0], session[1]
+            new_cap = f"📍 {text}\n\n{old_cap}"
+            save_session(chat_id, img_url, new_cap)
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={
+                "chat_id": chat_id, "text": f"✅ Lieu ajouté : {text}",
+                "reply_markup": {"inline_keyboard": [[{"text": "🚀 Publier", "callback_data": "publish_all"}], [{"text": "📅 Programmer", "callback_data": "schedule_post"}]]}
             })
             
-        # Gestion de l'HEURE de programmation
+        # Gestion de l'HEURE
         elif session and session[1] == "WAITING_FOR_TIME":
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={
-                "chat_id": chat_id, 
-                "text": f"✅ C'est noté David ! Cette photo sera publiée aujourd'hui à {text}.\n(Note: La file d'attente est active dans ton gestionnaire de tâches)."
-            })
-            save_session(chat_id, session[0], "POST_SCHEDULED") # Reset état
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": f"✅ C'est noté David ! Programmé pour {text}."})
+            save_session(chat_id, session[0], "POST_SCHEDULED")
             
         else: send_galerie_menu(chat_id)
 
@@ -162,19 +170,23 @@ def telegram_webhook():
         
         elif action == "manual_edit" and session:
             save_session(chat_id, session[0], "WAITING_FOR_MANUAL")
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✍️ Envoie ton texte (Titre, description et #) en un seul message."})
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✍️ Envoie ton texte complet en un seul message."})
+
+        elif action == "add_location" and session:
+            save_session(chat_id, session[0], "WAITING_FOR_LOCATION")
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "📍 Quel est le lieu ? (ex: Ljubljana, Slovenia)"})
             
         elif action == "schedule_post" and session:
             save_session(chat_id, session[0], "WAITING_FOR_TIME")
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "📅 À quelle heure souhaites-tu publier ?\n(Format ex: 18:30)"})
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "📅 Heure de publication ? (ex: 18:30)"})
             
         elif action == "publish_all" and session:
             url, cap = session
             mark_photo_as_sent(url)
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ Publication double lancée..."})
-            ok_ig, _ = publish_to_instagram(url, cap)
-            ok_th, _ = publish_to_threads(url, cap)
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": f"📸 Insta : {'✅' if ok_ig else '❌'}\n🧵 Threads : {'✅' if ok_th else '❌'}"})
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ Publication Expert lancée..."})
+            publish_to_instagram(url, cap)
+            publish_to_threads(url, cap)
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✅ Posté sur Insta & Threads !"})
             
     return jsonify({"status": "ok"})
 
@@ -190,16 +202,14 @@ def send_suggestion(chat_id, galerie_nom):
         if not avail: requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "Galerie terminée."}); return
         
         img_url = random.choice(avail)
-        cap = generate_ai_caption(img_url, galerie_nom)
+        cap = generate_ai_caption(img_url, galerie_nom) # Utilise la version EXPERT
         save_session(chat_id, img_url, cap)
         
         requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", json={
-            "chat_id": chat_id, 
-            "photo": img_url, 
-            "caption": cap, 
+            "chat_id": chat_id, "photo": img_url, "caption": cap, 
             "reply_markup": {"inline_keyboard": [
-                [{"text": "🚀 Publier maintenant", "callback_data": "publish_all"}],
-                [{"text": "📅 Programmer", "callback_data": "schedule_post"}],
+                [{"text": "🚀 Publier", "callback_data": "publish_all"}],
+                [{"text": "📍 Lieu", "callback_data": "add_location"}, {"text": "📅 Programmer", "callback_data": "schedule_post"}],
                 [{"text": "✍️ Manuel", "callback_data": "manual_edit"}, {"text": "🔄 Autre", "callback_data": f"select_{galerie_nom}"}],
                 [{"text": "⬅️ Menu", "callback_data": "menu"}]
             ]}
