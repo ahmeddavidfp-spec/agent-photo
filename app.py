@@ -22,6 +22,41 @@ def load_config():
         with open("config.yaml", "r") as f: return yaml.safe_load(f)
     except: return {"site_url": "https://www.davidahmed.me", "galeries": ["barcelone"]}
 
+# --- STATISTIQUES DE PERFORMANCE (INSIGHTS) ---
+
+def get_latest_insights():
+    token = os.environ.get('IG_ACCESS_TOKEN')
+    ig_id = "17841453263147553"
+    try:
+        # 1. Récupérer les 3 derniers médias
+        r = requests.get(f"https://graph.facebook.com/v21.0/{ig_id}/media", 
+                         params={"access_token": token, "limit": 3}).json()
+        media_data = r.get('data', [])
+        if not media_data: return "Aucune publication trouvée."
+
+        summary = "📈 **TES PERFORMANCES INSTAGRAM**\n\n"
+        for m in media_data:
+            m_id = m['id']
+            # 2. Récupérer les metrics
+            metrics = "reach,engagement,saved"
+            res = requests.get(f"https://graph.facebook.com/v21.0/{m_id}/insights", 
+                               params={"metric": metrics, "access_token": token}).json()
+            
+            # 3. Récupérer les infos de base (Lien et date)
+            m_info = requests.get(f"https://graph.facebook.com/v21.0/{m_id}", 
+                                  params={"fields": "permalink,timestamp", "access_token": token}).json()
+            
+            date = datetime.datetime.strptime(m_info['timestamp'], "%Y-%m-%dT%H:%M:%S%z").strftime("%d/%m")
+            stats = {item['name']: item['values'][0]['value'] for item in res.get('data', [])}
+            
+            summary += f"📅 Post du {date} :\n"
+            summary += f"👥 Portée : {stats.get('reach', 0)} | ❤️ Engagement : {stats.get('engagement', 0)}\n"
+            summary += f"💾 Enregistrements : {stats.get('saved', 0)}\n"
+            summary += f"🔗 {m_info['permalink']}\n\n"
+        return summary
+    except Exception as e:
+        return f"⚠️ Erreur lors de la récupération des stats : {str(e)}"
+
 # --- PUBLICATIONS ---
 
 def publish_to_instagram(image_url, caption):
@@ -53,7 +88,7 @@ def publish_to_threads(image_url, caption):
         return (True, "OK") if r_pub.status_code == 200 else (False, r_pub.text)
     except Exception as e: return False, str(e)
 
-# --- IA ANALYSE EXPERT (Vision + Théorie de l'Art) ---
+# --- IA ANALYSE EXPERT ---
 
 def generate_ai_caption(image_url, galerie_nom):
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
@@ -62,20 +97,14 @@ def generate_ai_caption(image_url, galerie_nom):
     manual_hashtag = config.get('custom_hashtag', '')
     extra_tag = f"+ {manual_hashtag}" if manual_hashtag else ""
     
-    instructions = f"""Tu es David Ahmed, photographe d'art reconnu pour son style minimaliste et cinématographique. 
-    Analyse cette photo de la série {galerie_nom} avec un regard d'expert.
-    
-    STRUCTURE DU MESSAGE :
-    1. Un titre fort qui capture l'essence de la scène (Commence par une MAJUSCULE).
-    2. Une analyse technique et poétique (2-3 phrases max sur la lumière, la composition comme la règle des tiers, ou l'émotion).
-    
+    instructions = f"""Tu es David Ahmed, photographe d'art. Analyse cette photo de {galerie_nom}.
+    STRUCTURE :
+    1. Titre évocateur (MAJUSCULE au début).
+    2. Analyse technique (2-3 phrases sur lumière/composition).
     3. (Saut de ligne)
     4. Série complète sur : {galerie_link}
-    
     5. (Saut de ligne)
-    6. Exactement 5 hashtags (#) techniques et géographiques variés {extra_tag}.
-    
-    STRICT : PAS d'astérisques, PAS de gras, PAS de chiffres."""
+    6. 5 hashtags variés {extra_tag}."""
     
     response = client.chat.completions.create(
         model="gpt-4o",
@@ -111,6 +140,10 @@ def send_galerie_menu(chat_id):
     conn = get_db_connection()
     sent_urls = [row[0] for row in conn.execute('SELECT url FROM sent_photos').fetchall()]
     conn.close()
+    
+    # Bouton STATS en haut
+    keyboard = [[{"text": "📈 Voir les Statistiques", "callback_data": "view_stats"}]]
+    
     buttons = []
     for g in config.get('galeries', []):
         url = f"{config.get('site_url')}/{g}"
@@ -120,8 +153,12 @@ def send_galerie_menu(chat_id):
             valid = [s if s.startswith('http') else f"{config.get('site_url')}{s}" for s in images]
             buttons.append({"text": f"{g.capitalize()} {len([u for u in valid if u in sent_urls])}/{len(valid)}", "callback_data": f"select_{g}"})
         except: buttons.append({"text": g.capitalize(), "callback_data": f"select_{g}"})
-    keyboard = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
-    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": f"{status_table}\n---\nQuelle galerie ?", "reply_markup": {"inline_keyboard": keyboard}})
+    
+    for i in range(0, len(buttons), 2):
+        keyboard.append(buttons[i:i + 2])
+        
+    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
+                  json={"chat_id": chat_id, "text": f"{status_table}\n---\nQuelle galerie ?", "reply_markup": {"inline_keyboard": keyboard}})
 
 # --- WEBHOOK ---
 @app.route("/telegram-webhook", methods=['POST'])
@@ -134,30 +171,16 @@ def telegram_webhook():
         chat_id = data["message"]["chat"]["id"]
         text = data["message"]["text"]
         session = get_session(chat_id)
-        
-        # Gestion du mode MANUEL
         if session and session[1] == "WAITING_FOR_MANUAL":
             save_session(chat_id, session[0], text)
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={
-                "chat_id": chat_id, "text": f"✅ Légende reçue !\n\nQue voulez-vous faire ?", 
-                "reply_markup": {"inline_keyboard": [[{"text": "🚀 Publier", "callback_data": "publish_all"}], [{"text": "📍 Lieu", "callback_data": "add_location"}, {"text": "📅 Programmer", "callback_data": "schedule_post"}]]}
-            })
-
-        # Gestion de la LOCALISATION
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": f"✅ Légende reçue !", "reply_markup": {"inline_keyboard": [[{"text": "🚀 Publier", "callback_data": "publish_all"}], [{"text": "📍 Lieu", "callback_data": "add_location"}, {"text": "📅 Programmer", "callback_data": "schedule_post"}]]}})
         elif session and session[1] == "WAITING_FOR_LOCATION":
-            img_url, old_cap = session[0], session[1]
-            new_cap = f"📍 {text}\n\n{old_cap}"
-            save_session(chat_id, img_url, new_cap)
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={
-                "chat_id": chat_id, "text": f"✅ Lieu ajouté : {text}",
-                "reply_markup": {"inline_keyboard": [[{"text": "🚀 Publier", "callback_data": "publish_all"}], [{"text": "📅 Programmer", "callback_data": "schedule_post"}]]}
-            })
-            
-        # Gestion de l'HEURE
+            new_cap = f"📍 {text}\n\n{session[1]}"
+            save_session(chat_id, session[0], new_cap)
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": f"✅ Lieu ajouté.", "reply_markup": {"inline_keyboard": [[{"text": "🚀 Publier", "callback_data": "publish_all"}]]}})
         elif session and session[1] == "WAITING_FOR_TIME":
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": f"✅ C'est noté David ! Programmé pour {text}."})
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": f"✅ Programmé pour {text}."})
             save_session(chat_id, session[0], "POST_SCHEDULED")
-            
         else: send_galerie_menu(chat_id)
 
     elif "callback_query" in data:
@@ -165,25 +188,23 @@ def telegram_webhook():
         action = data["callback_query"]["data"]
         session = get_session(chat_id)
         
-        if action == "menu": send_galerie_menu(chat_id)
+        if action == "view_stats":
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ Analyse des données Instagram..."})
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": get_latest_insights(), "disable_web_page_preview": True})
+        elif action == "menu": send_galerie_menu(chat_id)
         elif action.startswith("select_"): send_suggestion(chat_id, action.split("_")[1])
-        
         elif action == "manual_edit" and session:
             save_session(chat_id, session[0], "WAITING_FOR_MANUAL")
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✍️ Envoie ton texte complet en un seul message."})
-
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✍️ Envoie ton texte complet."})
         elif action == "add_location" and session:
             save_session(chat_id, session[0], "WAITING_FOR_LOCATION")
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "📍 Quel est le lieu ? (ex: Ljubljana, Slovenia)"})
-            
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "📍 Quel lieu ?"})
         elif action == "schedule_post" and session:
             save_session(chat_id, session[0], "WAITING_FOR_TIME")
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "📅 Heure de publication ? (ex: 18:30)"})
-            
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "📅 Quelle heure ?"})
         elif action == "publish_all" and session:
             url, cap = session
             mark_photo_as_sent(url)
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ Publication Expert lancée..."})
             publish_to_instagram(url, cap)
             publish_to_threads(url, cap)
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✅ Posté sur Insta & Threads !"})
@@ -200,21 +221,9 @@ def send_suggestion(chat_id, galerie_nom):
         conn = get_db_connection(); sent = [row[0] for row in conn.execute('SELECT url FROM sent_photos').fetchall()]; conn.close()
         avail = [u for u in valid if u not in sent]
         if not avail: requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "Galerie terminée."}); return
-        
-        img_url = random.choice(avail)
-        cap = generate_ai_caption(img_url, galerie_nom) # Utilise la version EXPERT
-        save_session(chat_id, img_url, cap)
-        
-        requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", json={
-            "chat_id": chat_id, "photo": img_url, "caption": cap, 
-            "reply_markup": {"inline_keyboard": [
-                [{"text": "🚀 Publier", "callback_data": "publish_all"}],
-                [{"text": "📍 Lieu", "callback_data": "add_location"}, {"text": "📅 Programmer", "callback_data": "schedule_post"}],
-                [{"text": "✍️ Manuel", "callback_data": "manual_edit"}, {"text": "🔄 Autre", "callback_data": f"select_{galerie_nom}"}],
-                [{"text": "⬅️ Menu", "callback_data": "menu"}]
-            ]}
-        })
-    except Exception as e: requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": f"Erreur: {e}"})
+        img_url = random.choice(avail); cap = generate_ai_caption(img_url, galerie_nom); save_session(chat_id, img_url, cap)
+        requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", json={"chat_id": chat_id, "photo": img_url, "caption": cap, "reply_markup": {"inline_keyboard": [[{"text": "🚀 Publier", "callback_data": "publish_all"}],[{"text": "📍 Lieu", "callback_data": "add_location"}, {"text": "📅 Programmer", "callback_data": "schedule_post"}],[{"text": "✍️ Manuel", "callback_data": "manual_edit"}, {"text": "🔄 Autre", "callback_data": f"select_{galerie_nom}"}],[{"text": "⬅️ Menu", "callback_data": "menu"}]]}})
+    except: pass
 
 def get_session(chat_id):
     conn = get_db_connection(); res = conn.execute('SELECT last_url, last_caption FROM current_session WHERE chat_id = ?', (chat_id,)).fetchone(); conn.close()
