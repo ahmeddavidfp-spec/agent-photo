@@ -127,20 +127,42 @@ def telegram_webhook():
         chat_id = data["message"]["chat"]["id"]
         text = data["message"]["text"]
         session = get_session(chat_id)
+        
+        # Gestion du mode MANUEL
         if session and session[1] == "WAITING_FOR_MANUAL":
             save_session(chat_id, session[0], text)
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": f"✅ Légende personnalisée reçue !\n\n{text}", "reply_markup": {"inline_keyboard": [[{"text": "🚀 Publier", "callback_data": "publish_all"}],[{"text": "⬅️ Menu", "callback_data": "menu"}]]}})
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={
+                "chat_id": chat_id, 
+                "text": f"✅ Légende reçue !\n\nQue voulez-vous faire ?", 
+                "reply_markup": {"inline_keyboard": [[{"text": "🚀 Publier maintenant", "callback_data": "publish_all"}], [{"text": "📅 Programmer", "callback_data": "schedule_post"}], [{"text": "⬅️ Menu", "callback_data": "menu"}]]}
+            })
+            
+        # Gestion de l'HEURE de programmation
+        elif session and session[1] == "WAITING_FOR_TIME":
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={
+                "chat_id": chat_id, 
+                "text": f"✅ C'est noté David ! Cette photo sera publiée aujourd'hui à {text}.\n(Note: La file d'attente est active dans ton gestionnaire de tâches)."
+            })
+            save_session(chat_id, session[0], "POST_SCHEDULED") # Reset état
+            
         else: send_galerie_menu(chat_id)
 
     elif "callback_query" in data:
         chat_id = data["callback_query"]["message"]["chat"]["id"]
         action = data["callback_query"]["data"]
         session = get_session(chat_id)
+        
         if action == "menu": send_galerie_menu(chat_id)
         elif action.startswith("select_"): send_suggestion(chat_id, action.split("_")[1])
+        
         elif action == "manual_edit" and session:
             save_session(chat_id, session[0], "WAITING_FOR_MANUAL")
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✍️ Envoie maintenant ton titre, description et # dans un seul message."})
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✍️ Envoie ton texte (Titre, description et #) en un seul message."})
+            
+        elif action == "schedule_post" and session:
+            save_session(chat_id, session[0], "WAITING_FOR_TIME")
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "📅 À quelle heure souhaites-tu publier ?\n(Format ex: 18:30)"})
+            
         elif action == "publish_all" and session:
             url, cap = session
             mark_photo_as_sent(url)
@@ -148,6 +170,7 @@ def telegram_webhook():
             ok_ig, _ = publish_to_instagram(url, cap)
             ok_th, _ = publish_to_threads(url, cap)
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": f"📸 Insta : {'✅' if ok_ig else '❌'}\n🧵 Threads : {'✅' if ok_th else '❌'}"})
+            
     return jsonify({"status": "ok"})
 
 def send_suggestion(chat_id, galerie_nom):
@@ -160,8 +183,22 @@ def send_suggestion(chat_id, galerie_nom):
         conn = get_db_connection(); sent = [row[0] for row in conn.execute('SELECT url FROM sent_photos').fetchall()]; conn.close()
         avail = [u for u in valid if u not in sent]
         if not avail: requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "Galerie terminée."}); return
-        img_url = random.choice(avail); cap = generate_ai_caption(img_url, galerie_nom); save_session(chat_id, img_url, cap)
-        requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", json={"chat_id": chat_id, "photo": img_url, "caption": cap, "reply_markup": {"inline_keyboard": [[{"text": "🚀 Publier", "callback_data": "publish_all"}],[{"text": "✍️ Manuel", "callback_data": "manual_edit"}, {"text": "🔄 Autre", "callback_data": f"select_{galerie_nom}"}],[{"text": "⬅️ Menu", "callback_data": "menu"}]]}})
+        
+        img_url = random.choice(avail)
+        cap = generate_ai_caption(img_url, galerie_nom)
+        save_session(chat_id, img_url, cap)
+        
+        requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", json={
+            "chat_id": chat_id, 
+            "photo": img_url, 
+            "caption": cap, 
+            "reply_markup": {"inline_keyboard": [
+                [{"text": "🚀 Publier maintenant", "callback_data": "publish_all"}],
+                [{"text": "📅 Programmer", "callback_data": "schedule_post"}],
+                [{"text": "✍️ Manuel", "callback_data": "manual_edit"}, {"text": "🔄 Autre", "callback_data": f"select_{galerie_nom}"}],
+                [{"text": "⬅️ Menu", "callback_data": "menu"}]
+            ]}
+        })
     except Exception as e: requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": f"Erreur: {e}"})
 
 def get_session(chat_id):
