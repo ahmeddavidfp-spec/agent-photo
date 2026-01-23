@@ -112,17 +112,20 @@ def generate_ai_caption(image_url, galerie_nom):
         max_tokens=500, temperature=0.7
     )
     
-    # --- NETTOYAGE DE SÉCURITÉ RENFORCÉ ---
+   # --- NETTOYAGE ET FORMATAGE DE SÉCURITÉ FINAL ---
     raw_caption = response.choices[0].message.content
     
-    # Nettoyage des symboles de formatage Markdown résiduels
-    clean_caption = raw_caption.replace("**", "")  # Retire le gras
-    clean_caption = clean_caption.replace("__", "") # Retire l'italique alternatif
-    clean_caption = clean_caption.replace("### ", "") # Retire les titres de niveau 3
-    clean_caption = clean_caption.replace("## ", "")  # Retire les titres de niveau 2
-    clean_caption = clean_caption.replace("# ", "")   # Retire les titres de niveau 1 (garde les hashtags sans espace)
+    # 1. Retrait des symboles Markdown (gras, titres)
+    clean_caption = raw_caption.replace("**", "").replace("__", "")
+    clean_caption = clean_caption.replace("### ", "").replace("## ", "").replace("# ", "")
     
-    return clean_caption.strip()
+    # 2. Forcer la casse normale sur la première ligne (le titre)
+    lines = clean_caption.split('\n')
+    if lines:
+        # Nettoie les espaces et force : 1ère lettre Majuscule, le reste en minuscules
+        lines[0] = lines[0].strip().capitalize()
+    
+    return "\n".join(lines).strip()
 
 
 # --- STATUT DES TOKENS ---
