@@ -22,22 +22,7 @@ def load_config():
         with open("config.yaml", "r") as f: return yaml.safe_load(f)
     except: return {"site_url": "https://www.davidahmed.me", "galeries": ["barcelone"]}
 
-# --- PUBLICATIONS ---
-
-def publish_to_facebook(image_url, caption):
-    token = os.environ.get('FB_PAGE_ACCESS_TOKEN')
-    page_id = "839551515911276"
-    try:
-        # Methode robuste : publication de photo par URL
-        url = f"https://graph.facebook.com/v21.0/{page_id}/photos"
-        r = requests.post(url, data={
-            'url': image_url.split('?')[0],
-            'caption': caption,
-            'access_token': token
-        }, timeout=40)
-        res = r.json()
-        return (True, "OK") if 'id' in res else (False, res)
-    except Exception as e: return False, str(e)
+# --- PUBLICATIONS (SANS FACEBOOK) ---
 
 def publish_to_instagram(image_url, caption):
     token = os.environ.get('IG_ACCESS_TOKEN')
@@ -85,12 +70,12 @@ def generate_ai_caption(image_url, galerie_nom):
     )
     return response.choices[0].message.content
 
-# --- MENUS AVEC COMPTEUR DANS LES BOUTONS ---
+# --- MENU DEUX COLONNES AVEC COMPTEUR ---
 
 def send_galerie_menu(chat_id):
     config = load_config()
     token = os.environ.get('TELEGRAM_TOKEN')
-    keyboard = []
+    buttons = []
     
     conn = get_db_connection()
     sent_urls = [row[0] for row in conn.execute('SELECT url FROM sent_photos').fetchall()]
@@ -99,19 +84,19 @@ def send_galerie_menu(chat_id):
     for g in config.get('galeries', []):
         url = f"{config.get('site_url')}/{g}"
         try:
-            # Compter les photos dans la galerie
             soup = BeautifulSoup(requests.get(url, timeout=10).text, 'html.parser')
             images = [img.get('src') for img in soup.find_all('img') if img.get('src')]
             valid_photos = [src if src.startswith('http') else f"{config.get('site_url')}{src}" for src in images]
             
             total = len(valid_photos)
             publiees = len([u for u in valid_photos if u in sent_urls])
-            
-            # Texte du bouton : "Vienne 5/10"
             btn_text = f"{g.capitalize()} {publiees}/{total}"
-            keyboard.append([{"text": btn_text, "callback_data": f"select_{g}"}])
+            buttons.append({"text": btn_text, "callback_data": f"select_{g}"})
         except:
-            keyboard.append([{"text": g.capitalize(), "callback_data": f"select_{g}"}])
+            buttons.append({"text": g.capitalize(), "callback_data": f"select_{g}"})
+
+    # Organisation en 2 colonnes
+    keyboard = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
 
     requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
                   json={"chat_id": chat_id, "text": "Quelle galerie voulez-vous explorer ?", "reply_markup": {"inline_keyboard": keyboard}})
@@ -138,13 +123,12 @@ def telegram_webhook():
         elif action == "publish_all" and session:
             url, cap = session
             mark_photo_as_sent(url)
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ Publication triple lancée..."})
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ Publication double lancée (Insta + Threads)..."})
             
             ok_ig, err_ig = publish_to_instagram(url, cap)
             ok_th, err_th = publish_to_threads(url, cap)
-            ok_fb, err_fb = publish_to_facebook(url, cap)
             
-            msg = f"📸 Instagram : {'✅' if ok_ig else '❌'}\n🧵 Threads : {'✅' if ok_th else '❌'}\n📘 Facebook : {'✅' if ok_fb else '❌'}"
+            msg = f"📸 Instagram : {'✅' if ok_ig else '❌'}\n🧵 Threads : {'✅' if ok_th else '❌'}"
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg})
             
     return jsonify({"status": "ok"})
@@ -161,7 +145,6 @@ def send_suggestion(chat_id, galerie_nom):
         conn = get_db_connection()
         sent = [row[0] for row in conn.execute('SELECT url FROM sent_photos').fetchall()]
         conn.close()
-        
         available = [u for u in valid_photos if u not in sent]
         
         if not available:
@@ -198,7 +181,7 @@ def mark_photo_as_sent(url):
     conn.close()
 
 @app.route("/")
-def index(): return "David Ahmed Agent - OK"
+def index(): return "David Ahmed Agent (IG/Threads) - OK"
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
