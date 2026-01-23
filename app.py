@@ -58,7 +58,11 @@ def generate_ai_caption(image_url, galerie_nom):
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     galerie_link = f"{config.get('site_url').rstrip('/')}/{galerie_nom}"
+    
+    # On récupère le hashtag, mais on gère le cas où il est vide ou absent
     manual_hashtag = config.get('custom_hashtag', '')
+    # Si le hashtag existe, on prépare le texte, sinon on laisse vide
+    extra_tag = f"+ {manual_hashtag}" if manual_hashtag else ""
     
     instructions = f"""Tu es David Ahmed, photographe de rue. Analyse cette photo.
     STRUCTURE DU MESSAGE :
@@ -67,7 +71,7 @@ def generate_ai_caption(image_url, galerie_nom):
     3. (Saut de ligne)
     4. Série complète sur : {galerie_link}
     5. (Saut de ligne)
-    6. Exactement 5 hashtags (#) variés + {manual_hashtag}.
+    6. Exactement 5 hashtags (#) variés {extra_tag}.
     STRICT : PAS d'astérisques, PAS de gras, PAS de chiffres."""
     
     response = client.chat.completions.create(
@@ -76,6 +80,7 @@ def generate_ai_caption(image_url, galerie_nom):
         max_tokens=400, temperature=0.7
     )
     return response.choices[0].message.content
+
 
 # --- STATUT DES TOKENS ---
 def get_token_status():
