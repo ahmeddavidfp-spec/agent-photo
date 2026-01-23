@@ -112,12 +112,18 @@ def generate_ai_caption(image_url, galerie_nom):
         max_tokens=500, temperature=0.7
     )
     
+    # --- NETTOYAGE DE SÉCURITÉ RENFORCÉ ---
     raw_caption = response.choices[0].message.content
     
-    # --- NETTOYAGE DE SÉCURITÉ ---
-    # On retire les doubles astérisques que l'IA ajoute parfois pour le gras
-    clean_caption = raw_caption.replace("**", "").replace("__", "")
-    return clean_caption
+    # Nettoyage des symboles de formatage Markdown résiduels
+    clean_caption = raw_caption.replace("**", "")  # Retire le gras
+    clean_caption = clean_caption.replace("__", "") # Retire l'italique alternatif
+    clean_caption = clean_caption.replace("### ", "") # Retire les titres de niveau 3
+    clean_caption = clean_caption.replace("## ", "")  # Retire les titres de niveau 2
+    clean_caption = clean_caption.replace("# ", "")   # Retire les titres de niveau 1 (garde les hashtags sans espace)
+    
+    return clean_caption.strip()
+
 
 # --- STATUT DES TOKENS ---
 def get_token_status():
