@@ -88,34 +88,76 @@ def generate_ai_caption(image_url, galerie_nom):
 
 # --- MENU DEUX COLONNES AVEC COMPTEUR ---
 
+import datetime
+
+# --- FONCTION DE VÉRIFICATION DES TOKENS ---
+
+def get_token_status():
+    status_msg = "📊 **ÉTAT DES ACCÈS**\n"
+    tokens = {
+        "IG/FB": os.environ.get('IG_ACCESS_TOKEN'),
+        "Threads": os.environ.get('THREADS_ACCESS_TOKEN')
+    }
+    
+    for name, token in tokens.items():
+        if not token:
+            status_msg += f"❌ {name} : Manquant\n"
+            continue
+        try:
+            # Appel à l'API Meta pour vérifier la validité
+            endpoint = "graph.facebook.com" if name == "IG/FB" else "graph.threads.net"
+            r = requests.get(f"https://{endpoint}/debug_token", params={
+                "input_token": token,
+                "access_token": token # On utilise le token lui-même pour s'auto-interroger
+            }, timeout=5).json()
+            
+            data = r.get('data', {})
+            expires_at = data.get('data_access_expires_at') or data.get('expires_at')
+            
+            if expires_at == 0 or not expires_at:
+                status_msg += f"✅ {name} : Permanent\n"
+            else:
+                days_left = (datetime.datetime.fromtimestamp(expires_at) - datetime.datetime.now()).days
+                status_msg += f"⏳ {name} : {days_left} jours restants\n"
+        except:
+            status_msg += f"⚠️ {name} : Vérification impossible\n"
+    
+    return status_msg
+
+# --- MENU MIS À JOUR ---
+
 def send_galerie_menu(chat_id):
     config = load_config()
     token = os.environ.get('TELEGRAM_TOKEN')
-    buttons = []
+    
+    # Récupération du tableau de statut
+    status_table = get_token_status()
     
     conn = get_db_connection()
     sent_urls = [row[0] for row in conn.execute('SELECT url FROM sent_photos').fetchall()]
     conn.close()
 
+    buttons = []
     for g in config.get('galeries', []):
         url = f"{config.get('site_url')}/{g}"
         try:
             soup = BeautifulSoup(requests.get(url, timeout=10).text, 'html.parser')
             images = [img.get('src') for img in soup.find_all('img') if img.get('src')]
             valid_photos = [src if src.startswith('http') else f"{config.get('site_url')}{src}" for src in images]
-            
             total = len(valid_photos)
             publiees = len([u for u in valid_photos if u in sent_urls])
-            btn_text = f"{g.capitalize()} {publiees}/{total}"
-            buttons.append({"text": btn_text, "callback_data": f"select_{g}"})
+            buttons.append({"text": f"{g.capitalize()} {publiees}/{total}", "callback_data": f"select_{g}"})
         except:
             buttons.append({"text": g.capitalize(), "callback_data": f"select_{g}"})
 
-    # Organisation en 2 colonnes
     keyboard = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
-
+    
+    # On affiche le statut au-dessus du menu
+    full_message = f"{status_table}\n---\nQuelle galerie voulez-vous explorer ?"
+    
     requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                  json={"chat_id": chat_id, "text": "Quelle galerie voulez-vous explorer ?", "reply_markup": {"inline_keyboard": keyboard}})
+                  json={"chat_id": chat_id, "text": full_message, "reply_markup": {"inline_keyboard": keyboard}})
+
 
 # --- WEBHOOK & SESSIONS ---
 
