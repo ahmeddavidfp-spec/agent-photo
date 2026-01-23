@@ -28,9 +28,10 @@ def load_config():
 
 def publish_to_facebook(image_url, caption):
     token = os.environ.get('FB_PAGE_ACCESS_TOKEN')
-    page_id = "1922962171929204"
+    page_id = "839551515911276"  # ID validé par tes tests
     try:
-        url = f"https://graph.facebook.com/v19.0/{page_id}/photos"
+        # Utilisation de v21.0 comme dans ton test réussi
+        url = f"https://graph.facebook.com/v21.0/{page_id}/photos"
         r = requests.post(url, data={
             'url': image_url.split('?')[0], 
             'caption': caption, 
@@ -43,15 +44,16 @@ def publish_to_facebook(image_url, caption):
 
 def publish_to_instagram(image_url, caption):
     token = os.environ.get('IG_ACCESS_TOKEN')
-    ig_id = os.environ.get('INSTAGRAM_BUSINESS_ID')
+    # Utilise l'ID Instagram Pro validé : 17841453263147553
+    ig_id = os.environ.get('INSTAGRAM_BUSINESS_ID') 
     try:
-        r = requests.post(f"https://graph.facebook.com/v19.0/{ig_id}/media", 
+        r = requests.post(f"https://graph.facebook.com/v21.0/{ig_id}/media", 
                           data={'image_url': image_url, 'caption': caption, 'access_token': token})
         res = r.json()
         c_id = res.get('id')
         if not c_id: return False, res
-        time.sleep(10)
-        requests.post(f"https://graph.facebook.com/v19.0/{ig_id}/media_publish", data={'creation_id': c_id, 'access_token': token})
+        time.sleep(10) # Temps de traitement Meta
+        requests.post(f"https://graph.facebook.com/v21.0/{ig_id}/media_publish", data={'creation_id': c_id, 'access_token': token})
         return True, "OK"
     except Exception as e: return False, str(e)
 
@@ -64,7 +66,6 @@ def publish_to_threads(image_url, caption):
         url = f"https://graph.threads.net/v1.0/{th_id}/threads"
         r = requests.post(url, data={'media_type': 'IMAGE', 'image_url': clean_url, 'text': caption, 'access_token': token}, timeout=30)
         
-        # Sécurité si la réponse n'est pas du JSON
         try:
             res = r.json()
         except:
@@ -124,16 +125,13 @@ def telegram_webhook():
             url, cap = session
             mark_photo_as_sent(url)
             
-            # Notification immédiate
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
                           json={"chat_id": chat_id, "text": "⏳ Publication triple lancée (FB + IG + Threads)..."})
             
-            # Exécution
             ok_ig, err_ig = publish_to_instagram(url, cap)
             ok_th, err_th = publish_to_threads(url, cap)
             ok_fb, err_fb = publish_to_facebook(url, cap)
             
-            # Rapport final
             msg = "Résultat de la publication :\n"
             msg += f"📸 Instagram : {'✅ OK' if ok_ig else '❌ ' + str(err_ig)}\n"
             msg += f"🧵 Threads : {'✅ OK' if ok_th else '❌ ' + str(err_th)}\n"
@@ -143,7 +141,7 @@ def telegram_webhook():
             
     return jsonify({"status": "ok"})
 
-# --- FONCTIONS AUXILIAIRES (Menus, Suggestions, DB) ---
+# --- FONCTIONS AUXILIAIRES ---
 
 def send_galerie_menu(chat_id):
     config = load_config()
@@ -169,7 +167,7 @@ def send_suggestion(chat_id, galerie_nom):
         valid_photos = [u for u in valid_photos if u not in sent]
         
         if not valid_photos:
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "Plus de photos neuves dans cette galerie."})
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "Plus de photos neuves."})
             return
         
         img_url = random.choice(valid_photos)
