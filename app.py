@@ -24,24 +24,22 @@ def load_config():
         with open("config.yaml", "r") as f: return yaml.safe_load(f)
     except: return {"site_url": "https://www.davidahmed.me", "galeries": ["barcelone"]}
 
-# --- Statistiques ---
-def get_galerie_stats(galerie_nom):
-    try:
-        config = load_config()
-        url = f"{config.get('site_url')}/{galerie_nom}"
-        res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        images = [img.get('src') for img in soup.find_all('img') if img.get('src')]
-        all_urls = [src if src.startswith('http') else f"{config.get('site_url')}{src}" for src in images]
-        if not all_urls: return 0, 0
-        conn = get_db_connection()
-        placeholders = ','.join(['?'] * len(all_urls))
-        sent = conn.execute(f'SELECT COUNT(*) FROM sent_photos WHERE url IN ({placeholders})', all_urls).fetchone()[0]
-        conn.close()
-        return sent, len(all_urls)
-    except: return 0, 0
-
 # --- PUBLICATIONS ---
+
+def publish_to_facebook(image_url, caption):
+    token = os.environ.get('FB_PAGE_ACCESS_TOKEN')
+    page_id = "1922962171929204"
+    try:
+        url = f"https://graph.facebook.com/v19.0/{page_id}/photos"
+        r = requests.post(url, data={
+            'url': image_url.split('?')[0], 
+            'caption': caption, 
+            'access_token': token
+        }, timeout=40)
+        res = r.json()
+        return (True, "OK") if 'id' in res else (False, res)
+    except Exception as e:
+        return False, str(e)
 
 def publish_to_instagram(image_url, caption):
     token = os.environ.get('IG_ACCESS_TOKEN')
@@ -49,43 +47,36 @@ def publish_to_instagram(image_url, caption):
     try:
         r = requests.post(f"https://graph.facebook.com/v19.0/{ig_id}/media", 
                           data={'image_url': image_url, 'caption': caption, 'access_token': token})
-        c_id = r.json().get('id')
-        if not c_id: return False, r.json()
+        res = r.json()
+        c_id = res.get('id')
+        if not c_id: return False, res
         time.sleep(10)
         requests.post(f"https://graph.facebook.com/v19.0/{ig_id}/media_publish", data={'creation_id': c_id, 'access_token': token})
         return True, "OK"
-    except: return False, "Erreur Instagram"
+    except Exception as e: return False, str(e)
 
 def publish_to_threads(image_url, caption):
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
-    
     clean_url = image_url.split('?')[0]
-    if len(caption) > 495:
-        caption = caption[:492] + "..."
-
+    if len(caption) > 495: caption = caption[:492] + "..."
     try:
         url = f"https://graph.threads.net/v1.0/{th_id}/threads"
-        r = requests.post(url, data={
-            'media_type': 'IMAGE',
-            'image_url': clean_url,
-            'text': caption,
-            'access_token': token
-        }, timeout=30) # Timeout requête plus court
+        r = requests.post(url, data={'media_type': 'IMAGE', 'image_url': clean_url, 'text': caption, 'access_token': token}, timeout=30)
         
-        res = r.json()
-        if 'id' not in res: return False, f"Step 1 : {res.get('error', {}).get('message')}"
-            
-        c_id = res['id']
+        # Sécurité si la réponse n'est pas du JSON
+        try:
+            res = r.json()
+        except:
+            return False, f"Erreur HTTP {r.status_code}"
+
+        if 'id' not in res: return False, res
         
-        # RÉDUCTION DU TEMPS : 15s au lieu de 25s pour rester sous la limite Render
         time.sleep(15) 
-        
         pub_url = f"https://graph.threads.net/v1.0/{th_id}/threads_publish"
-        r_pub = requests.post(pub_url, data={'creation_id': c_id, 'access_token': token}, timeout=30)
-        return (True, "OK") if r_pub.status_code == 200 else (False, f"Step 2 : {r_pub.text}")
-    except Exception as e:
-        return False, str(e)
+        r_pub = requests.post(pub_url, data={'creation_id': res['id'], 'access_token': token}, timeout=30)
+        return (True, "OK") if r_pub.status_code == 200 else (False, r_pub.text)
+    except Exception as e: return False, str(e)
 
 # --- IA ---
 
@@ -94,14 +85,14 @@ def generate_ai_caption(image_url, galerie_nom):
     config = load_config()
     galerie_link = f"{config.get('site_url').rstrip('/')}/{galerie_nom}"
     
-    instructions = f"""Tu es David Ahmed. Bio: {config.get('photographer_bio', '')}
-    MISSION : Analyse cette photo à {galerie_nom}. TON : {config.get('ai_tone', '')}
+    instructions = f"""Tu es David Ahmed, photographe professionnel. 
+    MISSION : Analyse cette photo de la galerie {galerie_nom}.
     FORMAT : 
-    1. TITRE EN MAJUSCULES (SANS SYMBOLES, SANS ASTÉRISQUES, SANS GRAS)
+    1. **TITRE EN MAJUSCULES**
     2. Description cinématographique courte (MAX 250 car.)
     3. Phrase: "Série complète disponible sur : {galerie_link}"
-    4. Exactement 5 hashtags pertinents (choisis les plus impactants).
-    STRICT : Pas d'émojis. Pas de Markdown. Pas d'astérisques (*). Maximum 5 hashtags."""
+    4. Exactement 5 hashtags pertinents.
+    STRICT : Pas d'émojis. Titre obligatoirement entouré de ** pour le gras."""
     
     response = client.chat.completions.create(
         model="gpt-4o",
@@ -110,16 +101,16 @@ def generate_ai_caption(image_url, galerie_nom):
     )
     return response.choices[0].message.content
 
-# --- TELEGRAM & WEBHOOK ---
+# --- TELEGRAM WEBHOOK ---
 
 @app.route("/telegram-webhook", methods=['POST'])
 def telegram_webhook():
     data = request.json
     token = os.environ.get('TELEGRAM_TOKEN')
-    
+    if not data: return jsonify({"status": "no data"})
+
     if "message" in data:
         send_galerie_menu(data["message"]["chat"]["id"])
-        
     elif "callback_query" in data:
         chat_id = data["callback_query"]["message"]["chat"]["id"]
         action = data["callback_query"]["data"]
@@ -127,48 +118,39 @@ def telegram_webhook():
         
         if action == "menu": 
             send_galerie_menu(chat_id)
-            
         elif action.startswith("select_"): 
             send_suggestion(chat_id, action.split("_")[1])
-            
         elif action == "publish_all" and session:
             url, cap = session
-            
-            # 1. Vérification immédiate du verrou
-            conn = get_db_connection()
-            check = conn.execute('SELECT 1 FROM sent_photos WHERE url = ?', (url,)).fetchone()
-            conn.close()
-            
-            if check:
-                requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                              json={"chat_id": chat_id, "text": "⚠️ Déjà publié !"})
-                return jsonify({"status": "ok"})
-
-            # 2. On répond TOUT DE SUITE à Telegram pour libérer le worker
-            # Telegram verra un "200 OK" et arrêtera de renvoyer la requête
             mark_photo_as_sent(url)
+            
+            # Notification immédiate
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                          json={"chat_id": chat_id, "text": "⏳ Publication lancée (Instagram + Threads)..."})
-
-            # 3. Exécution de la publication
-            # Note: Dans une version pro, on utiliserait un 'Thread' ou 'Celery' ici
+                          json={"chat_id": chat_id, "text": "⏳ Publication triple lancée (FB + IG + Threads)..."})
+            
+            # Exécution
             ok_ig, err_ig = publish_to_instagram(url, cap)
             ok_th, err_th = publish_to_threads(url, cap)
+            ok_fb, err_fb = publish_to_facebook(url, cap)
             
-            msg = f"📸 Instagram : {'✅ OK' if ok_ig else '❌ ' + str(err_ig)}\n"
-            msg += f"🧵 Threads : {'✅ OK' if ok_th else '❌ ' + str(err_th)}"
+            # Rapport final
+            msg = "Résultat de la publication :\n"
+            msg += f"📸 Instagram : {'✅ OK' if ok_ig else '❌ ' + str(err_ig)}\n"
+            msg += f"🧵 Threads : {'✅ OK' if ok_th else '❌ ' + str(err_th)}\n"
+            msg += f"📘 Facebook : {'✅ OK' if ok_fb else '❌ ' + str(err_fb)}"
+            
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg})
             
     return jsonify({"status": "ok"})
+
+# --- FONCTIONS AUXILIAIRES (Menus, Suggestions, DB) ---
 
 def send_galerie_menu(chat_id):
     config = load_config()
     token = os.environ.get('TELEGRAM_TOKEN')
     keyboard = []
-    galeries = config.get('galeries', [])
-    for i in range(0, len(galeries), 2):
-        row = [{"text": f"{g.capitalize()} ({get_galerie_stats(g)[0]}/{get_galerie_stats(g)[1]})", "callback_data": f"select_{g}"} for g in galeries[i:i+2]]
-        keyboard.append(row)
+    for g in config.get('galeries', []):
+        keyboard.append([{"text": f"{g.capitalize()}", "callback_data": f"select_{g}"}])
     requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
                   json={"chat_id": chat_id, "text": "Quelle galerie explorer ?", "reply_markup": {"inline_keyboard": keyboard}})
 
@@ -176,29 +158,33 @@ def send_suggestion(chat_id, galerie_nom):
     token = os.environ.get('TELEGRAM_TOKEN')
     config = load_config()
     url = f"{config.get('site_url')}/{galerie_nom}"
-    soup = BeautifulSoup(requests.get(url).text, 'html.parser')
-    images = [img.get('src') for img in soup.find_all('img') if img.get('src')]
-    valid_photos = [src if src.startswith('http') else f"{config.get('site_url')}{src}" for src in images]
-    
-    conn = get_db_connection()
-    sent = [row[0] for row in conn.execute('SELECT url FROM sent_photos').fetchall()]
-    conn.close()
-    valid_photos = [u for u in valid_photos if u not in sent]
-    
-    if not valid_photos:
-        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "Plus de photos."})
-        return
-    
-    img_url = random.choice(valid_photos)
-    cap = generate_ai_caption(img_url, galerie_nom)
-    save_session(chat_id, img_url, cap)
-    requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", json={
-        "chat_id": chat_id, "photo": img_url, "caption": cap, 
-        "reply_markup": {"inline_keyboard": [
-            [{"text": "🚀 Publier Partout", "callback_data": "publish_all"}],
-            [{"text": "🔄 Autre", "callback_data": f"select_{galerie_nom}"}, {"text": "⬅️ Menu", "callback_data": "menu"}]
-        ]}
-    })
+    try:
+        soup = BeautifulSoup(requests.get(url, timeout=10).text, 'html.parser')
+        images = [img.get('src') for img in soup.find_all('img') if img.get('src')]
+        valid_photos = [src if src.startswith('http') else f"{config.get('site_url')}{src}" for src in images]
+        
+        conn = get_db_connection()
+        sent = [row[0] for row in conn.execute('SELECT url FROM sent_photos').fetchall()]
+        conn.close()
+        valid_photos = [u for u in valid_photos if u not in sent]
+        
+        if not valid_photos:
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "Plus de photos neuves dans cette galerie."})
+            return
+        
+        img_url = random.choice(valid_photos)
+        cap = generate_ai_caption(img_url, galerie_nom)
+        save_session(chat_id, img_url, cap)
+        
+        requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", json={
+            "chat_id": chat_id, "photo": img_url, "caption": cap, 
+            "reply_markup": {"inline_keyboard": [
+                [{"text": "🚀 Publier Partout", "callback_data": "publish_all"}],
+                [{"text": "🔄 Autre suggestion", "callback_data": f"select_{galerie_nom}"}, {"text": "⬅️ Menu", "callback_data": "menu"}]
+            ]}
+        })
+    except Exception as e:
+        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": f"Erreur suggestion: {e}"})
 
 def get_session(chat_id):
     conn = get_db_connection()
@@ -219,7 +205,7 @@ def mark_photo_as_sent(url):
     conn.close()
 
 @app.route("/")
-def index(): return "Agent David Ahmed - Actif"
+def index(): return "Agent David Ahmed - OK"
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
