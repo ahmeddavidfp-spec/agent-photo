@@ -187,7 +187,6 @@ def telegram_webhook():
             send_suggestion(chat_id, action.split("_")[1])
             
         else:
-            # Actions de publication (Instagram / Threads)
             session = get_session(chat_id)
             if session:
                 if action == "pub_ig":
@@ -228,9 +227,10 @@ def telegram_webhook():
 # SECTION 6 : FONCTIONS AUXILIAIRES
 # =================================================================
 def send_galerie_menu(chat_id):
+    """Génère le menu avec compteurs d'accès et décomptes x/y."""
     config = load_config()
     token = os.environ.get('TELEGRAM_TOKEN')
-    status = get_token_status() # Affiche l'état des accès
+    status = get_token_status()
     
     conn = get_db_connection()
     sent_urls = [row[0] for row in conn.execute('SELECT url FROM sent_photos').fetchall()]
@@ -240,9 +240,10 @@ def send_galerie_menu(chat_id):
     buttons = []
     for g in config.get('galeries', []):
         try:
-            # Récupération du total pour décompte x/y
+            # Récupération du total pour décompte x/y sur boutons
             soup = BeautifulSoup(requests.get(f"{config.get('site_url')}/{g}", timeout=10).text, 'html.parser')
-            valid = [s for s in [img.get('src') for img in soup.find_all('img')] if s]
+            imgs = [img.get('src') for img in soup.find_all('img') if img.get('src')]
+            valid = [s if s.startswith('http') else f"{config.get('site_url')}{s}" for s in imgs]
             count = f"{len([u for u in valid if u in sent_urls])}/{len(valid)}"
             buttons.append({"text": f"{g.capitalize()} {count}", "callback_data": f"select_{g}"})
         except: buttons.append({"text": g.capitalize(), "callback_data": f"select_{g}"})
@@ -280,5 +281,8 @@ def save_session(chat_id, url, cap):
     conn.commit()
     conn.close()
 
+# =================================================================
+# LANCEMENT DU SERVEUR (Tout à gauche pour Render)
+# =================================================================
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
