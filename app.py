@@ -8,9 +8,12 @@ DB_PATH = '/data/photos.db' if os.path.exists('/data') else 'photos.db'
 
 def get_db_connection(): return sqlite3.connect(DB_PATH)
 
+# --- BASE DE DONNÉES MISE À JOUR ---
 def init_db():
     conn = get_db_connection()
-    conn.execute('CREATE TABLE IF NOT EXISTS sent_photos (url TEXT PRIMARY KEY)')
+    # On ajoute les colonnes galerie et date_envoi
+    conn.execute('''CREATE TABLE IF NOT EXISTS sent_photos 
+                    (url TEXT PRIMARY KEY, galerie TEXT, date_envoi TEXT)''')
     conn.execute('CREATE TABLE IF NOT EXISTS current_session (chat_id INTEGER PRIMARY KEY, last_url TEXT, last_caption TEXT)')
     conn.commit()
     conn.close()
@@ -213,8 +216,15 @@ def get_session(chat_id):
 def save_session(chat_id, url, cap):
     conn = get_db_connection(); conn.execute('INSERT OR REPLACE INTO current_session VALUES (?, ?, ?)', (chat_id, url, cap)); conn.commit(); conn.close()
 
-def mark_photo_as_sent(url):
-    conn = get_db_connection(); conn.execute('INSERT OR IGNORE INTO sent_photos VALUES (?)', (url,)); conn.commit(); conn.close()
+# --- MODIFICATION DE LA LOGIQUE D'ENREGISTREMENT ---
+def mark_photo_as_sent(url, galerie):
+    date_jour = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_db_connection()
+    # On enregistre l'URL avec sa galerie et la date actuelle
+    conn.execute('INSERT OR IGNORE INTO sent_photos (url, galerie, date_envoi) VALUES (?, ?, ?)', 
+                 (url, galerie, date_jour))
+    conn.commit()
+    conn.close()
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
