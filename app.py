@@ -46,7 +46,7 @@ init_db()
 
 
 # =================================================================
-# SECTION 2 : MOTEUR IA (VERSION FINALE AVEC CORRECTION AUTO DES @)
+# SECTION 2 : MOTEUR IA (VERSION CORRIGÉE - PYTHON COMPATIBLE)
 # =================================================================
 def generate_ai_caption(image_url, galerie_nom):
     """Génère la légende et force l'ajout des @ sur les mentions."""
@@ -102,23 +102,21 @@ def generate_ai_caption(image_url, galerie_nom):
         alt_part = f"Photographie artistique de {galerie_nom} par David Ahmed."
 
     # --- LE PATCH DE SÉCURITÉ ---
-    # On nettoie les en-têtes indésirables
     clean_cap = caption_part.replace("PARTIE 1", "").replace("LÉGENDE", "").replace("Titre :", "").strip()
     
-    # On force les @ dans la ligne (cc ...)
     lines = clean_cap.split('\n')
     final_lines = []
     for line in lines:
         if line.strip().startswith('(cc'):
-            # On récupère les comptes, on nettoie les parenthèses
             content = line.replace('(cc', '').replace(')', '').strip()
-            # On ajoute @ si manquant devant chaque mot
             fixed_mentions = " ".join([word if word.startswith('@') else f"@{word}" for word in content.split()])
             final_lines.append(f"(cc {fixed_mentions})")
         else:
             final_lines.append(line)
             
-    return f"{'\n'.join(final_lines)}|||{alt_part}"
+    # CORRECTION DU BUG ICI : On prépare le texte AVANT le return
+    final_caption = "\n".join(final_lines)
+    return f"{final_caption}|||{alt_part}"
 
 
 
