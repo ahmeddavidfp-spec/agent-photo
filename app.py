@@ -163,7 +163,7 @@ def telegram_webhook():
         chat_id = data["message"]["chat"]["id"]
         text = data["message"]["text"]
         
-        # Commandes de Debug/Export
+        # --- COMMANDES ADMIN ---
         if text == "/debug_db":
             conn = get_db_connection()
             rows = conn.execute('SELECT url FROM sent_photos').fetchall()
@@ -183,7 +183,36 @@ def telegram_webhook():
                 requests.post(f"https://api.telegram.org/bot{token}/sendDocument", data={"chat_id": chat_id}, files={"document": f})
             return jsonify({"status": "ok"})
 
-        # Logique de Session (Manuel / Lieu)
+        # NOUVEAU : Commande de renouvellement Threads 
+        if text == "/renew_threads":
+            client_secret = os.environ.get('THREADS_CLIENT_SECRET')
+            current_token = os.environ.get('THREADS_ACCESS_TOKEN')
+            
+            if not client_secret:
+                requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
+                              json={"chat_id": chat_id, "text": "❌ Erreur : THREADS_CLIENT_SECRET manquant sur Render."})
+            else:
+                url = "https://graph.threads.net/access_token"
+                params = {
+                    "grant_type": "th_exchange_token",
+                    "client_secret": client_secret,
+                    "access_token": current_token
+                }
+                r = requests.get(url, params=params)
+                res = r.json()
+                
+                if "access_token" in res:
+                    new_token = res['access_token']
+                    days = res.get('expires_in', 0) // 86400
+                    msg = f"✅ Token renouvelé pour {days} jours !\n\n⚠️ IMPORTANT : Copie ce token dans tes variables Render :\n`{new_token}`"
+                    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
+                                  json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
+                else:
+                    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
+                                  json={"chat_id": chat_id, "text": f"❌ Échec de l'échange : {res}"})
+            return jsonify({"status": "ok"})
+
+        # --- LOGIQUE DE SESSION (MANUEL / LIEU) ---
         session = get_session(chat_id)
         if session and session[1] == "WAITING_FOR_MANUAL":
             save_session(chat_id, session[0], text)
@@ -200,7 +229,6 @@ def telegram_webhook():
         action = data["callback_query"]["data"]
         session = get_session(chat_id)
         
-        # Sécurité : vérifier si déjà envoyé pour bloquer le compteur
         is_already_sent = False
         if session:
             conn = get_db_connection()
@@ -241,7 +269,6 @@ def telegram_webhook():
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✍️ Envoie ton texte."})
             
     return jsonify({"status": "ok"})
-
 # =================================================================
 # SECTION 6 : FONCTIONS AUXILIAIRES (Scraping, Session)
 # =================================================================
