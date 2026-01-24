@@ -156,11 +156,21 @@ def publish_to_threads(image_url, caption):
 # =================================================================
 # SECTION 4 : GESTION DE LA BASE DE DONNÉES (DB Admin)
 # =================================================================
+
+def mark_photo_as_sent(url, galerie):
+    """Enregistre une photo publiée dans l'historique avec date et galerie."""
+    date_jour = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_db_connection()
+    conn.execute('INSERT OR IGNORE INTO sent_photos (url, galerie, date_envoi) VALUES (?, ?, ?)', 
+                 (url, galerie, date_jour))
+    conn.commit()
+    conn.close()
+
 def get_token_status():
     """Vérifie la validité et l'expiration des Tokens Meta (IG & Threads)."""
     status_msg = "📊 **ÉTAT DES ACCÈS**\n"
     
-    # 1. Vérification IG / FB (Endpoint classique)
+    # 1. Vérification IG / FB
     ig_token = os.environ.get('IG_ACCESS_TOKEN')
     if ig_token:
         try:
@@ -174,33 +184,69 @@ def get_token_status():
         except: status_msg += "⚠️ IG/FB : Vérif impossible\n"
     else: status_msg += "❌ IG/FB : Manquant\n"
 
-    # 2. Vérification Threads (Endpoint /me car /debug_token est instable sur Threads)
+    # 2. Vérification Threads
     th_token = os.environ.get('THREADS_ACCESS_TOKEN')
     if th_token:
         try:
-            # On interroge l'identité du token pour vérifier sa validité
             r = requests.get("https://graph.threads.net/me", 
                              params={"fields": "id", "access_token": th_token}, timeout=5).json()
-            
             if "id" in r:
-                # Si valide, on tente de récupérer l'expiration via le debug_token spécifique Threads
-                # Note: On utilise le token lui-même comme access_token d'interrogation
                 d = requests.get("https://graph.threads.net/debug_token", 
                                  params={"input_token": th_token, "access_token": th_token}, timeout=5).json()
                 exp = d.get('data', {}).get('expires_at')
-                
                 if not exp or exp == 0: status_msg += "✅ Threads : Permanent\n"
                 else:
                     days = (datetime.datetime.fromtimestamp(exp) - datetime.datetime.now()).days
                     status_msg += f"⏳ Threads : {days} jours\n"
-            else:
-                status_msg += "❌ Threads : Token Invalide\n"
-        except:
-            status_msg += "⚠️ Threads : Vérif impossible\n"
+            else: status_msg += "❌ Threads : Token Invalide\n"
+        except: status_msg += "⚠️ Threads : Vérif impossible\n"
     else: status_msg += "❌ Threads : Manquant\n"
-    
     return status_msg
 
+def export_db_to_csv():
+    """Génère le fichier CSV de la base de données pour Sequel Ace."""
+    conn = get_db_connection()
+    cursor = conn.execute('SELECT * FROM sent_photos')
+    file_path = '/tmp/export.csv'
+    with open(file_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['url', 'galerie', 'date_envoi'])
+        writer.writerows(cursor.fetchall())
+    conn.close()
+    return file_path
+
+def renew_threads_token():
+    """Tente d'échanger le token Threads actuel contre un token de 60 jours."""
+    client_secret = os.environ.get('THREADS_CLIENT_SECRET')
+    current_token = os.environ.get('THREADS_ACCESS_TOKEN')
+    if not client_secret: return False, "THREADS_CLIENT_SECRET manquant sur Render."
+    
+    url = "https://graph.threads.net/access_token"
+    params = {
+        "grant_type": "th_exchange_token",
+        "client_secret": client_secret,
+        "access_token": current_token
+    }
+    try:
+        r = requests.get(url, params=params)
+        res = r.json()
+        if "access_token" in res:
+            days = res.get('expires_in', 0) // 86400
+            return True, (res['access_token'], days)
+        return False, f"Échec Meta : {res}"
+    except Exception as e: return False, str(e)
+
+def get_db_stats():
+    """Génère un résumé des publications par galerie."""
+    conn = get_db_connection()
+    stats = conn.execute('SELECT galerie, COUNT(*) FROM sent_photos GROUP BY galerie').fetchall()
+    conn.close()
+    if not stats: return "La base de données est vide."
+    msg = "📁 **RÉSUMÉ DES PUBLICATIONS :**\n"
+    for s in stats: msg += f"- {s[0].capitalize()} : {s[1]} photos\n"
+    return msg
+    
+    
 # =================================================================
 # SECTION 5 : INTERFACE TELEGRAM (Webhook & Menus)
 # =================================================================
