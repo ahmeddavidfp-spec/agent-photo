@@ -43,11 +43,12 @@ def load_config():
 
 init_db()
 
+
 # =================================================================
-# SECTION 2 : MOTEUR IA (TITRE ENTRE GUILLEMETS + 8 HASHTAGS)
+# SECTION 2 : MOTEUR IA (TITRE "...", ANALYSE EXPERT + ENGAGEMENT)
 # =================================================================
 def generate_ai_caption(image_url, galerie_nom):
-    """Génère la légende ET le texte alternatif (SEO)."""
+    """Génère la légende (Titre "", Analyse Tech, Question) + Alt Text."""
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     
@@ -58,38 +59,37 @@ def generate_ai_caption(image_url, galerie_nom):
     
     instructions = f"""Tu es David Ahmed, photographe d'art. Analyse cette photo de {galerie_nom}.
     
-    TACHE : Générer une légende Instagram et un Alt Text SEO.
+    TACHE : Générer une légende Instagram engageante et un Alt Text SEO.
     
-    RÈGLES POUR LA LÉGENDE :
-    1. Commence DIRECTEMENT par le titre mis entre guillemets doubles "..." (Pas de "Titre:", pas de "Partie 1").
-    2. Analyse artistique en 2 phrases.
-    3. Ajoute le lien : {display_link}
-    4. Génère 8 HASHTAGS : 
-       - 2 hashtags très populaires (ex: #StreetPhotography).
-       - 4 hashtags contextuels (ce qu'on voit sur l'image).
-       - 2 hashtags d'ambiance (ex: #MoodyGrams).
-       - Ajoute {base_tag} à la fin.
+    RÈGLES POUR LA LÉGENDE (Expertise & Engagement) :
+    1. TITRE : Commence DIRECTEMENT par un titre entre guillemets doubles "..." (Ex: "Lumière d'Hiver").
+    2. ANALYSE (Le corps) : Fais une analyse technique et artistique en 2-3 phrases. Parle de la lumière, de la composition (lignes, contrastes) ou de l'émotion. Sois précis, pas générique.
+    3. ENGAGEMENT (Le Boost) : Termine le texte par une question courte et ouverte pour inciter les abonnés à commenter (Ex: "Et vous, quelle émotion cela vous inspire ?").
+    4. LIEN : Voir la galerie : {display_link}
+    5. HASHTAGS : Génère 8 hashtags (Mélange : Niche, Technique, Ambiance) + {base_tag}.
     
-    RÈGLES POUR LE ALT TEXT :
-    - Description purement physique pour un aveugle. Pas de "Photo de...", décris direct.
+    RÈGLES POUR LE ALT TEXT (Accessibilité) :
+    - Description purement factuelle et physique de l'image pour les malvoyants.
     
     FORMAT DE SORTIE OBLIGATOIRE (Sépare par |||) :
-    "Titre de l'Oeuvre"
-    [Reste du texte de la légende ici...]
+    "Titre"
+    [Analyse Expert + Question d'engagement]
+    [Lien]
+    [Hashtags]
     |||
-    [Texte alternatif ici...]
+    [Texte alternatif]
     
-    INTERDIT : Ne jamais écrire "Partie 1", "Légende", ou "Sujet". Pas de Markdown."""
+    INTERDIT : Ne jamais écrire "Titre:", "Légende:", "Partie 1". Pas de Markdown gras (**)."""
     
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": [{"type": "text", "text": instructions}, {"type": "image_url", "image_url": {"url": image_url, "detail": "high"}}]}],
-        max_tokens=600, temperature=0.7
+        max_tokens=650, temperature=0.7
     )
     
     raw = response.choices[0].message.content
     
-    # Séparation et nettoyage de sécurité
+    # Séparation et nettoyage
     if "|||" in raw:
         parts = raw.split("|||")
         caption_part = parts[0].strip()
@@ -98,10 +98,11 @@ def generate_ai_caption(image_url, galerie_nom):
         caption_part = raw
         alt_part = f"Photographie artistique de {galerie_nom} par David Ahmed."
 
-    # On nettoie une dernière fois au cas où l'IA soit têtue
+    # Nettoyage ultime
     clean_cap = caption_part.replace("PARTIE 1", "").replace("LÉGENDE", "").replace("Titre :", "").strip()
     
     return f"{clean_cap}|||{alt_part}"
+
 
 # =================================================================
 # SECTION 3 : LOGIQUE DES RÉSEAUX SOCIAUX (AVEC ALT TEXT)
