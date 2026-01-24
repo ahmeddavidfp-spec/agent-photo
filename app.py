@@ -414,8 +414,38 @@ def send_suggestion(chat_id, galerie_nom):
         requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "Galerie terminée."})
         return
 
-    img_url = random.choice(avail
+    # CORRECTION : Parenthèse refermée ci-dessous
+    img_url = random.choice(avail) 
+    cap = generate_ai_caption(img_url, galerie_nom)
+    save_session(chat_id, img_url, cap)
 
+    # --- Clavier optimisé sous la photo ---
+    keyboard = [
+        [{"text": "📸 Instagram", "callback_data": "pub_ig"}, {"text": "🧵 Threads", "callback_data": "pub_th"}],
+        [{"text": "📍 Lieu", "callback_data": "add_location"}, {"text": "✍️ Manuel", "callback_data": "manual_edit"}],
+        [{"text": "🔄 Autre", "callback_data": f"select_{galerie_nom}"}, {"text": "⬅️ Menu", "callback_data": "menu"}]
+    ]
+
+    requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", json={
+        "chat_id": chat_id, 
+        "photo": img_url, 
+        "caption": cap, 
+        "reply_markup": {"inline_keyboard": keyboard}
+    })
+
+def get_session(chat_id):
+    conn = get_db_connection()
+    res = conn.execute('SELECT last_url, last_caption FROM current_session WHERE chat_id = ?', (chat_id,)).fetchone()
+    conn.close()
+    return res
+
+def save_session(chat_id, url, cap):
+    conn = get_db_connection()
+    conn.execute('INSERT OR REPLACE INTO current_session VALUES (?, ?, ?)', (chat_id, url, cap))
+    conn.commit()
+    conn.close()
+    
+    
 # =================================================================
 # LANCEMENT DU SERVEUR
 # =================================================================
