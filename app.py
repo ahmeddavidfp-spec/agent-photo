@@ -51,14 +51,30 @@ def generate_ai_caption(image_url, galerie_nom):
     """Analyse l'image et génère une légende structurée (Hook SEO + Technique)."""
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
-    galerie_link = f"{config.get('site_url').rstrip('/')}/{galerie_nom}"
+    
+    # Préparation du lien simplifié pour l'IA (ex: davidahmed.me/new-york)
+    base_url = config.get('site_url', 'davidahmed.me').replace('https://', '').replace('http://', '').rstrip('/')
+    display_link = f"{base_url}/{galerie_nom}"
+    
     manual_hashtag = config.get('custom_hashtag', '')
     extra_tag = f"+ {manual_hashtag}" if manual_hashtag else ""
     
     instructions = f"""Tu es David Ahmed, photographe d'art. Analyse cette photo de {galerie_nom}.
+    
     STRATÉGIE : 1. Crochet (Hook) percutant. 2. Vocabulaire riche. 3. 2-3 phrases claires.
-    STRUCTURE : Titre / Analyse / Lien Galerie : {galerie_link} / Hashtags {extra_tag}.
-    STRICT : PAS de gras (**), PAS de ###, PAS de majuscules intégrales. Max 490 chars."""
+    
+    STRUCTURE STRICTE :
+    - Ligne 1 : Titre percutant.
+    - Ligne 2 : Analyse (2-3 phrases).
+    - (Saut de ligne)
+    - Ligne : Voir la galerie : {display_link}
+    - (Saut de ligne)
+    - Hashtags {extra_tag}.
+    
+    STRICT : 
+    - PAS de gras (**), PAS de ###, PAS de majuscules intégrales. 
+    - Ne transforme PAS le lien en format Markdown [texte](url). Affiche-le tel quel.
+    - Max 480 caractères au total."""
     
     response = client.chat.completions.create(
         model="gpt-4o",
@@ -67,11 +83,15 @@ def generate_ai_caption(image_url, galerie_nom):
     )
     
     raw = response.choices[0].message.content
-    # Nettoyage Markdown et mise en forme du titre (Capitalize)
+    
+    # Nettoyage final de sécurité contre le Markdown résiduel
     clean = raw.replace("**", "").replace("__", "").replace("### ", "").replace("## ", "").replace("# ", "")
+    
     lines = clean.split('\n')
-    if lines: lines[0] = lines[0].strip().capitalize()
-    return "\n".join(lines).strip()[:495]
+    if lines:
+        lines[0] = lines[0].strip().capitalize() # Formate le Hook
+    
+    return "\n".join(lines).strip()[:495] # Coupe à 495 pour Threads
 
 # =================================================================
 # SECTION 3 : LOGIQUE DES RÉSEAUX SOCIAUX (Instagram & Threads)
