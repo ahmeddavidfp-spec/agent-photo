@@ -9,7 +9,7 @@ from openai import OpenAI
 app = Flask(__name__)
 DB_PATH = '/data/photos.db' if os.path.exists('/data') else 'photos.db'
 
-def get_db_connection():
+def get_db_connection(): 
     """Établit la connexion à la base SQLite locale."""
     return sqlite3.connect(DB_PATH)
 
@@ -178,19 +178,7 @@ def telegram_webhook():
     text = data.get("message", {}).get("text", "").strip()
     action = data.get("callback_query", {}).get("data", "")
 
-    # 1. PRIORITÉ ABSOLUE : LES COMMANDES TEXTE
-    if text:
-        if text == "/renew_threads":
-            success, result = renew_threads_token()
-            msg = f"✅ **TOKEN RENOUVELÉ ({result[1]}j)**\n`{result[0]}`" if success else f"❌ {result}"
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
-            return jsonify({"status": "ok"})
-
-        elif text == "/debug_db":
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": get_db_stats(), "parse_mode": "Markdown"})
-            return jsonify({"status": "ok"})
-
-    # 2. TRAITEMENT DES BOUTONS (CALLBACKS)
+    # 1. TRAITEMENT DES BOUTONS (CALLBACKS)
     if action:
         if action == "renew_threads_btn":
             success, result = renew_threads_token()
@@ -254,8 +242,20 @@ def telegram_webhook():
         
         return jsonify({"status": "ok"})
 
-    # 3. GESTION DES ÉTATS DE SESSION (Texte classique)
+    # 2. GESTION DES COMMANDES TEXTUELLES
     if text:
+        # ===> C'EST ICI QUE TU DOIS RAJOUTER LA VÉRIFICATION DU TEXTE <===
+        if text == "/renew_threads":
+            success, result = renew_threads_token()
+            msg = f"✅ **TOKEN RENOUVELÉ ({result[1]}j)**\n`{result[0]}`" if success else f"❌ {result}"
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
+            return jsonify({"status": "ok"})
+
+        elif text == "/debug_db":
+             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": get_db_stats(), "parse_mode": "Markdown"})
+             return jsonify({"status": "ok"})
+
+        # Suite logique existante
         session = get_session(chat_id)
         if session and session[1] == "WAITING_FOR_MANUAL":
             save_session(chat_id, session[0], text)
