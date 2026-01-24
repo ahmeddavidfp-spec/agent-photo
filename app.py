@@ -46,10 +46,10 @@ init_db()
 
 
 # =================================================================
-# SECTION 2 : MOTEUR IA (VERSION BLINDÉE : @ OBLIGATOIRES + TITRE PRO)
+# SECTION 2 : MOTEUR IA (VERSION FINALE AVEC CORRECTION AUTO DES @)
 # =================================================================
 def generate_ai_caption(image_url, galerie_nom):
-    """Génère la légende avec Mentions (@) forcées et Titre soigné."""
+    """Génère la légende et force l'ajout des @ sur les mentions."""
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     
@@ -62,25 +62,17 @@ def generate_ai_caption(image_url, galerie_nom):
     
     TACHE : Légende virale et Alt Text.
     
-    RÈGLES STRICTES DE RÉDACTION :
-    
-    1. TITRE : Invente un titre artistique (Capitalisé) entre guillemets.
-       BON : "Ombres et Lumières"
-       MAUVAIS : "dusseldorf..."
-       
-    2. ANALYSE : 2 phrases sur la technique/lumière/émotion.
+    RÈGLES DE RÉDACTION :
+    1. TITRE : Titre artistique Capitalisé entre guillemets (Ex: "Lumières Nocturnes").
+    2. ANALYSE : 2 phrases sur l'esthétique/émotion.
     
     (LAISSE UNE LIGNE VIDE ICI)
     
-    3. QUESTION : Question ouverte pour engager l'audience.
-    
-    4. MENTIONS (CRITIQUE) : Suggère 3 comptes pertinents.
-       TU DOIS IMPÉRATIVEMENT METTRE LE SYMBOLE '@' DEVANT CHAQUE NOM.
-       Exemple OBLIGATOIRE : (cc @visit{galerie_nom} @lensculture @magnumphotos)
-       
+    3. QUESTION : Question ouverte pour engager.
+    4. MENTIONS : Suggère 3 comptes pertinents (Ville ou Hub).
+       FORMAT : (cc @compte1 @compte2 @compte3)
     5. LIEN : {display_link}
-    
-    6. HASHTAGS : 8 hashtags pertinents + {base_tag}.
+    6. HASHTAGS : 8 hashtags + {base_tag}.
     
     FORMAT DE SORTIE (Séparateur |||) :
     "Titre"
@@ -91,9 +83,7 @@ def generate_ai_caption(image_url, galerie_nom):
     [Lien]
     [Hashtags]
     |||
-    [Alt Text factuel]
-    
-    INTERDIT : "Titre:", "Légende:". Pas de Markdown."""
+    [Alt Text factuel]"""
     
     response = client.chat.completions.create(
         model="gpt-4o",
@@ -111,9 +101,24 @@ def generate_ai_caption(image_url, galerie_nom):
         caption_part = raw
         alt_part = f"Photographie artistique de {galerie_nom} par David Ahmed."
 
+    # --- LE PATCH DE SÉCURITÉ ---
+    # On nettoie les en-têtes indésirables
     clean_cap = caption_part.replace("PARTIE 1", "").replace("LÉGENDE", "").replace("Titre :", "").strip()
     
-    return f"{clean_cap}|||{alt_part}"
+    # On force les @ dans la ligne (cc ...)
+    lines = clean_cap.split('\n')
+    final_lines = []
+    for line in lines:
+        if line.strip().startswith('(cc'):
+            # On récupère les comptes, on nettoie les parenthèses
+            content = line.replace('(cc', '').replace(')', '').strip()
+            # On ajoute @ si manquant devant chaque mot
+            fixed_mentions = " ".join([word if word.startswith('@') else f"@{word}" for word in content.split()])
+            final_lines.append(f"(cc {fixed_mentions})")
+        else:
+            final_lines.append(line)
+            
+    return f"{'\n'.join(final_lines)}|||{alt_part}"
 
 
 
