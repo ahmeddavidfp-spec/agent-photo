@@ -262,9 +262,9 @@ def telegram_webhook():
     # --- 1. GESTION DES MESSAGES TEXTES ---
     if "message" in data and "text" in data["message"]:
         chat_id = data["message"]["chat"]["id"]
-        text = data["message"]["text"]
-        
-        # Commandes d'administration (Texte)
+        text = data["message"]["text"].strip() # .strip() retire les espaces inutiles
+
+        # PRIORITÉ 1 : Commandes d'administration
         if text == "/debug_db":
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
                           json={"chat_id": chat_id, "text": get_db_stats(), "parse_mode": "Markdown"})
@@ -288,90 +288,79 @@ def telegram_webhook():
                           json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
             return jsonify({"status": "ok"})
 
-        # Logique de Session (Manuel / Lieu / Menu Galerie)
+        # PRIORITÉ 2 : Logique de Session (Manuel / Lieu)
         session = get_session(chat_id)
         if session and session[1] == "WAITING_FOR_MANUAL":
             save_session(chat_id, session[0], text)
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✅ Légende reçue !", "reply_markup": {"inline_keyboard": [[{"text": "📸 Instagram", "callback_data": "pub_ig"}, {"text": "🧵 Threads", "callback_data": "pub_th"}], [{"text": "📍 Lieu", "callback_data": "add_location"}]]}})
+            return jsonify({"status": "ok"})
+            
         elif session and session[1] == "WAITING_FOR_LOCATION":
-            new_cap = f"📍 {text}\n\n{session[1]}"
+            new_cap = f"📍 {text}\n\n{session[2]}" # session[2] est le texte stocké
             save_session(chat_id, session[0], new_cap)
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✅ Lieu ajouté.", "reply_markup": {"inline_keyboard": [[{"text": "📸 Instagram", "callback_data": "pub_ig"}, {"text": "🧵 Threads", "callback_data": "pub_th"}]]}})
-        else: 
-            send_galerie_menu(chat_id)
+            return jsonify({"status": "ok"})
+            
+        # PAR DÉFAUT : Afficher le menu
+        send_galerie_menu(chat_id)
 
     # --- 2. GESTION DES CLICS BOUTONS (CALLBACKS) ---
     elif "callback_query" in data:
         chat_id = data["callback_query"]["message"]["chat"]["id"]
         action = data["callback_query"]["data"]
-        session = get_session(chat_id)
         
-        # Sécurité anti-doublon
-        is_already_sent = False
-        if session:
-            conn = get_db_connection()
-            is_already_sent = conn.execute('SELECT 1 FROM sent_photos WHERE url = ?', (session[0],)).fetchone()
-            conn.close()
-
-        # Actions Admin via Boutons
+        # Actions Admin Boutons (Action directe sans check session)
         if action == "view_stats":
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                          json={"chat_id": chat_id, "text": get_db_stats(), "parse_mode": "Markdown"})
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": get_db_stats(), "parse_mode": "Markdown"})
         
         elif action == "export_db_btn":
             file_path = export_db_to_csv()
             with open(file_path, 'rb') as f:
-                requests.post(f"https://api.telegram.org/bot{token}/sendDocument", 
-                              data={"chat_id": chat_id}, files={"document": f})
+                requests.post(f"https://api.telegram.org/bot{token}/sendDocument", data={"chat_id": chat_id}, files={"document": f})
 
         elif action == "renew_threads_btn":
             success, result = renew_threads_token()
-            if success:
-                new_token, days = result
-                msg = f"✅ **TOKEN RENOUVELÉ ({days} jours)**\n\nCopie ce token sur Render :\n`{new_token}`"
-            else:
-                msg = f"❌ **ERREUR MÉTA**\n{result}"
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                          json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
+            msg = f"✅ **TOKEN RENOUVELÉ**\n`{result[0]}`" if success else f"❌ {result}"
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
 
         elif action == "menu":
             send_galerie_menu(chat_id)
 
         elif action.startswith("select_"): 
             send_suggestion(chat_id, action.split("_")[1])
-        
-        # Publication IG
-        elif action == "pub_ig" and session:
-            if is_already_sent:
-                requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⚠️ Déjà enregistré."})
-            else:
-                ok, res = publish_to_instagram(session[0], session[1])
-                if ok: 
-                    gal_name = session[0].split('/')[-2] if '/' in session[0] else "inconnue"
-                    mark_photo_as_sent(session[0], gal_name)
-                    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "📸 Insta : ✅"})
+
+        # Publication (nécessite une session)
+        else:
+            session = get_session(chat_id)
+            if not session: return jsonify({"status": "ok"})
+            
+            # Anti-doublon
+            conn = get_db_connection()
+            is_sent = conn.execute('SELECT 1 FROM sent_photos WHERE url = ?', (session[0],)).fetchone()
+            conn.close()
+
+            if action == "pub_ig":
+                if is_sent: requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⚠️ Déjà posté."})
                 else:
-                    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": f"❌ Erreur IG : {res}"})
-        
-        # Publication Threads
-        elif action == "pub_th" and session:
-            if is_already_sent:
-                requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⚠️ Déjà enregistré."})
-            else:
-                ok, res = publish_to_threads(session[0], session[1])
-                if ok: 
-                    gal_name = session[0].split('/')[-2] if '/' in session[0] else "inconnue"
-                    mark_photo_as_sent(session[0], gal_name)
-                    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "🧵 Threads : ✅"})
+                    ok, res = publish_to_instagram(session[0], session[1])
+                    if ok:
+                        mark_photo_as_sent(session[0], "Auto")
+                        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "📸 Insta : ✅"})
+            
+            elif action == "pub_th":
+                if is_sent: requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⚠️ Déjà posté."})
                 else:
-                    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": f"❌ Erreur TH : {res}"})
-        
-        elif action == "manual_edit" and session:
-            save_session(chat_id, session[0], "WAITING_FOR_MANUAL")
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✍️ Envoie ton texte complet."})
+                    ok, res = publish_to_threads(session[0], session[1])
+                    if ok:
+                        mark_photo_as_sent(session[0], "Auto")
+                        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "🧵 Threads : ✅"})
+
+            elif action == "manual_edit":
+                save_session(chat_id, session[0], "WAITING_FOR_MANUAL")
+                requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✍️ Envoie ton texte."})
             
     return jsonify({"status": "ok"})
-        
+
 # =================================================================
 # SECTION 6 : FONCTIONS AUXILIAIRES (Scraping, Session)
 # =================================================================
@@ -379,32 +368,21 @@ def send_galerie_menu(chat_id):
     """Génère le menu des galeries avec outils d'administration inclus."""
     config = load_config()
     token = os.environ.get('TELEGRAM_TOKEN')
-    status = get_token_status()
+    status = get_token_status() # Récupère l'état (IG/Threads jours)
     conn = get_db_connection()
     sent_urls = [row[0] for row in conn.execute('SELECT url FROM sent_photos').fetchall()]
     conn.close()
 
-    # --- Ligne d'outils Admin en haut du menu ---
-    keyboard = [
-        [{"text": "📈 Stats", "callback_data": "view_stats"}, 
-         {"text": "📥 Export", "callback_data": "export_db_btn"},
-         {"text": "🔄 Renew", "callback_data": "renew_threads_btn"}]
-    ]
+    keyboard = [[{"text": "📈 Stats", "callback_data": "view_stats"}, {"text": "📥 Export", "callback_data": "export_db_btn"}, {"text": "🔄 Renew", "callback_data": "renew_threads_btn"}]]
     
     buttons = []
     for g in config.get('galeries', []):
-        url = f"{config.get('site_url')}/{g}"
         try:
-            soup = BeautifulSoup(requests.get(url, timeout=10).text, 'html.parser')
-            imgs = [img.get('src') for img in soup.find_all('img') if img.get('src')]
-            valid = [s if s.startswith('http') else f"{config.get('site_url')}{s}" for s in imgs]
-            count = f"{len([u for u in valid if u in sent_urls])}/{len(valid)}"
-            buttons.append({"text": f"{g.capitalize()} {count}", "callback_data": f"select_{g}"})
-        except: 
-            buttons.append({"text": g.capitalize(), "callback_data": f"select_{g}"})
+            # On ne fait pas de scraping lourd ici pour éviter le timeout
+            buttons.append({"text": f"{g.capitalize()}", "callback_data": f"select_{g}"})
+        except: continue
     
-    for i in range(0, len(buttons), 2): 
-        keyboard.append(buttons[i:i + 2])
+    for i in range(0, len(buttons), 2): keyboard.append(buttons[i:i + 2])
         
     requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={
         "chat_id": chat_id, 
@@ -413,7 +391,6 @@ def send_galerie_menu(chat_id):
     })
 
 def send_suggestion(chat_id, galerie_nom):
-    """Propose une photo avec actions de publication et accès rapide admin."""
     token = os.environ.get('TELEGRAM_TOKEN')
     config = load_config()
     soup = BeautifulSoup(requests.get(f"{config.get('site_url')}/{galerie_nom}").text, 'html.parser')
@@ -428,24 +405,13 @@ def send_suggestion(chat_id, galerie_nom):
         requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "Galerie terminée."})
         return
 
-    # CORRECTION : Parenthèse refermée ci-dessous
-    img_url = random.choice(avail) 
+    img_url = random.choice(avail)
     cap = generate_ai_caption(img_url, galerie_nom)
     save_session(chat_id, img_url, cap)
 
-    # --- Clavier optimisé sous la photo ---
-    keyboard = [
-        [{"text": "📸 Instagram", "callback_data": "pub_ig"}, {"text": "🧵 Threads", "callback_data": "pub_th"}],
-        [{"text": "📍 Lieu", "callback_data": "add_location"}, {"text": "✍️ Manuel", "callback_data": "manual_edit"}],
-        [{"text": "🔄 Autre", "callback_data": f"select_{galerie_nom}"}, {"text": "⬅️ Menu", "callback_data": "menu"}]
-    ]
+    keyboard = [[{"text": "📸 Instagram", "callback_data": "pub_ig"}, {"text": "🧵 Threads", "callback_data": "pub_th"}],[{"text": "📍 Lieu", "callback_data": "add_location"}, {"text": "✍️ Manuel", "callback_data": "manual_edit"}],[{"text": "🔄 Autre", "callback_data": f"select_{galerie_nom}"}, {"text": "⬅️ Menu", "callback_data": "menu"}]]
 
-    requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", json={
-        "chat_id": chat_id, 
-        "photo": img_url, 
-        "caption": cap, 
-        "reply_markup": {"inline_keyboard": keyboard}
-    })
+    requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", json={"chat_id": chat_id, "photo": img_url, "caption": cap, "reply_markup": {"inline_keyboard": keyboard}})
 
 def get_session(chat_id):
     conn = get_db_connection()
@@ -458,8 +424,7 @@ def save_session(chat_id, url, cap):
     conn.execute('INSERT OR REPLACE INTO current_session VALUES (?, ?, ?)', (chat_id, url, cap))
     conn.commit()
     conn.close()
-    
-    
+
 # =================================================================
 # LANCEMENT DU SERVEUR
 # =================================================================
