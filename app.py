@@ -257,60 +257,35 @@ def telegram_webhook():
     if not data: return jsonify({"status": "ok"})
     
     # --- Gestion des Messages Textes ---
-    if "message" in data:
+    if "message" in data and "text" in data["message"]:
         chat_id = data["message"]["chat"]["id"]
         text = data["message"]["text"]
         
-        # --- COMMANDES ADMIN ---
+        # 1. COMMANDES ADMIN (Basées sur Section 4)
         if text == "/debug_db":
-            conn = get_db_connection()
-            rows = conn.execute('SELECT url FROM sent_photos').fetchall()
-            conn.close()
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": f"📋 DB : {len(rows)} photos publiées."})
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
+                          json={"chat_id": chat_id, "text": get_db_stats()})
             return jsonify({"status": "ok"})
             
         if text == "/export_db":
-            conn = get_db_connection()
-            cursor = conn.execute('SELECT * FROM sent_photos')
-            with open('/tmp/export.csv', 'w', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow(['url', 'galerie', 'date_envoi'])
-                writer.writerows(cursor.fetchall())
-            conn.close()
-            with open('/tmp/export.csv', 'rb') as f:
-                requests.post(f"https://api.telegram.org/bot{token}/sendDocument", data={"chat_id": chat_id}, files={"document": f})
+            file_path = export_db_to_csv()
+            with open(file_path, 'rb') as f:
+                requests.post(f"https://api.telegram.org/bot{token}/sendDocument", 
+                              data={"chat_id": chat_id}, files={"document": f})
             return jsonify({"status": "ok"})
 
-        # NOUVEAU : Commande de renouvellement Threads 
         if text == "/renew_threads":
-            client_secret = os.environ.get('THREADS_CLIENT_SECRET')
-            current_token = os.environ.get('THREADS_ACCESS_TOKEN')
-            
-            if not client_secret:
-                requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                              json={"chat_id": chat_id, "text": "❌ Erreur : THREADS_CLIENT_SECRET manquant sur Render."})
+            success, result = renew_threads_token()
+            if success:
+                new_token, days = result
+                msg = f"✅ Token renouvelé pour {days} jours !\n\n⚠️ IMPORTANT : Copie ce token dans tes variables Render :\n`{new_token}`"
             else:
-                url = "https://graph.threads.net/access_token"
-                params = {
-                    "grant_type": "th_exchange_token",
-                    "client_secret": client_secret,
-                    "access_token": current_token
-                }
-                r = requests.get(url, params=params)
-                res = r.json()
-                
-                if "access_token" in res:
-                    new_token = res['access_token']
-                    days = res.get('expires_in', 0) // 86400
-                    msg = f"✅ Token renouvelé pour {days} jours !\n\n⚠️ IMPORTANT : Copie ce token dans tes variables Render :\n`{new_token}`"
-                    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                                  json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
-                else:
-                    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                                  json={"chat_id": chat_id, "text": f"❌ Échec de l'échange : {res}"})
+                msg = f"❌ Échec : {result}"
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
+                          json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
             return jsonify({"status": "ok"})
 
-        # --- LOGIQUE DE SESSION (MANUEL / LIEU) ---
+        # 2. LOGIQUE DE SESSION (MANUEL / LIEU)
         session = get_session(chat_id)
         if session and session[1] == "WAITING_FOR_MANUAL":
             save_session(chat_id, session[0], text)
@@ -319,7 +294,8 @@ def telegram_webhook():
             new_cap = f"📍 {text}\n\n{session[1]}"
             save_session(chat_id, session[0], new_cap)
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✅ Lieu ajouté.", "reply_markup": {"inline_keyboard": [[{"text": "📸 Instagram", "callback_data": "pub_ig"}, {"text": "🧵 Threads", "callback_data": "pub_th"}]]}})
-        else: send_galerie_menu(chat_id)
+        else: 
+            send_galerie_menu(chat_id)
 
     # --- Gestion des Clics Boutons (Callbacks) ---
     elif "callback_query" in data:
@@ -327,6 +303,7 @@ def telegram_webhook():
         action = data["callback_query"]["data"]
         session = get_session(chat_id)
         
+        # Vérification de sécurité anti-doublon
         is_already_sent = False
         if session:
             conn = get_db_connection()
@@ -362,11 +339,14 @@ def telegram_webhook():
                 else:
                     requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": f"❌ Erreur TH : {res}"})
         
-        elif action == "manual_edit":
+        elif action == "manual_edit" and session:
             save_session(chat_id, session[0], "WAITING_FOR_MANUAL")
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✍️ Envoie ton texte."})
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✍️ Envoie ton texte complet."})
             
     return jsonify({"status": "ok"})
+        
+        
+        
 # =================================================================
 # SECTION 6 : FONCTIONS AUXILIAIRES (Scraping, Session)
 # =================================================================
