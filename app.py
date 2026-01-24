@@ -33,11 +33,12 @@ def load_config():
 
 init_db()
 
+
 # =================================================================
-# SECTION 2 : MOTEUR D'INTELLIGENCE ARTIFICIELLE (RÉTABLIE)
+# SECTION 2 : MOTEUR D'INTELLIGENCE ARTIFICIELLE (HASHTAGS DYNAMIQUES)
 # =================================================================
 def generate_ai_caption(image_url, galerie_nom):
-    """Analyse l'image et génère une légende structurée (Hook SEO + Technique)."""
+    """Analyse l'image et génère une légende avec des hashtags contextuels."""
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     
@@ -45,24 +46,28 @@ def generate_ai_caption(image_url, galerie_nom):
     display_link = f"{base_url}/{galerie_nom}"
     
     manual_hashtag = config.get('custom_hashtag', '')
-    extra_tag = f"+ {manual_hashtag}" if manual_hashtag else ""
+    # On prépare le tag de base (ex: #DavidAhmed), l'IA ajoutera les autres à la suite
+    base_tag = f"#{manual_hashtag}" if manual_hashtag else ""
     
     instructions = f"""Tu es David Ahmed, photographe d'art. Analyse cette photo de {galerie_nom}.
     
-    STRATÉGIE : 1. Crochet (Hook) percutant. 2. Vocabulaire riche. 3. 2-3 phrases claires.
+    OBJECTIFS : 
+    1. Écrire un titre accrocheur (sans "Titre :").
+    2. Analyser l'ambiance artistique en 2 phrases max.
+    3. Générer 3 à 5 hashtags DYNAMIQUES (en Anglais ou Français) basés sur les éléments visuels (couleurs, objets, lumière) et l'ambiance, en plus du tag imposé.
     
-    STRUCTURE STRICTE :
+    STRUCTURE STRICTE DU RÉSULTAT :
     - Ligne 1 : Titre percutant.
-    - Ligne 2 : Analyse (2-3 phrases).
-    - (Saut de ligne)
-    - Ligne : Voir la galerie : {display_link}
-    - (Saut de ligne)
-    - Hashtags {extra_tag}.
+    - Ligne 2 : Analyse.
+    - (Saut de ligne vide)
+    - Ligne 4 : Voir la galerie : {display_link}
+    - (Saut de ligne vide)
+    - Ligne 6 : {base_tag} #TagDynamique1 #TagDynamique2 #TagDynamique3...
     
-    STRICT : 
-    - PAS de gras (**), PAS de ###, PAS de majuscules intégrales. 
-    - Ne transforme PAS le lien en format Markdown [texte](url). Affiche-le tel quel.
-    - Max 480 caractères au total."""
+    CONTRAINTES : 
+    - PAS de gras (**), PAS de balises Markdown. 
+    - Ne transforme PAS le lien.
+    - Max 480 caractères tout compris."""
     
     response = client.chat.completions.create(
         model="gpt-4o",
@@ -71,12 +76,15 @@ def generate_ai_caption(image_url, galerie_nom):
     )
     
     raw = response.choices[0].message.content
-    clean = raw.replace("**", "").replace("__", "").replace("### ", "").replace("## ", "").replace("# ", "")
+    # Nettoyage léger pour éviter de casser les hashtags
+    clean = raw.replace("**", "").replace("__", "").replace("### ", "").replace("## ", "")
     lines = clean.split('\n')
     if lines:
         lines[0] = lines[0].strip().capitalize()
     
     return "\n".join(lines).strip()[:495]
+
+
 
 # =================================================================
 # SECTION 3 : LOGIQUE DES RÉSEAUX SOCIAUX
