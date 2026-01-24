@@ -156,7 +156,6 @@ def publish_to_threads(image_url, caption):
 # =================================================================
 # SECTION 4 : GESTION DE LA BASE DE DONNÉES (DB Admin)
 # =================================================================
-
 def mark_photo_as_sent(url, galerie):
     """Enregistre une photo publiée dans l'historique avec date et galerie."""
     date_jour = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -237,13 +236,17 @@ def renew_threads_token():
     except Exception as e: return False, str(e)
 
 def get_db_stats():
-    """Génère un résumé des publications par galerie."""
+    """Génère un résumé des publications par galerie avec sécurité contre les noms vides."""
     conn = get_db_connection()
     stats = conn.execute('SELECT galerie, COUNT(*) FROM sent_photos GROUP BY galerie').fetchall()
     conn.close()
     if not stats: return "La base de données est vide."
+    
     msg = "📁 **RÉSUMÉ DES PUBLICATIONS :**\n"
-    for s in stats: msg += f"- {s[0].capitalize()} : {s[1]} photos\n"
+    for s in stats:
+        # CORRECTION : On vérifie si s[0] (nom de la galerie) n'est pas None avant de capitalize
+        gal_name = s[0].capitalize() if s[0] else "Anciennes (Sans nom)"
+        msg += f"- {gal_name} : {s[1]} photos\n"
     return msg
     
     
