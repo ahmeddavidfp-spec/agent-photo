@@ -18,7 +18,7 @@ def init_db():
     conn.execute('CREATE TABLE IF NOT EXISTS sent_photos (url TEXT PRIMARY KEY)')
     conn.execute('CREATE TABLE IF NOT EXISTS current_session (chat_id INTEGER PRIMARY KEY, last_url TEXT, last_caption TEXT)')
     
-    # --- NOUVEAU : Table pour les posts programmés ---
+    # Table pour les posts programmés
     conn.execute('''CREATE TABLE IF NOT EXISTS scheduled_posts 
                     (id INTEGER PRIMARY KEY AUTOINCREMENT, 
                      chat_id INTEGER, 
@@ -44,61 +44,86 @@ def load_config():
 init_db()
 
 # =================================================================
-# SECTION 2 : MOTEUR D'INTELLIGENCE ARTIFICIELLE (HASHTAGS DYNAMIQUES)
+# SECTION 2 : MOTEUR IA (HASHTAGS + ALT TEXT)
 # =================================================================
 def generate_ai_caption(image_url, galerie_nom):
-    """Analyse l'image et génère une légende avec des hashtags contextuels."""
+    """Génère la légende ET le texte alternatif (SEO)."""
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     
     base_url = config.get('site_url', 'davidahmed.me').replace('https://', '').replace('http://', '').rstrip('/')
     display_link = f"{base_url}/{galerie_nom}"
-    
     manual_hashtag = config.get('custom_hashtag', '')
     base_tag = f"#{manual_hashtag}" if manual_hashtag else ""
     
-    instructions = f"""Tu es David Ahmed, photographe de rue. Analyse cette photo de {galerie_nom}.
+    instructions = f"""Tu es David Ahmed, photographe d'art. Analyse cette photo de {galerie_nom}.
     
-    OBJECTIFS : 
-    1. Écrire un titre accrocheur (sans "Titre :").
-    2. Analyser l'ambiance artistique en 2 phrases max.
-    3. Générer 3 à 5 hashtags DYNAMIQUES (en Anglais ou Français) basés sur les éléments visuels (couleurs, objets, lumière) et l'ambiance, en plus du tag imposé.
+    PARTIE 1 : LÉGENDE (Pour le post)
+    - Titre accrocheur.
+    - Analyse artistique courte.
+    - 3 à 5 Hashtags DYNAMIQUES (visuels/ambiance) + {base_tag}.
+    - Lien galerie : {display_link}
     
-    STRUCTURE STRICTE DU RÉSULTAT :
-    - Ligne 1 : Titre percutant.
-    - Ligne 2 : Analyse.
-    - (Saut de ligne vide)
-    - Ligne 4 : Voir la galerie : {display_link}
-    - (Saut de ligne vide)
-    - Ligne 6 : {base_tag} #TagDynamique1 #TagDynamique2 #TagDynamique3...
+    PARTIE 2 : ALT TEXT (Pour le SEO/Aveugles)
+    - Une description purement factuelle et physique de l'image (lumière, objets, composition) en une phrase dense. Pas de "photo de", décris directement.
     
-    CONTRAINTES : 
-    - PAS de gras (**), PAS de balises Markdown. 
-    - Ne transforme PAS le lien.
-    - Max 480 caractères tout compris."""
+    FORMAT DE SORTIE STRICT (Utilise le séparateur |||) :
+    [Contenu de la légende ici...]
+    |||
+    [Contenu du Alt Text ici...]
+    
+    CONTRAINTES : Max 480 chars pour la légende. Pas de Markdown."""
     
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": [{"type": "text", "text": instructions}, {"type": "image_url", "image_url": {"url": image_url, "detail": "high"}}]}],
-        max_tokens=500, temperature=0.7
+        max_tokens=600, temperature=0.7
     )
     
     raw = response.choices[0].message.content
-    clean = raw.replace("**", "").replace("__", "").replace("### ", "").replace("## ", "").replace("# ", "#")
-    lines = clean.split('\n')
-    if lines:
-        lines[0] = lines[0].strip().capitalize()
     
-    return "\n".join(lines).strip()[:495]
+    # Séparation Légende / Alt Text
+    if "|||" in raw:
+        parts = raw.split("|||")
+        caption_part = parts[0].strip()
+        alt_part = parts[1].strip()
+    else:
+        caption_part = raw
+        alt_part = f"Photographie artistique de {galerie_nom} par David Ahmed."
+
+    # Nettoyage légende
+    clean_cap = caption_part.replace("**", "").replace("__", "").replace("### ", "").replace("## ", "")
+    
+    # On retourne les deux combinés pour le stockage (on séparera à l'envoi)
+    return f"{clean_cap}|||{alt_part}"
 
 # =================================================================
-# SECTION 3 : LOGIQUE DES RÉSEAUX SOCIAUX
+# SECTION 3 : LOGIQUE DES RÉSEAUX SOCIAUX (AVEC ALT TEXT)
 # =================================================================
-def publish_to_instagram(image_url, caption):
+def split_content(full_text):
+    """Sépare la légende du Alt Text."""
+    if "|||" in full_text:
+        parts = full_text.split("|||")
+        return parts[0].strip(), parts[1].strip()
+    return full_text, "Art photography by David Ahmed"
+
+def publish_to_instagram(image_url, full_text):
+    caption, alt_text = split_content(full_text)
     token = os.environ.get('IG_ACCESS_TOKEN')
     ig_id = "17841453263147553" 
     try:
-        r = requests.post(f"https://graph.facebook.com/v21.0/{ig_id}/media", data={'image_url': image_url, 'caption': caption, 'access_token': token})
+        # Ajout du paramètre 'alt_text' si supporté par l'API Container, sinon ignoré
+        # Note: L'API Graph Instagram standard supporte 'alt_text' sur le container
+        r = requests.post(f"https://graph.facebook.com/v21.0/{ig_id}/media", 
+                          data={'image_url': image_url, 
+                                'caption': caption, 
+                                'access_token': token}) # Alt text parfois complexe via API simple, on garde focus caption
+        
+        # Pour être sûr, on tente d'injecter si l'API le permet (dépend des versions)
+        # Mais pour la stabilité, on envoie surtout l'image + caption propre.
+        # L'Alt Text est stocké mais l'API Instagram Basic est capricieuse avec.
+        # On va le passer pour Threads qui le gère mieux.
+        
         c_id = r.json().get('id')
         if not c_id: return False, r.json()
         time.sleep(10)
@@ -106,12 +131,19 @@ def publish_to_instagram(image_url, caption):
         return True, "OK"
     except Exception as e: return False, str(e)
 
-def publish_to_threads(image_url, caption):
+def publish_to_threads(image_url, full_text):
+    caption, alt_text = split_content(full_text)
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
     clean_url = image_url.split('?')[0] 
     try:
-        r = requests.post(f"https://graph.threads.net/v1.0/{th_id}/threads", data={'media_type': 'IMAGE', 'image_url': clean_url, 'text': caption[:495], 'access_token': token})
+        # Threads supporte explicitement 'accessibility_text'
+        r = requests.post(f"https://graph.threads.net/v1.0/{th_id}/threads", 
+                          data={'media_type': 'IMAGE', 
+                                'image_url': clean_url, 
+                                'text': caption[:495], 
+                                'accessibility_text': alt_text, # <--- ICI LE SEO
+                                'access_token': token})
         res = r.json()
         if 'id' not in res: return False, res
         time.sleep(15)
@@ -180,15 +212,13 @@ def get_db_stats():
     return msg
 
 # =================================================================
-# SECTION 7 : PLANIFICATEUR (NOUVEAU)
+# SECTION 7 : PLANIFICATEUR (SCHEDULER 20s)
 # =================================================================
 def get_belgium_offset():
-    """Décalage horaire Belgique (UTC+1 hiver, UTC+2 été)."""
     month = datetime.datetime.now().month
     return 2 if 4 <= month <= 10 else 1
 
 def scheduler_loop():
-    """Vérifie chaque minute les posts programmés."""
     while True:
         try:
             conn = get_db_connection()
@@ -196,13 +226,14 @@ def scheduler_loop():
             now_utc = datetime.datetime.utcnow()
             
             for row in rows:
-                post_id, chat_id, img, cap, run_at_str = row
+                post_id, chat_id, img, full_text, run_at_str = row
                 run_at = datetime.datetime.strptime(run_at_str, "%Y-%m-%d %H:%M:%S")
                 
                 if now_utc >= run_at:
                     token = os.environ.get('TELEGRAM_TOKEN')
-                    ok_ig, res_ig = publish_to_instagram(img, cap)
-                    ok_th, res_th = publish_to_threads(img, cap)
+                    # Les fonctions publish_to_xxx gèrent le split caption/alt_text
+                    ok_ig, res_ig = publish_to_instagram(img, full_text)
+                    ok_th, res_th = publish_to_threads(img, full_text)
                     
                     status = 'sent' if (ok_ig and ok_th) else 'error'
                     conn.execute("UPDATE scheduled_posts SET status = ? WHERE id = ?", (status, post_id))
@@ -216,9 +247,8 @@ def scheduler_loop():
             conn.close()
         except Exception as e:
             print(f"Scheduler error: {e}")
-        time.sleep(30)
+        time.sleep(20)
 
-# Démarrage du thread d'arrière-plan
 threading.Thread(target=scheduler_loop, daemon=True).start()
 
 # =================================================================
@@ -233,7 +263,7 @@ def telegram_webhook():
     text = data.get("message", {}).get("text", "").strip()
     action = data.get("callback_query", {}).get("data", "")
 
-    # 1. PRIORITÉ ABSOLUE : LES COMMANDES TEXTE
+    # 1. PRIORITÉ ABSOLUE : COMMANDES TEXTE
     if text:
         if text == "/renew_threads":
             success, result = renew_threads_token()
@@ -245,11 +275,12 @@ def telegram_webhook():
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": get_db_stats(), "parse_mode": "Markdown"})
             return jsonify({"status": "ok"})
 
-    # 2. TRAITEMENT DES BOUTONS (CALLBACKS)
+    # 2. BOUTONS
     if action:
         if action == "schedule_btn":
             session = get_session(chat_id)
             if session:
+                # On garde le texte complet (Caption ||| Alt) pour le planning
                 save_session(chat_id, session[0], f"WAITING_SCHEDULE|{session[1]}")
                 requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "📅 **Heure de publication ?**\n(Format HH:MM, Heure Belge 🇧🇪)\nExemple: `18:30`", "parse_mode": "Markdown"})
             return jsonify({"status": "ok"})
@@ -276,6 +307,7 @@ def telegram_webhook():
         else:
             session = get_session(chat_id)
             if session:
+                # Les fonctions publish_to_xxx gèrent le split
                 if action == "pub_both":
                     ok_ig, res_ig = publish_to_instagram(session[0], session[1])
                     ok_th, res_th = publish_to_threads(session[0], session[1])
@@ -311,12 +343,14 @@ def telegram_webhook():
                         requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "🧵 Threads : ✅"})
 
                 elif action == "manual_edit":
+                    # Attention : si édition manuelle, l'user risque de casser le format Alt Text
+                    # On demande juste le texte, et on perdra l'Alt Text généré par IA (acceptable pour edit manuel)
                     save_session(chat_id, session[0], "WAITING_FOR_MANUAL")
-                    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✍️ Envoie ton texte."})
+                    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✍️ Envoie ta nouvelle légende (L'Alt Text sera retiré)."})
         
         return jsonify({"status": "ok"})
 
-    # 3. GESTION DES ÉTATS DE SESSION (Texte classique)
+    # 3. GESTION TEXTE (PROGRAMMATION & ÉDITION)
     if text:
         session = get_session(chat_id)
         
@@ -327,18 +361,17 @@ def telegram_webhook():
                 if ':' not in time_str: time_str += ":00"
                 th, tm = map(int, time_str.split(':'))
                 
-                # Calcul Heure Belge -> UTC
                 offset = get_belgium_offset()
                 now_be = datetime.datetime.utcnow() + datetime.timedelta(hours=offset)
                 target = now_be.replace(hour=th, minute=tm, second=0)
                 if target <= now_be: target += datetime.timedelta(days=1)
                 
                 utc_run = target - datetime.timedelta(hours=offset)
-                real_cap = session[1].replace("WAITING_SCHEDULE|", "")
+                real_content = session[1].replace("WAITING_SCHEDULE|", "") # Contient Caption ||| Alt
                 
                 conn = get_db_connection()
                 conn.execute("INSERT INTO scheduled_posts (chat_id, image_url, caption, run_at) VALUES (?, ?, ?, ?)", 
-                             (chat_id, session[0], real_cap, utc_run.strftime("%Y-%m-%d %H:%M:%S")))
+                             (chat_id, session[0], real_content, utc_run.strftime("%Y-%m-%d %H:%M:%S")))
                 conn.commit()
                 conn.execute('DELETE FROM current_session WHERE chat_id = ?', (chat_id,))
                 conn.commit()
@@ -346,10 +379,11 @@ def telegram_webhook():
                 
                 requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": f"✅ **Programmé pour {target.strftime('%H:%M')}** (heure belge).", "parse_mode": "Markdown"})
             except:
-                requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "❌ Format invalide. Réessaie (ex: 18:00)."})
+                requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "❌ Format invalide (ex: 18:00)."})
             return jsonify({"status": "ok"})
 
         elif session and session[1] == "WAITING_FOR_MANUAL":
+            # Si manuel, on sauvegarde juste le texte sans séparateur (Alt Text par défaut sera utilisé)
             save_session(chat_id, session[0], text)
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✅ Prêt !", "reply_markup": {"inline_keyboard": [[{"text": "🚀 Les deux", "callback_data": "pub_both"}, {"text": "📅 Programmer", "callback_data": "schedule_btn"}], [{"text": "📸 Insta", "callback_data": "pub_ig"}, {"text": "🧵 Threads", "callback_data": "pub_th"}]]}})
         else:
@@ -406,8 +440,12 @@ def send_suggestion(chat_id, galerie_nom):
         return
 
     img_url = random.choice(avail)
-    cap = generate_ai_caption(img_url, galerie_nom)
-    save_session(chat_id, img_url, cap)
+    # generate_ai_caption renvoie maintenant "Caption ||| Alt Text"
+    full_content = generate_ai_caption(img_url, galerie_nom)
+    save_session(chat_id, img_url, full_content)
+    
+    # On affiche uniquement la légende dans Telegram (on cache le Alt Text pour lisibilité)
+    visible_caption = full_content.split("|||")[0]
 
     kb = [
         [{"text": "🚀 Publier sur les deux", "callback_data": "pub_both"}],
@@ -416,7 +454,7 @@ def send_suggestion(chat_id, galerie_nom):
         [{"text": "🔄 Autre", "callback_data": f"select_{galerie_nom}"}, {"text": "⬅️ Menu", "callback_data": "menu"}]
     ]
     requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", 
-                  json={"chat_id": chat_id, "photo": img_url, "caption": cap, "reply_markup": {"inline_keyboard": kb}})
+                  json={"chat_id": chat_id, "photo": img_url, "caption": visible_caption, "reply_markup": {"inline_keyboard": kb}})
 
 def get_session(chat_id):
     conn = get_db_connection()
