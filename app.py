@@ -169,10 +169,6 @@ def get_db_stats():
 # =================================================================
 # SECTION 5 : INTERFACE TELEGRAM
 # =================================================================
-
-# =================================================================
-# SECTION 5 : INTERFACE TELEGRAM
-# =================================================================
 @app.route("/telegram-webhook", methods=['POST'])
 def telegram_webhook():
     data = request.json
@@ -188,7 +184,7 @@ def telegram_webhook():
             success, result = renew_threads_token()
             msg = f"✅ **TOKEN RENOUVELÉ ({result[1]}j)**\n`{result[0]}`" if success else f"❌ {result}"
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
-            return jsonify({"status": "ok"}) # ON S'ARRÊTE ICI
+            return jsonify({"status": "ok"})
 
         elif text == "/debug_db":
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": get_db_stats(), "parse_mode": "Markdown"})
@@ -218,7 +214,6 @@ def telegram_webhook():
         else:
             session = get_session(chat_id)
             if session:
-                # --- LOGIQUE PUBLICATION (pub_both, pub_ig, pub_th) ---
                 if action == "pub_both":
                     ok_ig, res_ig = publish_to_instagram(session[0], session[1])
                     ok_th, res_th = publish_to_threads(session[0], session[1])
@@ -232,7 +227,30 @@ def telegram_webhook():
                     else:
                         msg = f"⚠️ Résultat partiel :\nIG: {'✅' if ok_ig else '❌ ' + str(res_ig)}\nTH: {'✅' if ok_th else '❌ ' + str(res_th)}"
                         requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg})
-                # ... (tes autres elif pub_ig, pub_th, manual_edit)
+                
+                elif action == "pub_ig":
+                    ok, res = publish_to_instagram(session[0], session[1])
+                    if ok:
+                        mark_photo_as_sent(session[0], "Auto")
+                        conn = get_db_connection()
+                        conn.execute('DELETE FROM current_session WHERE chat_id = ?', (chat_id,))
+                        conn.commit()
+                        conn.close()
+                        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "📸 Insta : ✅"})
+
+                elif action == "pub_th":
+                    ok, res = publish_to_threads(session[0], session[1])
+                    if ok:
+                        mark_photo_as_sent(session[0], "Auto")
+                        conn = get_db_connection()
+                        conn.execute('DELETE FROM current_session WHERE chat_id = ?', (chat_id,))
+                        conn.commit()
+                        conn.close()
+                        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "🧵 Threads : ✅"})
+
+                elif action == "manual_edit":
+                    save_session(chat_id, session[0], "WAITING_FOR_MANUAL")
+                    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✍️ Envoie ton texte."})
         
         return jsonify({"status": "ok"})
 
@@ -247,13 +265,10 @@ def telegram_webhook():
                 
     return jsonify({"status": "ok"})
 
-
-
 # =================================================================
 # SECTION 6 : FONCTIONS AUXILIAIRES
 # =================================================================
 def send_galerie_menu(chat_id):
-    """Génère le menu des galeries avec outils d'administration inclus."""
     config = load_config()
     token = os.environ.get('TELEGRAM_TOKEN')
     status = get_token_status()
@@ -284,7 +299,6 @@ def send_galerie_menu(chat_id):
                   json={"chat_id": chat_id, "text": f"{status}\n---\nQuelle galerie ?", "reply_markup": {"inline_keyboard": keyboard}})
 
 def send_suggestion(chat_id, galerie_nom):
-    """Propose une photo avec le bouton pour publier sur les deux réseaux simultanément."""
     token = os.environ.get('TELEGRAM_TOKEN')
     config = load_config()
     soup = BeautifulSoup(requests.get(f"{config.get('site_url')}/{galerie_nom}").text, 'html.parser')
