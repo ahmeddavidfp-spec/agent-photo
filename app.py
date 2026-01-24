@@ -1,4 +1,4 @@
-import os, requests, yaml, random, sqlite3, time, datetime, csv, threading
+import os, requests, yaml, random, sqlite3, time, datetime, csv, threading, re
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 from openai import OpenAI
@@ -43,13 +43,11 @@ def load_config():
 
 init_db()
 
-
-
 # =================================================================
-# SECTION 2 : MOTEUR IA (LISTE "SAFE" VÉRIFIÉE & AUDITÉE)
+# SECTION 2 : MOTEUR IA (LISTE "SAFE" + CORRECTION REGEX)
 # =================================================================
 def generate_ai_caption(image_url, galerie_nom):
-    """Génère la légende en utilisant uniquement des hubs vérifiés."""
+    """Génère la légende en utilisant uniquement des hubs vérifiés + Correction Regex."""
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     
@@ -112,26 +110,33 @@ def generate_ai_caption(image_url, galerie_nom):
         caption_part = raw
         alt_part = f"Photographie artistique de {galerie_nom} par David Ahmed."
 
-    # PATCH SÉCURITÉ (Nettoyage + Force @)
+    # --- PATCH SÉCURITÉ ULTRA-ROBUSTE (REGEX) ---
     clean_cap = caption_part.replace("PARTIE 1", "").replace("LÉGENDE", "").replace("Titre :", "").strip()
     
     lines = clean_cap.split('\n')
     final_lines = []
+    
     for line in lines:
-        if line.strip().startswith('(cc'):
-            content = line.replace('(cc', '').replace(')', '').strip()
-            fixed_mentions = " ".join([word if word.startswith('@') else f"@{word}" for word in content.split() if word])
-            final_lines.append(f"(cc {fixed_mentions})")
+        # On utilise une expression régulière pour trouver "(cc ...)" peu importe le formatage
+        if "(cc" in line:
+            # Cette regex capture tout ce qu'il y a entre parenthèses après "cc"
+            content_match = re.search(r'\(cc\s+(.*?)\)', line)
+            if content_match:
+                content = content_match.group(1)
+                # On nettoie et on force le @ sur chaque mot
+                words = content.replace(',', ' ').split()
+                fixed_mentions = " ".join([w if w.startswith('@') else f"@{w}" for w in words])
+                final_lines.append(f"(cc {fixed_mentions})")
+            else:
+                final_lines.append(line)
         else:
             final_lines.append(line)
             
     final_caption = "\n".join(final_lines)
     return f"{final_caption}|||{alt_part}"
 
-
-
 # =================================================================
-# SECTION 3 : LOGIQUE DES RÉSEAUX SOCIAUX (AVEC ALT TEXT)
+# SECTION 3 : LOGIQUE DES RÉSEAUX SOCIAUX
 # =================================================================
 def split_content(full_text):
     """Sépare la légende du Alt Text."""
@@ -141,22 +146,12 @@ def split_content(full_text):
     return full_text, "Art photography by David Ahmed"
 
 def publish_to_instagram(image_url, full_text):
-    caption, alt_text = split_content(full_text)
+    caption, _ = split_content(full_text)
     token = os.environ.get('IG_ACCESS_TOKEN')
     ig_id = "17841453263147553" 
     try:
-        # Ajout du paramètre 'alt_text' si supporté par l'API Container, sinon ignoré
-        # Note: L'API Graph Instagram standard supporte 'alt_text' sur le container
         r = requests.post(f"https://graph.facebook.com/v21.0/{ig_id}/media", 
-                          data={'image_url': image_url, 
-                                'caption': caption, 
-                                'access_token': token}) # Alt text parfois complexe via API simple, on garde focus caption
-        
-        # Pour être sûr, on tente d'injecter si l'API le permet (dépend des versions)
-        # Mais pour la stabilité, on envoie surtout l'image + caption propre.
-        # L'Alt Text est stocké mais l'API Instagram Basic est capricieuse avec.
-        # On va le passer pour Threads qui le gère mieux.
-        
+                          data={'image_url': image_url, 'caption': caption, 'access_token': token})
         c_id = r.json().get('id')
         if not c_id: return False, r.json()
         time.sleep(10)
@@ -170,13 +165,8 @@ def publish_to_threads(image_url, full_text):
     th_id = os.environ.get('THREADS_USER_ID')
     clean_url = image_url.split('?')[0] 
     try:
-        # Threads supporte explicitement 'accessibility_text'
         r = requests.post(f"https://graph.threads.net/v1.0/{th_id}/threads", 
-                          data={'media_type': 'IMAGE', 
-                                'image_url': clean_url, 
-                                'text': caption[:495], 
-                                'accessibility_text': alt_text, # <--- ICI LE SEO
-                                'access_token': token})
+                          data={'media_type': 'IMAGE', 'image_url': clean_url, 'text': caption[:495], 'accessibility_text': alt_text, 'access_token': token})
         res = r.json()
         if 'id' not in res: return False, res
         time.sleep(15)
@@ -257,29 +247,22 @@ def scheduler_loop():
             conn = get_db_connection()
             rows = conn.execute("SELECT id, chat_id, image_url, caption, run_at FROM scheduled_posts WHERE status='pending'").fetchall()
             now_utc = datetime.datetime.utcnow()
-            
             for row in rows:
                 post_id, chat_id, img, full_text, run_at_str = row
                 run_at = datetime.datetime.strptime(run_at_str, "%Y-%m-%d %H:%M:%S")
-                
                 if now_utc >= run_at:
                     token = os.environ.get('TELEGRAM_TOKEN')
-                    # Les fonctions publish_to_xxx gèrent le split caption/alt_text
                     ok_ig, res_ig = publish_to_instagram(img, full_text)
                     ok_th, res_th = publish_to_threads(img, full_text)
-                    
                     status = 'sent' if (ok_ig and ok_th) else 'error'
                     conn.execute("UPDATE scheduled_posts SET status = ? WHERE id = ?", (status, post_id))
                     conn.commit()
-                    
                     msg = "⏰ **Post Programmé Exécuté !**\n"
                     msg += f"IG: {'✅' if ok_ig else '❌'} | TH: {'✅' if ok_th else '❌'}"
                     requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
-                    
                     if ok_ig or ok_th: mark_photo_as_sent(img, "Programmé")
             conn.close()
-        except Exception as e:
-            print(f"Scheduler error: {e}")
+        except Exception as e: print(f"Scheduler error: {e}")
         time.sleep(20)
 
 threading.Thread(target=scheduler_loop, daemon=True).start()
@@ -296,51 +279,40 @@ def telegram_webhook():
     text = data.get("message", {}).get("text", "").strip()
     action = data.get("callback_query", {}).get("data", "")
 
-    # 1. PRIORITÉ ABSOLUE : COMMANDES TEXTE
     if text:
         if text == "/renew_threads":
             success, result = renew_threads_token()
             msg = f"✅ **TOKEN RENOUVELÉ ({result[1]}j)**\n`{result[0]}`" if success else f"❌ {result}"
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
             return jsonify({"status": "ok"})
-
         elif text == "/debug_db":
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": get_db_stats(), "parse_mode": "Markdown"})
             return jsonify({"status": "ok"})
 
-    # 2. BOUTONS
     if action:
         if action == "schedule_btn":
             session = get_session(chat_id)
             if session:
-                # On garde le texte complet (Caption ||| Alt) pour le planning
                 save_session(chat_id, session[0], f"WAITING_SCHEDULE|{session[1]}")
                 requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "📅 **Heure de publication ?**\n(Format HH:MM, Heure Belge 🇧🇪)\nExemple: `18:30`", "parse_mode": "Markdown"})
             return jsonify({"status": "ok"})
-            
         elif action == "renew_threads_btn":
             success, result = renew_threads_token()
             msg = f"✅ **TOKEN RENOUVELÉ ({result[1]}j)**\n`{result[0]}`" if success else f"❌ {result}"
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
             return jsonify({"status": "ok"})
-        
         elif action == "view_stats":
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": get_db_stats(), "parse_mode": "Markdown"})
-        
         elif action == "export_db_btn":
             path = export_db_to_csv()
             with open(path, 'rb') as f: requests.post(f"https://api.telegram.org/bot{token}/sendDocument", data={"chat_id": chat_id}, files={"document": f})
-        
         elif action == "menu": 
             send_galerie_menu(chat_id)
-            
         elif action.startswith("select_"): 
             send_suggestion(chat_id, action.split("_")[1])
-            
         else:
             session = get_session(chat_id)
             if session:
-                # Les fonctions publish_to_xxx gèrent le split
                 if action == "pub_both":
                     ok_ig, res_ig = publish_to_instagram(session[0], session[1])
                     ok_th, res_th = publish_to_threads(session[0], session[1])
@@ -354,7 +326,6 @@ def telegram_webhook():
                     else:
                         msg = f"⚠️ Résultat partiel :\nIG: {'✅' if ok_ig else '❌ ' + str(res_ig)}\nTH: {'✅' if ok_th else '❌ ' + str(res_th)}"
                         requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg})
-                
                 elif action == "pub_ig":
                     ok, res = publish_to_instagram(session[0], session[1])
                     if ok:
@@ -364,7 +335,6 @@ def telegram_webhook():
                         conn.commit()
                         conn.close()
                         requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "📸 Insta : ✅"})
-
                 elif action == "pub_th":
                     ok, res = publish_to_threads(session[0], session[1])
                     if ok:
@@ -374,34 +344,24 @@ def telegram_webhook():
                         conn.commit()
                         conn.close()
                         requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "🧵 Threads : ✅"})
-
                 elif action == "manual_edit":
-                    # Attention : si édition manuelle, l'user risque de casser le format Alt Text
-                    # On demande juste le texte, et on perdra l'Alt Text généré par IA (acceptable pour edit manuel)
                     save_session(chat_id, session[0], "WAITING_FOR_MANUAL")
                     requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✍️ Envoie ta nouvelle légende (L'Alt Text sera retiré)."})
-        
         return jsonify({"status": "ok"})
 
-    # 3. GESTION TEXTE (PROGRAMMATION & ÉDITION)
     if text:
         session = get_session(chat_id)
-        
-        # LOGIQUE PROGRAMMATION
         if session and session[1].startswith("WAITING_SCHEDULE|"):
             try:
                 time_str = text.strip().replace('h', ':')
                 if ':' not in time_str: time_str += ":00"
                 th, tm = map(int, time_str.split(':'))
-                
                 offset = get_belgium_offset()
                 now_be = datetime.datetime.utcnow() + datetime.timedelta(hours=offset)
                 target = now_be.replace(hour=th, minute=tm, second=0)
                 if target <= now_be: target += datetime.timedelta(days=1)
-                
                 utc_run = target - datetime.timedelta(hours=offset)
-                real_content = session[1].replace("WAITING_SCHEDULE|", "") # Contient Caption ||| Alt
-                
+                real_content = session[1].replace("WAITING_SCHEDULE|", "")
                 conn = get_db_connection()
                 conn.execute("INSERT INTO scheduled_posts (chat_id, image_url, caption, run_at) VALUES (?, ?, ?, ?)", 
                              (chat_id, session[0], real_content, utc_run.strftime("%Y-%m-%d %H:%M:%S")))
@@ -409,37 +369,27 @@ def telegram_webhook():
                 conn.execute('DELETE FROM current_session WHERE chat_id = ?', (chat_id,))
                 conn.commit()
                 conn.close()
-                
                 requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": f"✅ **Programmé pour {target.strftime('%H:%M')}** (heure belge).", "parse_mode": "Markdown"})
             except:
                 requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "❌ Format invalide (ex: 18:00)."})
             return jsonify({"status": "ok"})
-
         elif session and session[1] == "WAITING_FOR_MANUAL":
-            # Si manuel, on sauvegarde juste le texte sans séparateur (Alt Text par défaut sera utilisé)
             save_session(chat_id, session[0], text)
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✅ Prêt !", "reply_markup": {"inline_keyboard": [[{"text": "🚀 Les deux", "callback_data": "pub_both"}, {"text": "📅 Programmer", "callback_data": "schedule_btn"}], [{"text": "📸 Insta", "callback_data": "pub_ig"}, {"text": "🧵 Threads", "callback_data": "pub_th"}]]}})
         else:
             send_galerie_menu(chat_id)
-                
     return jsonify({"status": "ok"})
 
-# =================================================================
-# SECTION 6 : FONCTIONS AUXILIAIRES
-# =================================================================
 def send_galerie_menu(chat_id):
     config = load_config()
     token = os.environ.get('TELEGRAM_TOKEN')
     status = get_token_status()
-    
     conn = get_db_connection()
     sent_urls = [row[0] for row in conn.execute('SELECT url FROM sent_photos').fetchall()]
     conn.close()
-
     keyboard = [[{"text": "📈 Stats", "callback_data": "view_stats"}, 
                  {"text": "📥 Export", "callback_data": "export_db_btn"}, 
                  {"text": "🔄 Renew", "callback_data": "renew_threads_btn"}]]
-    
     buttons = []
     for g in config.get('galeries', []):
         try:
@@ -448,46 +398,31 @@ def send_galerie_menu(chat_id):
             valid = [s if s.startswith('http') else f"{config.get('site_url')}{s}" for s in imgs]
             count = f"{len([u for u in valid if u in sent_urls])}/{len(valid)}"
             buttons.append({"text": f"{g.capitalize()} {count}", "callback_data": f"select_{g}"})
-        except: 
-            buttons.append({"text": g.capitalize(), "callback_data": f"select_{g}"})
-            
-    for i in range(0, len(buttons), 2): 
-        keyboard.append(buttons[i:i + 2])
-        
-    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                  json={"chat_id": chat_id, "text": f"{status}\n---\nQuelle galerie ?", "reply_markup": {"inline_keyboard": keyboard}})
+        except: buttons.append({"text": g.capitalize(), "callback_data": f"select_{g}"})
+    for i in range(0, len(buttons), 2): keyboard.append(buttons[i:i + 2])
+    requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": f"{status}\n---\nQuelle galerie ?", "reply_markup": {"inline_keyboard": keyboard}})
 
 def send_suggestion(chat_id, galerie_nom):
     token = os.environ.get('TELEGRAM_TOKEN')
     config = load_config()
     soup = BeautifulSoup(requests.get(f"{config.get('site_url')}/{galerie_nom}").text, 'html.parser')
     valid = [s if s.startswith('http') else f"{config.get('site_url')}{s}" for s in [img.get('src') for img in soup.find_all('img') if img.get('src')]]
-    
     conn = get_db_connection()
     sent = [row[0] for row in conn.execute('SELECT url FROM sent_photos').fetchall()]
     conn.close()
-    
     avail = [u for u in valid if u not in sent]
     if not avail:
         requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "Galerie vide."})
         return
-
     img_url = random.choice(avail)
-    # generate_ai_caption renvoie maintenant "Caption ||| Alt Text"
     full_content = generate_ai_caption(img_url, galerie_nom)
     save_session(chat_id, img_url, full_content)
-    
-    # On affiche uniquement la légende dans Telegram (on cache le Alt Text pour lisibilité)
     visible_caption = full_content.split("|||")[0]
-
-    kb = [
-        [{"text": "🚀 Publier sur les deux", "callback_data": "pub_both"}],
-        [{"text": "📅 Programmer", "callback_data": "schedule_btn"}],
-        [{"text": "📸 Insta", "callback_data": "pub_ig"}, {"text": "🧵 Threads", "callback_data": "pub_th"}],
-        [{"text": "🔄 Autre", "callback_data": f"select_{galerie_nom}"}, {"text": "⬅️ Menu", "callback_data": "menu"}]
-    ]
-    requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", 
-                  json={"chat_id": chat_id, "photo": img_url, "caption": visible_caption, "reply_markup": {"inline_keyboard": kb}})
+    kb = [[{"text": "🚀 Publier sur les deux", "callback_data": "pub_both"}],
+          [{"text": "📅 Programmer", "callback_data": "schedule_btn"}],
+          [{"text": "📸 Insta", "callback_data": "pub_ig"}, {"text": "🧵 Threads", "callback_data": "pub_th"}],
+          [{"text": "🔄 Autre", "callback_data": f"select_{galerie_nom}"}, {"text": "⬅️ Menu", "callback_data": "menu"}]]
+    requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", json={"chat_id": chat_id, "photo": img_url, "caption": visible_caption, "reply_markup": {"inline_keyboard": kb}})
 
 def get_session(chat_id):
     conn = get_db_connection()
