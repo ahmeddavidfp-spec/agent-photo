@@ -166,6 +166,8 @@ def get_db_stats():
         msg += f"- {name} : {s[1]} photos\n"
     return msg
 
+
+
 # =================================================================
 # SECTION 5 : INTERFACE TELEGRAM
 # =================================================================
@@ -179,26 +181,32 @@ def telegram_webhook():
     action = data.get("callback_query", {}).get("data", "")
 
     if action:
+        # PRIORITÉ : Renouvellement de Token
         if action == "renew_threads_btn":
             success, result = renew_threads_token()
             msg = f"✅ **TOKEN RENOUVELÉ ({result[1]}j)**\n`{result[0]}`" if success else f"❌ {result}"
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
             return jsonify({"status": "ok"})
+
+        # Actions d'administration
         elif action == "view_stats":
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": get_db_stats(), "parse_mode": "Markdown"})
         elif action == "export_db_btn":
             path = export_db_to_csv()
             with open(path, 'rb') as f: requests.post(f"https://api.telegram.org/bot{token}/sendDocument", data={"chat_id": chat_id}, files={"document": f})
-        elif action == "menu": send_galerie_menu(chat_id)
-        elif action.startswith("select_"): send_suggestion(chat_id, action.split("_")[1])
+        elif action == "menu": 
+            send_galerie_menu(chat_id)
+        elif action.startswith("select_"): 
+            send_suggestion(chat_id, action.split("_")[1])
+        
+        # Logique de Publication
         else:
             session = get_session(chat_id)
             if session:
-                # --- NOUVELLE ACTION : PUBLIER SUR LES DEUX ---
+                # --- ACTION : PUBLIER SUR LES DEUX ---
                 if action == "pub_both":
                     ok_ig, res_ig = publish_to_instagram(session[0], session[1])
                     ok_th, res_th = publish_to_threads(session[0], session[1])
-                    
                     if ok_ig and ok_th:
                         mark_photo_as_sent(session[0], "Auto")
                         conn = get_db_connection()
@@ -210,6 +218,7 @@ def telegram_webhook():
                         msg = f"⚠️ Résultat partiel :\nIG: {'✅' if ok_ig else '❌ ' + str(res_ig)}\nTH: {'✅' if ok_th else '❌ ' + str(res_th)}"
                         requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg})
 
+                # --- ACTION : INSTA SEUL ---
                 elif action == "pub_ig":
                     ok, res = publish_to_instagram(session[0], session[1])
                     if ok: 
@@ -219,6 +228,8 @@ def telegram_webhook():
                         conn.commit()
                         conn.close()
                         requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "📸 Insta : ✅"})
+                
+                # --- ACTION : THREADS SEUL ---
                 elif action == "pub_th":
                     ok, res = publish_to_threads(session[0], session[1])
                     if ok:
@@ -228,12 +239,15 @@ def telegram_webhook():
                         conn.commit()
                         conn.close()
                         requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "🧵 Threads : ✅"})
+                
                 elif action == "manual_edit":
                     save_session(chat_id, session[0], "WAITING_FOR_MANUAL")
                     requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✍️ Envoie ton texte."})
+        
         return jsonify({"status": "ok"})
 
     if text:
+        # Commandes textes directes
         if text == "/renew_threads":
             success, result = renew_threads_token()
             msg = f"✅ **TOKEN RENOUVELÉ**\n`{result[0]}`" if success else f"❌ {result}"
@@ -247,7 +261,9 @@ def telegram_webhook():
                 requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✅ Prêt !", "reply_markup": {"inline_keyboard": [[{"text": "🚀 Les deux", "callback_data": "pub_both"}], [{"text": "📸 Insta", "callback_data": "pub_ig"}, {"text": "🧵 Threads", "callback_data": "pub_th"}]]}})
             else:
                 send_galerie_menu(chat_id)
+                
     return jsonify({"status": "ok"})
+
 
 
 # =================================================================
