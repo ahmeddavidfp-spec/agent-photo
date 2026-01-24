@@ -216,7 +216,7 @@ def scheduler_loop():
             conn.close()
         except Exception as e:
             print(f"Scheduler error: {e}")
-        time.sleep(60)
+        time.sleep(30)
 
 # Démarrage du thread d'arrière-plan
 threading.Thread(target=scheduler_loop, daemon=True).start()
