@@ -46,10 +46,10 @@ init_db()
 
 
 # =================================================================
-# SECTION 2 : MOTEUR IA (LISTE BLANCHE DE COMPTES RÉELS)
+# SECTION 2 : MOTEUR IA (LISTE "SAFE" VÉRIFIÉE & AUDITÉE)
 # =================================================================
 def generate_ai_caption(image_url, galerie_nom):
-    """Génère la légende en piochant dans une liste de comptes vérifiés."""
+    """Génère la légende en utilisant uniquement des hubs vérifiés."""
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     
@@ -60,18 +60,26 @@ def generate_ai_caption(image_url, galerie_nom):
     
     instructions = f"""Tu es David Ahmed, photographe d'art. Analyse cette photo de {galerie_nom}.
     
-    TACHE : Légende virale et Alt Text.
+    TACHE : Légende virale et choix des mentions.
     
     RÈGLES DE RÉDACTION :
-    1. TITRE : Titre artistique Capitalisé entre guillemets (Ex: "Lumières Nocturnes").
+    1. TITRE : Titre artistique Capitalisé entre guillemets.
     2. ANALYSE : 2 phrases sur l'esthétique/émotion.
     
     (LAISSE UNE LIGNE VIDE ICI)
     
     3. QUESTION : Question ouverte pour engager.
-    4. MENTIONS (CRUCIAL) : Pour garantir que les liens fonctionnent, tu DOIS choisir 3 comptes PARMI CETTE LISTE VÉRIFIÉE :
-       [@lensculture, @magnumphotos, @streetphotographyinternational, @streetclassics, @somewheremagazine, @artofvisuals, @beautifuldestinations, @natgeotravel, @moodygrams, @urbanromantix]
-       Tu peux ajouter un compte de ville (ex: @visitlondon) SEULEMENT si c'est une capitale mondiale majeure.
+    
+    4. MENTIONS (SÉCURITÉ) :
+       Analyse le style de la photo et choisis EXACTEMENT 3 comptes dans la liste ci-dessous (Ne rien inventer) :
+       
+       - ARCHI : [@archdaily, @architecture_hunter, @buildinglovers]
+       - STREET : [@streetclassics, @urbanromantix, @raw_urbanshots]
+       - NOIR & BLANC : [@bnw_planet, @bnw_greatshots, @lensculture]
+       - ART/TRAVEL : [@magnumphotos, @somewheremagazine, @artofvisuals]
+       
+       *Tu peux ajouter @visit{galerie_nom} (ex: @visitlondon) UNIQUEMENT si c'est une capitale majeure.*
+       
        FORMAT : (cc @compte1 @compte2 @compte3)
        
     5. LIEN : {display_link}
@@ -112,7 +120,6 @@ def generate_ai_caption(image_url, galerie_nom):
     for line in lines:
         if line.strip().startswith('(cc'):
             content = line.replace('(cc', '').replace(')', '').strip()
-            # On s'assure que les @ sont là, même si l'IA les a mis, le script repasse derrière
             fixed_mentions = " ".join([word if word.startswith('@') else f"@{word}" for word in content.split() if word])
             final_lines.append(f"(cc {fixed_mentions})")
         else:
