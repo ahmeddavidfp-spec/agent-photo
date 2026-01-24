@@ -259,32 +259,36 @@ def telegram_webhook():
     token = os.environ.get('TELEGRAM_TOKEN')
     if not data: return jsonify({"status": "ok"})
     
-    # --- Gestion des Messages Textes ---
+    # --- 1. GESTION DES MESSAGES TEXTES ---
     if "message" in data and "text" in data["message"]:
         chat_id = data["message"]["chat"]["id"]
         text = data["message"]["text"]
         
-        # 1. COMMANDES ADMIN (Texte)
+        # Commandes d'administration (Texte)
         if text == "/debug_db":
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
                           json={"chat_id": chat_id, "text": get_db_stats(), "parse_mode": "Markdown"})
             return jsonify({"status": "ok"})
             
-        if text == "/export_db":
+        elif text == "/export_db":
             file_path = export_db_to_csv()
             with open(file_path, 'rb') as f:
                 requests.post(f"https://api.telegram.org/bot{token}/sendDocument", 
                               data={"chat_id": chat_id}, files={"document": f})
             return jsonify({"status": "ok"})
 
-        if text == "/renew_threads":
+        elif text == "/renew_threads":
             success, result = renew_threads_token()
-            msg = f"✅ Token renouvelé ({result[1]}j) :\n`{result[0]}`" if success else f"❌ {result}"
+            if success:
+                new_token, days = result
+                msg = f"✅ **TOKEN RENOUVELÉ ({days} jours)**\n\nCopie ce token sur Render :\n`{new_token}`"
+            else:
+                msg = f"❌ **ERREUR MÉTA**\n{result}"
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
                           json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
             return jsonify({"status": "ok"})
 
-        # 2. LOGIQUE DE SESSION (MANUEL / LIEU)
+        # Logique de Session (Manuel / Lieu / Menu Galerie)
         session = get_session(chat_id)
         if session and session[1] == "WAITING_FOR_MANUAL":
             save_session(chat_id, session[0], text)
@@ -296,19 +300,20 @@ def telegram_webhook():
         else: 
             send_galerie_menu(chat_id)
 
-    # --- Gestion des Clics Boutons (Callbacks) ---
+    # --- 2. GESTION DES CLICS BOUTONS (CALLBACKS) ---
     elif "callback_query" in data:
         chat_id = data["callback_query"]["message"]["chat"]["id"]
         action = data["callback_query"]["data"]
         session = get_session(chat_id)
         
+        # Sécurité anti-doublon
         is_already_sent = False
         if session:
             conn = get_db_connection()
             is_already_sent = conn.execute('SELECT 1 FROM sent_photos WHERE url = ?', (session[0],)).fetchone()
             conn.close()
 
-        # ACTIONS ADMIN VIA BOUTONS
+        # Actions Admin via Boutons
         if action == "view_stats":
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
                           json={"chat_id": chat_id, "text": get_db_stats(), "parse_mode": "Markdown"})
@@ -321,7 +326,11 @@ def telegram_webhook():
 
         elif action == "renew_threads_btn":
             success, result = renew_threads_token()
-            msg = f"✅ Token renouvelé ({result[1]}j) :\n`{result[0]}`" if success else f"❌ {result}"
+            if success:
+                new_token, days = result
+                msg = f"✅ **TOKEN RENOUVELÉ ({days} jours)**\n\nCopie ce token sur Render :\n`{new_token}`"
+            else:
+                msg = f"❌ **ERREUR MÉTA**\n{result}"
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
                           json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
 
@@ -331,9 +340,10 @@ def telegram_webhook():
         elif action.startswith("select_"): 
             send_suggestion(chat_id, action.split("_")[1])
         
+        # Publication IG
         elif action == "pub_ig" and session:
             if is_already_sent:
-                requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⚠️ Déjà enregistré dans la base."})
+                requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⚠️ Déjà enregistré."})
             else:
                 ok, res = publish_to_instagram(session[0], session[1])
                 if ok: 
@@ -343,9 +353,10 @@ def telegram_webhook():
                 else:
                     requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": f"❌ Erreur IG : {res}"})
         
+        # Publication Threads
         elif action == "pub_th" and session:
             if is_already_sent:
-                requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⚠️ Déjà enregistré dans la base."})
+                requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⚠️ Déjà enregistré."})
             else:
                 ok, res = publish_to_threads(session[0], session[1])
                 if ok: 
@@ -359,7 +370,7 @@ def telegram_webhook():
             save_session(chat_id, session[0], "WAITING_FOR_MANUAL")
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✍️ Envoie ton texte complet."})
             
-    return jsonify({"status": "ok"})      
+    return jsonify({"status": "ok"})
         
 # =================================================================
 # SECTION 6 : FONCTIONS AUXILIAIRES (Scraping, Session)
