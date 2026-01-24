@@ -45,10 +45,10 @@ init_db()
 
 
 # =================================================================
-# SECTION 2 : MOTEUR IA (TITRE "...", SAUT DE LIGNE + QUESTION)
+# SECTION 2 : MOTEUR IA (TITRE, ANALYSE, QUESTION + TAGGING SMART)
 # =================================================================
 def generate_ai_caption(image_url, galerie_nom):
-    """Génère la légende (Titre, Analyse, Saut de ligne, Question) + Alt Text."""
+    """Génère la légende complète avec Mentions (Tagging) pour la visibilité."""
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     
@@ -59,26 +59,29 @@ def generate_ai_caption(image_url, galerie_nom):
     
     instructions = f"""Tu es David Ahmed, photographe d'art. Analyse cette photo de {galerie_nom}.
     
-    TACHE : Générer une légende Instagram aérée et un Alt Text SEO.
+    TACHE : Générer une légende optimisée pour la viralité (Engagement + Visibilité).
     
-    RÈGLES POUR LA LÉGENDE :
-    1. TITRE : Commence DIRECTEMENT par un titre entre guillemets "..." (Ex: "Lumière d'Hiver").
-    2. ANALYSE : Analyse technique/artistique en 2 phrases (Lumière, composition, émotion).
-    3. SAUT DE LIGNE : Laisse impérativement une ligne vide après l'analyse.
-    4. ENGAGEMENT : Pose une question courte et ouverte (Ex: "Et vous, le noir et blanc vous inspire-t-il ?").
-    5. LIEN & TAGS : Ajoute le lien {display_link} puis les 8 hashtags.
+    RÈGLES DE RÉDACTION :
+    1. TITRE : Commence par un titre entre guillemets "..." (Ex: "Lumière d'Hiver").
+    2. ANALYSE : Analyse technique et artistique en 2 phrases (Lumière, composition).
+    3. SAUT DE LIGNE : Laisse impérativement une ligne vide.
+    4. ENGAGEMENT : Une question ouverte pertinente pour l'audience.
+    5. TAGGING (VISIBILITÉ) : Suggère 3 comptes Instagram/Threads majeurs à mentionner en fonction de l'image.
+       - Si ville : Compte officiel tourisme ou hub local (ex: @munich_germany).
+       - Si style : Gros hub photo (ex: @streetphotographyinternational, @magnumphotos, @lensculture).
+       - Format : (cc @compte1 @compte2 @compte3)
+    6. FIN : Ajoute le lien {display_link} puis les 8 hashtags.
     
-    RÈGLES ALT TEXT : Description physique factuelle pour malvoyants.
-    
-    FORMAT DE SORTIE STRICT (Respecte les sauts de ligne) :
+    FORMAT DE SORTIE STRICT :
     "Titre"
     [Analyse Expert...]
     
     [Question d'engagement]
+    (cc @mention1 @mention2 @mention3)
     [Lien]
     [Hashtags]
     |||
-    [Texte alternatif]
+    [Texte alternatif factuel]
     
     INTERDIT : "Titre:", "Légende:", "Partie 1". Pas de Markdown."""
     
@@ -90,7 +93,7 @@ def generate_ai_caption(image_url, galerie_nom):
     
     raw = response.choices[0].message.content
     
-    # Séparation
+    # Séparation Légende / Alt Text
     if "|||" in raw:
         parts = raw.split("|||")
         caption_part = parts[0].strip()
@@ -103,7 +106,6 @@ def generate_ai_caption(image_url, galerie_nom):
     clean_cap = caption_part.replace("PARTIE 1", "").replace("LÉGENDE", "").replace("Titre :", "").strip()
     
     return f"{clean_cap}|||{alt_part}"
-
 
 # =================================================================
 # SECTION 3 : LOGIQUE DES RÉSEAUX SOCIAUX (AVEC ALT TEXT)
