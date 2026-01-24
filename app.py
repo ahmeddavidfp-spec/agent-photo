@@ -44,11 +44,12 @@ def load_config():
 init_db()
 
 
+
 # =================================================================
-# SECTION 2 : MOTEUR IA (TITRE, ANALYSE, QUESTION + TAGGING SMART)
+# SECTION 2 : MOTEUR IA (FIX: FORCER LES @ ET SAUTS DE LIGNE)
 # =================================================================
 def generate_ai_caption(image_url, galerie_nom):
-    """Génère la légende complète avec Mentions (Tagging) pour la visibilité."""
+    """Génère la légende avec Mentions VALIDES (@) et aération."""
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     
@@ -59,31 +60,34 @@ def generate_ai_caption(image_url, galerie_nom):
     
     instructions = f"""Tu es David Ahmed, photographe d'art. Analyse cette photo de {galerie_nom}.
     
-    TACHE : Générer une légende optimisée pour la viralité (Engagement + Visibilité).
+    TACHE : Légende virale et Alt Text.
     
-    RÈGLES DE RÉDACTION :
-    1. TITRE : Commence par un titre entre guillemets "..." (Ex: "Lumière d'Hiver").
-    2. ANALYSE : Analyse technique et artistique en 2 phrases (Lumière, composition).
-    3. SAUT DE LIGNE : Laisse impérativement une ligne vide.
-    4. ENGAGEMENT : Une question ouverte pertinente pour l'audience.
-    5. TAGGING (VISIBILITÉ) : Suggère 3 comptes Instagram/Threads majeurs à mentionner en fonction de l'image.
-       - Si ville : Compte officiel tourisme ou hub local (ex: @munich_germany).
-       - Si style : Gros hub photo (ex: @streetphotographyinternational, @magnumphotos, @lensculture).
-       - Format : (cc @compte1 @compte2 @compte3)
-    6. FIN : Ajoute le lien {display_link} puis les 8 hashtags.
+    STRUCTURE OBLIGATOIRE DU TEXTE (Respecte scrupuleusement les sauts de ligne) :
     
-    FORMAT DE SORTIE STRICT :
+    1. TITRE : "{galerie_nom}..." (Entre guillemets).
+    2. ANALYSE : 2 phrases sur la technique/lumière.
+    
+    (ICI TU DOIS LAISSER UNE LIGNE VIDE)
+    
+    3. QUESTION : Question ouverte pour engager l'audience.
+    4. MENTIONS : Suggère 3 comptes pertinents (Ville ou Hub Photo).
+       IMPORTANT : Tu DOIS mettre le symbole '@' devant chaque nom pour qu'il soit cliquable.
+       Exemple : (cc @visitljubljana @lensculture @magnumphotos)
+    5. LIEN : {display_link}
+    6. HASHTAGS : 8 hashtags + {base_tag}.
+    
+    FORMAT DE SORTIE (Séparateur |||) :
     "Titre"
-    [Analyse Expert...]
+    [Analyse...]
     
-    [Question d'engagement]
+    [Question]
     (cc @mention1 @mention2 @mention3)
     [Lien]
     [Hashtags]
     |||
-    [Texte alternatif factuel]
+    [Alt Text factuel]
     
-    INTERDIT : "Titre:", "Légende:", "Partie 1". Pas de Markdown."""
+    INTERDIT : Pas de "Titre:", "Légende:". Pas de Markdown."""
     
     response = client.chat.completions.create(
         model="gpt-4o",
@@ -93,7 +97,6 @@ def generate_ai_caption(image_url, galerie_nom):
     
     raw = response.choices[0].message.content
     
-    # Séparation Légende / Alt Text
     if "|||" in raw:
         parts = raw.split("|||")
         caption_part = parts[0].strip()
@@ -102,10 +105,13 @@ def generate_ai_caption(image_url, galerie_nom):
         caption_part = raw
         alt_part = f"Photographie artistique de {galerie_nom} par David Ahmed."
 
-    # Nettoyage
     clean_cap = caption_part.replace("PARTIE 1", "").replace("LÉGENDE", "").replace("Titre :", "").strip()
     
     return f"{clean_cap}|||{alt_part}"
+
+
+
+
 
 # =================================================================
 # SECTION 3 : LOGIQUE DES RÉSEAUX SOCIAUX (AVEC ALT TEXT)
