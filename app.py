@@ -44,7 +44,7 @@ def load_config():
 init_db()
 
 # =================================================================
-# SECTION 2 : MOTEUR IA (HASHTAGS + ALT TEXT)
+# SECTION 2 : MOTEUR IA (TITRE ENTRE GUILLEMETS + 8 HASHTAGS)
 # =================================================================
 def generate_ai_caption(image_url, galerie_nom):
     """Génère la légende ET le texte alternatif (SEO)."""
@@ -61,7 +61,7 @@ def generate_ai_caption(image_url, galerie_nom):
     TACHE : Générer une légende Instagram et un Alt Text SEO.
     
     RÈGLES POUR LA LÉGENDE :
-    1. Commence DIRECTEMENT par le titre (Pas de "Titre:", pas de "Partie 1").
+    1. Commence DIRECTEMENT par le titre mis entre guillemets doubles "..." (Pas de "Titre:", pas de "Partie 1").
     2. Analyse artistique en 2 phrases.
     3. Ajoute le lien : {display_link}
     4. Génère 8 HASHTAGS : 
@@ -74,7 +74,8 @@ def generate_ai_caption(image_url, galerie_nom):
     - Description purement physique pour un aveugle. Pas de "Photo de...", décris direct.
     
     FORMAT DE SORTIE OBLIGATOIRE (Sépare par |||) :
-    [Titre et texte de la légende ici...]
+    "Titre de l'Oeuvre"
+    [Reste du texte de la légende ici...]
     |||
     [Texte alternatif ici...]
     
