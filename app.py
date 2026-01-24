@@ -1,4 +1,4 @@
-import os, requests, yaml, random, sqlite3, time, datetime
+import os, requests, yaml, random, sqlite3, time, datetime, csv
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 from openai import OpenAI
@@ -126,6 +126,28 @@ def telegram_webhook():
     if "message" in data:
         chat_id = data["message"]["chat"]["id"]
         text = data["message"]["text"]
+        
+        # --- COMMANDES ADMIN BASE DE DONNÉES ---
+        if text == "/debug_db":
+            conn = get_db_connection()
+            rows = conn.execute('SELECT url FROM sent_photos').fetchall()
+            conn.close()
+            msg = f"📋 PHOTOS DANS LA BASE ({len(rows)})"
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg})
+            return jsonify({"status": "ok"})
+            
+        if text == "/export_db":
+            conn = get_db_connection()
+            cursor = conn.execute('SELECT * FROM sent_photos')
+            with open('/tmp/export.csv', 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(['url'])
+                writer.writerows(cursor.fetchall())
+            conn.close()
+            with open('/tmp/export.csv', 'rb') as f:
+                requests.post(f"https://api.telegram.org/bot{token}/sendDocument", data={"chat_id": chat_id}, files={"document": f})
+            return jsonify({"status": "ok"})
+
         session = get_session(chat_id)
         if session and session[1] == "WAITING_FOR_MANUAL":
             save_session(chat_id, session[0], text)
@@ -141,7 +163,6 @@ def telegram_webhook():
         action = data["callback_query"]["data"]
         session = get_session(chat_id)
         
-        # SÉCURITÉ : Vérifier si la photo est déjà marquée comme envoyée pour éviter le doublon
         is_already_sent = False
         if session:
             conn = get_db_connection()
@@ -154,7 +175,7 @@ def telegram_webhook():
         
         elif action == "pub_ig" and session:
             if is_already_sent:
-                requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⚠️ Photo déjà publiée."})
+                requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⚠️ Déjà dans la base."})
             else:
                 ok, res = publish_to_instagram(session[0], session[1])
                 if ok: mark_photo_as_sent(session[0])
@@ -162,7 +183,7 @@ def telegram_webhook():
         
         elif action == "pub_th" and session:
             if is_already_sent:
-                requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⚠️ Photo déjà publiée sur Threads."})
+                requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "⚠️ Déjà dans la base."})
             else:
                 ok, res = publish_to_threads(session[0], session[1])
                 if ok: mark_photo_as_sent(session[0])
