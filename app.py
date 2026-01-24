@@ -46,10 +46,10 @@ init_db()
 
 
 # =================================================================
-# SECTION 2 : MOTEUR IA (VERSION CORRIGÉE - PYTHON COMPATIBLE)
+# SECTION 2 : MOTEUR IA (LISTE BLANCHE DE COMPTES RÉELS)
 # =================================================================
 def generate_ai_caption(image_url, galerie_nom):
-    """Génère la légende et force l'ajout des @ sur les mentions."""
+    """Génère la légende en piochant dans une liste de comptes vérifiés."""
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     
@@ -69,8 +69,11 @@ def generate_ai_caption(image_url, galerie_nom):
     (LAISSE UNE LIGNE VIDE ICI)
     
     3. QUESTION : Question ouverte pour engager.
-    4. MENTIONS : Suggère 3 comptes pertinents (Ville ou Hub).
+    4. MENTIONS (CRUCIAL) : Pour garantir que les liens fonctionnent, tu DOIS choisir 3 comptes PARMI CETTE LISTE VÉRIFIÉE :
+       [@lensculture, @magnumphotos, @streetphotographyinternational, @streetclassics, @somewheremagazine, @artofvisuals, @beautifuldestinations, @natgeotravel, @moodygrams, @urbanromantix]
+       Tu peux ajouter un compte de ville (ex: @visitlondon) SEULEMENT si c'est une capitale mondiale majeure.
        FORMAT : (cc @compte1 @compte2 @compte3)
+       
     5. LIEN : {display_link}
     6. HASHTAGS : 8 hashtags + {base_tag}.
     
@@ -101,7 +104,7 @@ def generate_ai_caption(image_url, galerie_nom):
         caption_part = raw
         alt_part = f"Photographie artistique de {galerie_nom} par David Ahmed."
 
-    # --- LE PATCH DE SÉCURITÉ ---
+    # PATCH SÉCURITÉ (Nettoyage + Force @)
     clean_cap = caption_part.replace("PARTIE 1", "").replace("LÉGENDE", "").replace("Titre :", "").strip()
     
     lines = clean_cap.split('\n')
@@ -109,15 +112,14 @@ def generate_ai_caption(image_url, galerie_nom):
     for line in lines:
         if line.strip().startswith('(cc'):
             content = line.replace('(cc', '').replace(')', '').strip()
-            fixed_mentions = " ".join([word if word.startswith('@') else f"@{word}" for word in content.split()])
+            # On s'assure que les @ sont là, même si l'IA les a mis, le script repasse derrière
+            fixed_mentions = " ".join([word if word.startswith('@') else f"@{word}" for word in content.split() if word])
             final_lines.append(f"(cc {fixed_mentions})")
         else:
             final_lines.append(line)
             
-    # CORRECTION DU BUG ICI : On prépare le texte AVANT le return
     final_caption = "\n".join(final_lines)
     return f"{final_caption}|||{alt_part}"
-
 
 
 
