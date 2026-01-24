@@ -46,10 +46,10 @@ init_db()
 
 
 # =================================================================
-# SECTION 2 : MOTEUR IA (FIX: FORCER LES @ ET SAUTS DE LIGNE)
+# SECTION 2 : MOTEUR IA (VERSION BLINDÉE : @ OBLIGATOIRES + TITRE PRO)
 # =================================================================
 def generate_ai_caption(image_url, galerie_nom):
-    """Génère la légende avec Mentions VALIDES (@) et aération."""
+    """Génère la légende avec Mentions (@) forcées et Titre soigné."""
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     
@@ -62,19 +62,25 @@ def generate_ai_caption(image_url, galerie_nom):
     
     TACHE : Légende virale et Alt Text.
     
-    STRUCTURE OBLIGATOIRE DU TEXTE (Respecte scrupuleusement les sauts de ligne) :
+    RÈGLES STRICTES DE RÉDACTION :
     
-    1. TITRE : "{galerie_nom}..." (Entre guillemets).
-    2. ANALYSE : 2 phrases sur la technique/lumière.
+    1. TITRE : Invente un titre artistique (Capitalisé) entre guillemets.
+       BON : "Ombres et Lumières"
+       MAUVAIS : "dusseldorf..."
+       
+    2. ANALYSE : 2 phrases sur la technique/lumière/émotion.
     
-    (ICI TU DOIS LAISSER UNE LIGNE VIDE)
+    (LAISSE UNE LIGNE VIDE ICI)
     
     3. QUESTION : Question ouverte pour engager l'audience.
-    4. MENTIONS : Suggère 3 comptes pertinents (Ville ou Hub Photo).
-       IMPORTANT : Tu DOIS mettre le symbole '@' devant chaque nom pour qu'il soit cliquable.
-       Exemple : (cc @visitljubljana @lensculture @magnumphotos)
+    
+    4. MENTIONS (CRITIQUE) : Suggère 3 comptes pertinents.
+       TU DOIS IMPÉRATIVEMENT METTRE LE SYMBOLE '@' DEVANT CHAQUE NOM.
+       Exemple OBLIGATOIRE : (cc @visit{galerie_nom} @lensculture @magnumphotos)
+       
     5. LIEN : {display_link}
-    6. HASHTAGS : 8 hashtags + {base_tag}.
+    
+    6. HASHTAGS : 8 hashtags pertinents + {base_tag}.
     
     FORMAT DE SORTIE (Séparateur |||) :
     "Titre"
@@ -87,7 +93,7 @@ def generate_ai_caption(image_url, galerie_nom):
     |||
     [Alt Text factuel]
     
-    INTERDIT : Pas de "Titre:", "Légende:". Pas de Markdown."""
+    INTERDIT : "Titre:", "Légende:". Pas de Markdown."""
     
     response = client.chat.completions.create(
         model="gpt-4o",
@@ -108,7 +114,6 @@ def generate_ai_caption(image_url, galerie_nom):
     clean_cap = caption_part.replace("PARTIE 1", "").replace("LÉGENDE", "").replace("Titre :", "").strip()
     
     return f"{clean_cap}|||{alt_part}"
-
 
 
 
