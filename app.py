@@ -184,7 +184,6 @@ def telegram_webhook():
             msg = f"✅ **TOKEN RENOUVELÉ ({result[1]}j)**\n`{result[0]}`" if success else f"❌ {result}"
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
             return jsonify({"status": "ok"})
-
         elif action == "view_stats":
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": get_db_stats(), "parse_mode": "Markdown"})
         elif action == "export_db_btn":
@@ -239,12 +238,15 @@ def telegram_webhook():
         return jsonify({"status": "ok"})
 
     if text:
+        # CORRECTION : Ajout de return jsonify pour bloquer l'exécution du menu après une commande
         if text == "/renew_threads":
             success, result = renew_threads_token()
-            msg = f"✅ **TOKEN RENOUVELÉ**\n`{result[0]}`" if success else f"❌ {result}"
+            msg = f"✅ **TOKEN RENOUVELÉ ({result[1]}j)**\n`{result[0]}`" if success else f"❌ {result}"
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
+            return jsonify({"status": "ok"})
         elif text == "/debug_db":
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": get_db_stats(), "parse_mode": "Markdown"})
+            return jsonify({"status": "ok"})
         else:
             session = get_session(chat_id)
             if session and session[1] == "WAITING_FOR_MANUAL":
