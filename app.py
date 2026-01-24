@@ -14,11 +14,25 @@ def get_db_connection():
     return sqlite3.connect(DB_PATH)
 
 def init_db():
-    """Initialise les tables si elles n'existent pas (Schéma v2 : URL, Galerie, Date)."""
+    """Initialise et met à jour la structure de la base de données (Migration)."""
     conn = get_db_connection()
-    conn.execute('''CREATE TABLE IF NOT EXISTS sent_photos 
-                    (url TEXT PRIMARY KEY, galerie TEXT, date_envoi TEXT)''')
+    
+    # 1. Création initiale des tables si elles n'existent pas du tout
+    conn.execute('CREATE TABLE IF NOT EXISTS sent_photos (url TEXT PRIMARY KEY)')
     conn.execute('CREATE TABLE IF NOT EXISTS current_session (chat_id INTEGER PRIMARY KEY, last_url TEXT, last_caption TEXT)')
+    
+    # 2. Migration : Ajout dynamique des colonnes manquantes
+    cursor = conn.execute('PRAGMA table_info(sent_photos)')
+    existing_columns = [column[1] for column in cursor.fetchall()]
+    
+    if 'galerie' not in existing_columns:
+        print("Mise à jour DB : Ajout de la colonne 'galerie'")
+        conn.execute('ALTER TABLE sent_photos ADD COLUMN galerie TEXT')
+        
+    if 'date_envoi' not in existing_columns:
+        print("Mise à jour DB : Ajout de la colonne 'date_envoi'")
+        conn.execute('ALTER TABLE sent_photos ADD COLUMN date_envoi TEXT')
+        
     conn.commit()
     conn.close()
 
