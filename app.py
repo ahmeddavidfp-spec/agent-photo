@@ -158,31 +158,36 @@ def telegram_webhook():
     token = os.environ.get('TELEGRAM_TOKEN')
     if not data: return jsonify({"status": "ok"})
     
-    # Extraction des données
+    # 1. RÉCUPÉRATION DES IDENTIFIANTS
     chat_id = data.get("message", {}).get("chat", {}).get("id") or \
               data.get("callback_query", {}).get("message", {}).get("chat", {}).get("id")
     text = data.get("message", {}).get("text", "").strip()
     action = data.get("callback_query", {}).get("data", "")
 
-    # 1. PRIORITÉ ABSOLUE : ADMIN
-    if text == "/renew_threads" or action == "renew_threads_btn":
-        success, result = renew_threads_token()
-        msg = f"✅ **NOUVEAU TOKEN ({result[1]}j)**\n`{result[0]}`" if success else f"❌ {result}"
-        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
-        return jsonify({"status": "ok"})
-
-    if text == "/debug_db" or action == "view_stats":
-        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": get_db_stats(), "parse_mode": "Markdown"})
-        return jsonify({"status": "ok"})
-
-    # 2. GESTION BOUTONS
+    # 2. PRIORITÉ ABSOLUE : LES BOUTONS (CALLBACKS)
     if action:
-        if action == "menu": send_galerie_menu(chat_id)
-        elif action.startswith("select_"): send_suggestion(chat_id, action.split("_")[1])
+        # Bloc Renew (priorité sur tout)
+        if action == "renew_threads_btn":
+            success, result = renew_threads_token()
+            msg = f"✅ **TOKEN RENOUVELÉ ({result[1]}j)**\n`{result[0]}`" if success else f"❌ {result}"
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
+            return jsonify({"status": "ok"})
+
+        elif action == "view_stats":
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": get_db_stats(), "parse_mode": "Markdown"})
+        
         elif action == "export_db_btn":
             path = export_db_to_csv()
             with open(path, 'rb') as f: requests.post(f"https://api.telegram.org/bot{token}/sendDocument", data={"chat_id": chat_id}, files={"document": f})
+
+        elif action == "menu": 
+            send_galerie_menu(chat_id)
+            
+        elif action.startswith("select_"): 
+            send_suggestion(chat_id, action.split("_")[1])
+            
         else:
+            # Actions de publication (Instagram / Threads)
             session = get_session(chat_id)
             if session:
                 if action == "pub_ig":
@@ -198,16 +203,25 @@ def telegram_webhook():
                 elif action == "manual_edit":
                     save_session(chat_id, session[0], "WAITING_FOR_MANUAL")
                     requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✍️ Envoie ton texte."})
+        
         return jsonify({"status": "ok"})
 
-    # 3. GESTION TEXTE / SESSIONS
+    # 3. GESTION DU TEXTE (COMMANDES ET SESSIONS)
     if text:
-        session = get_session(chat_id)
-        if session and session[1] == "WAITING_FOR_MANUAL":
-            save_session(chat_id, session[0], text)
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✅ Prêt !", "reply_markup": {"inline_keyboard": [[{"text": "📸 Insta", "callback_data": "pub_ig"}, {"text": "🧵 Threads", "callback_data": "pub_th"}]]}})
+        if text == "/renew_threads":
+            success, result = renew_threads_token()
+            msg = f"✅ **TOKEN RENOUVELÉ**\n`{result[0]}`" if success else f"❌ {result}"
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
+        elif text == "/debug_db":
+            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": get_db_stats(), "parse_mode": "Markdown"})
         else:
-            send_galerie_menu(chat_id)
+            session = get_session(chat_id)
+            if session and session[1] == "WAITING_FOR_MANUAL":
+                save_session(chat_id, session[0], text)
+                requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": "✅ Prêt !", "reply_markup": {"inline_keyboard": [[{"text": "📸 Insta", "callback_data": "pub_ig"}, {"text": "🧵 Threads", "callback_data": "pub_th"}]]}})
+            else:
+                send_galerie_menu(chat_id)
+                
     return jsonify({"status": "ok"})
 
 # =================================================================
