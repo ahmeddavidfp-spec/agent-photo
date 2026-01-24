@@ -138,15 +138,17 @@ def publish_to_threads(image_url, caption):
 # =================================================================
 def mark_photo_as_sent(url, galerie):
     """Enregistre une photo publiée dans l'historique avec date et galerie."""
+    # Formatage de la date pour un tri facile dans Sequel Ace
     date_jour = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn = get_db_connection()
+    # Utilisation du schéma v2 : URL, Galerie, Date
     conn.execute('INSERT OR IGNORE INTO sent_photos (url, galerie, date_envoi) VALUES (?, ?, ?)', 
                  (url, galerie, date_jour))
     conn.commit()
     conn.close()
 
 def get_token_status():
-    """Vérifie la validité et l'expiration des Tokens Meta."""
+    """Vérifie la validité et l'expiration des Tokens Meta (IG & Threads)."""
     status_msg = "📊 **ÉTAT DES ACCÈS**\n"
     tokens = {"IG/FB": os.environ.get('IG_ACCESS_TOKEN'), "Threads": os.environ.get('THREADS_ACCESS_TOKEN')}
     for name, token in tokens.items():
@@ -156,12 +158,25 @@ def get_token_status():
             r = requests.get(f"https://{endpoint}/debug_token", params={"input_token": token, "access_token": token}, timeout=5).json()
             data = r.get('data', {})
             exp = data.get('expires_at')
+            # Distinction entre tokens permanents et temporaires
             if not exp or exp == 0: status_msg += f"✅ {name} : Permanent\n"
             else:
                 days = (datetime.datetime.fromtimestamp(exp) - datetime.datetime.now()).days
                 status_msg += f"⏳ {name} : {days} jours\n"
         except: status_msg += f"⚠️ {name} : Vérif impossible\n"
     return status_msg
+
+def get_db_stats():
+    """Génère un résumé rapide du contenu de la base pour Telegram."""
+    conn = get_db_connection()
+    # Récupère le nombre de photos par galerie pour ton suivi
+    stats = conn.execute('SELECT galerie, COUNT(*) FROM sent_photos GROUP BY galerie').fetchall()
+    conn.close()
+    if not stats: return "La base de données est vide."
+    msg = "📁 **RÉSUMÉ DES PUBLICATIONS :**\n"
+    for s in stats:
+        msg += f"- {s[0].capitalize()} : {s[1]} photos\n"
+    return msg
 
 # =================================================================
 # SECTION 5 : INTERFACE TELEGRAM (Webhook & Menus)
