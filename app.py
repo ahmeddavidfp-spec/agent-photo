@@ -58,21 +58,27 @@ def generate_ai_caption(image_url, galerie_nom):
     
     instructions = f"""Tu es David Ahmed, photographe d'art. Analyse cette photo de {galerie_nom}.
     
-    PARTIE 1 : LÉGENDE (Pour le post)
-    - Titre accrocheur.
-    - Analyse artistique courte.
-    - 3 à 5 Hashtags DYNAMIQUES (visuels/ambiance) + {base_tag}.
-    - Lien galerie : {display_link}
+    TACHE : Générer une légende Instagram et un Alt Text SEO.
     
-    PARTIE 2 : ALT TEXT (Pour le SEO/Aveugles)
-    - Une description purement factuelle et physique de l'image (lumière, objets, composition) en une phrase dense. Pas de "photo de", décris directement.
+    RÈGLES POUR LA LÉGENDE :
+    1. Commence DIRECTEMENT par le titre (Pas de "Titre:", pas de "Partie 1").
+    2. Analyse artistique en 2 phrases.
+    3. Ajoute le lien : {display_link}
+    4. Génère 8 HASHTAGS : 
+       - 2 hashtags très populaires (ex: #StreetPhotography).
+       - 4 hashtags contextuels (ce qu'on voit sur l'image).
+       - 2 hashtags d'ambiance (ex: #MoodyGrams).
+       - Ajoute {base_tag} à la fin.
     
-    FORMAT DE SORTIE STRICT (Utilise le séparateur |||) :
-    [Contenu de la légende ici...]
+    RÈGLES POUR LE ALT TEXT :
+    - Description purement physique pour un aveugle. Pas de "Photo de...", décris direct.
+    
+    FORMAT DE SORTIE OBLIGATOIRE (Sépare par |||) :
+    [Titre et texte de la légende ici...]
     |||
-    [Contenu du Alt Text ici...]
+    [Texte alternatif ici...]
     
-    CONTRAINTES : Max 480 chars pour la légende. Pas de Markdown."""
+    INTERDIT : Ne jamais écrire "Partie 1", "Légende", ou "Sujet". Pas de Markdown."""
     
     response = client.chat.completions.create(
         model="gpt-4o",
@@ -82,7 +88,7 @@ def generate_ai_caption(image_url, galerie_nom):
     
     raw = response.choices[0].message.content
     
-    # Séparation Légende / Alt Text
+    # Séparation et nettoyage de sécurité
     if "|||" in raw:
         parts = raw.split("|||")
         caption_part = parts[0].strip()
@@ -91,10 +97,9 @@ def generate_ai_caption(image_url, galerie_nom):
         caption_part = raw
         alt_part = f"Photographie artistique de {galerie_nom} par David Ahmed."
 
-    # Nettoyage légende
-    clean_cap = caption_part.replace("**", "").replace("__", "").replace("### ", "").replace("## ", "")
+    # On nettoie une dernière fois au cas où l'IA soit têtue
+    clean_cap = caption_part.replace("PARTIE 1", "").replace("LÉGENDE", "").replace("Titre :", "").strip()
     
-    # On retourne les deux combinés pour le stockage (on séparera à l'envoi)
     return f"{clean_cap}|||{alt_part}"
 
 # =================================================================
