@@ -44,7 +44,7 @@ def load_config():
 init_db()
 
 # =================================================================
-# SECTION 2 : MOTEUR IA (LISTE "SAFE" + CORRECTION REGEX)
+# SECTION 2 : MOTEUR IA (LISTE "SAFE" + CORRECTION REGEX ROBUSTE)
 # =================================================================
 def generate_ai_caption(image_url, galerie_nom):
     """Génère la légende en utilisant uniquement des hubs vérifiés + Correction Regex."""
@@ -68,15 +68,14 @@ def generate_ai_caption(image_url, galerie_nom):
     
     3. QUESTION : Question ouverte pour engager.
     
-    4. MENTIONS (SÉCURITÉ) :
-       Analyse le style de la photo et choisis EXACTEMENT 3 comptes dans la liste ci-dessous (Ne rien inventer) :
+    4. MENTIONS (SÉCURITÉ ABSOLUE) :
+       Analyse le style de la photo et choisis EXACTEMENT 3 comptes dans la liste ci-dessous.
+       INTERDICTION D'INVENTER des comptes de ville. Pioche uniquement ici :
        
        - ARCHI : [@archdaily, @architecture_hunter, @buildinglovers]
        - STREET : [@streetclassics, @urbanromantix, @raw_urbanshots]
        - NOIR & BLANC : [@bnw_planet, @bnw_greatshots, @lensculture]
        - ART/TRAVEL : [@magnumphotos, @somewheremagazine, @artofvisuals]
-       
-       *Tu peux ajouter @visit{galerie_nom} (ex: @visitlondon) UNIQUEMENT si c'est une capitale majeure.*
        
        FORMAT : (cc @compte1 @compte2 @compte3)
        
@@ -123,10 +122,15 @@ def generate_ai_caption(image_url, galerie_nom):
             content_match = re.search(r'\(cc\s+(.*?)\)', line)
             if content_match:
                 content = content_match.group(1)
-		# On SUPPRIME les tirets (-) car ils cassent les liens sur Threads
-                content = content.replace(',', ' ').replace('-', '')
-                # On nettoie et on force le @ sur chaque mot
-                words = content.replace(',', ' ').split()
+                
+                # CORRECTION DU BUG PYTHON ICI :
+                # 1. On nettoie la chaine brute (vire les tirets et virgules)
+                clean_content = content.replace(',', ' ').replace('-', '')
+                
+                # 2. On crée la liste de mots à partir de la chaine PROPRE
+                words = clean_content.split()
+                
+                # 3. On force le @
                 fixed_mentions = " ".join([w if w.startswith('@') else f"@{w}" for w in words])
                 final_lines.append(f"(cc {fixed_mentions})")
             else:
