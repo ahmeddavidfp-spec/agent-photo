@@ -43,11 +43,13 @@ def load_config():
 
 init_db()
 
+
+
 # =================================================================
-# SECTION 2 : MOTEUR IA (LISTE "SAFE" + CORRECTION REGEX ROBUSTE)
+# SECTION 2 : MOTEUR IA (LISTE "SAFE" + NETTOYAGE BULLDOZER)
 # =================================================================
 def generate_ai_caption(image_url, galerie_nom):
-    """Génère la légende en utilisant uniquement des hubs vérifiés + Correction Regex."""
+    """Génère la légende et force les liens bleus par nettoyage agressif."""
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     
@@ -68,9 +70,9 @@ def generate_ai_caption(image_url, galerie_nom):
     
     3. QUESTION : Question ouverte pour engager.
     
-    4. MENTIONS (SÉCURITÉ ABSOLUE) :
-       Analyse le style de la photo et choisis EXACTEMENT 3 comptes dans la liste ci-dessous.
-       INTERDICTION D'INVENTER des comptes de ville. Pioche uniquement ici :
+    4. MENTIONS (SÉCURITÉ STRICTE) :
+       Choisis EXACTEMENT 3 comptes dans la liste ci-dessous.
+       INTERDICTION FORMELLE D'INVENTER D'AUTRES COMPTES.
        
        - ARCHI : [@archdaily, @architecture_hunter, @buildinglovers]
        - STREET : [@streetclassics, @urbanromantix, @raw_urbanshots]
@@ -109,37 +111,38 @@ def generate_ai_caption(image_url, galerie_nom):
         caption_part = raw
         alt_part = f"Photographie artistique de {galerie_nom} par David Ahmed."
 
-    # --- PATCH SÉCURITÉ ULTRA-ROBUSTE (REGEX) ---
+    # --- LE NETTOYEUR BULLDOZER ---
+    # On enlève les titres parasites
     clean_cap = caption_part.replace("PARTIE 1", "").replace("LÉGENDE", "").replace("Titre :", "").strip()
     
     lines = clean_cap.split('\n')
     final_lines = []
     
     for line in lines:
-        # On utilise une expression régulière pour trouver "(cc ...)" peu importe le formatage
-        if "(cc" in line:
-            # Cette regex capture tout ce qu'il y a entre parenthèses après "cc"
-            content_match = re.search(r'\(cc\s+(.*?)\)', line)
-            if content_match:
-                content = content_match.group(1)
-                
-                # CORRECTION DU BUG PYTHON ICI :
-                # 1. On nettoie la chaine brute (vire les tirets et virgules)
-                clean_content = content.replace(',', ' ').replace('-', '')
-                
-                # 2. On crée la liste de mots à partir de la chaine PROPRE
-                words = clean_content.split()
-                
-                # 3. On force le @
-                fixed_mentions = " ".join([w if w.startswith('@') else f"@{w}" for w in words])
+        # On détecte la ligne des mentions, peu importe comment elle est écrite (cc, CC, (cc: ...)
+        if "cc" in line.lower() and "@" in line or line.strip().startswith('('):
+            # 1. On nettoie tout ce qui n'est pas un nom de compte
+            # On remplace les parenthèses, le 'cc', les deux-points, les virgules et les tirets par du vide ou espace
+            content = line.lower().replace('(cc', '').replace('cc', '').replace('(', '').replace(')', '').replace(':', '').replace(',', ' ').replace('-', '')
+            
+            # 2. On récupère les mots restants (les pseudos)
+            words = content.split()
+            
+            # 3. On reconstruit en forçant le @ devant CHAQUE mot
+            # .lstrip('@') évite les doubles @@ si l'IA l'avait déjà mis
+            fixed_mentions = " ".join([f"@{w.lstrip('@')}" for w in words if w])
+            
+            if fixed_mentions:
                 final_lines.append(f"(cc {fixed_mentions})")
             else:
-                final_lines.append(line)
+                final_lines.append(line) # Sécurité si la ligne devient vide
         else:
             final_lines.append(line)
             
     final_caption = "\n".join(final_lines)
     return f"{final_caption}|||{alt_part}"
+
+
 
 # =================================================================
 # SECTION 3 : LOGIQUE DES RÉSEAUX SOCIAUX
