@@ -153,7 +153,7 @@ def generate_ai_caption(image_url, galerie_nom):
 
 
 # =================================================================
-# SECTION 3 : LOGIQUE DES RÉSEAUX SOCIAUX (AVEC SÉCURITÉ "OVERWRITE")
+# SECTION 3 : LOGIQUE DES RÉSEAUX SOCIAUX (SÉCURITÉ ET FORMATAGE)
 # =================================================================
 def split_content(full_text):
     """Sépare la légende du Alt Text."""
@@ -163,8 +163,12 @@ def split_content(full_text):
     return full_text, "Art photography by David Ahmed"
 
 def final_security_check(text):
-    """Dernier contrôle : ÉCRASE et REMPLACE les mentions pour garantir le @."""
-    # Liste de sécurité
+    """
+    Dernier contrôle : 
+    1. Détecte le bloc (cc ...) même sur plusieurs lignes.
+    2. Aplatit tout sur une seule ligne.
+    3. Force les @.
+    """
     SAFE_ACCOUNTS = [
         "archdaily", "architecture_hunter", "buildinglovers", "tv_buildings",
         "streetclassics", "urbanromantix", "raw_urbanshots", "street_avengers",
@@ -173,22 +177,41 @@ def final_security_check(text):
         "natgeotravel", "moodygrams", "streetphotographyinternational"
     ]
     
-    clean_text = text
-    for acc in SAFE_ACCOUNTS:
-        # REGEX "BULLDOZER" : 
-        # r'@?\b' cherche soit "lensculture", soit "@lensculture" (avec ou sans @)
-        # flags=re.IGNORECASE permet de trouver "LensCulture" ou "LENSCULTURE"
-        pattern = r'@?\b' + re.escape(acc) + r'\b'
+    # 1. On cherche le bloc (cc ...) avec Regex
+    # re.DOTALL permet de capturer les retours à la ligne (\n) à l'intérieur des parenthèses
+    match = re.search(r'\(cc\s*(.*?)\)', text, flags=re.IGNORECASE | re.DOTALL)
+    
+    if match:
+        original_block = match.group(0) # Le bloc complet (avec les parenthèses et les sauts de ligne)
+        content_inside = match.group(1) # Juste les mots dedans
         
-        # On remplace TOUT ce qu'on a trouvé par "@compte" (en minuscule, propre)
-        clean_text = re.sub(pattern, f"@{acc}", clean_text, flags=re.IGNORECASE)
+        # 2. On extrait les comptes valides
+        # On remplace les virgules et sauts de ligne par des espaces pour faire le tri
+        words = content_inside.replace(',', ' ').split()
+        found_accounts = []
         
-    return clean_text
+        for word in words:
+            clean_word = word.lower().replace('@', '').strip()
+            if clean_word in SAFE_ACCOUNTS:
+                found_accounts.append(f"@{clean_word}")
+        
+        # Sauvetage si vide
+        if not found_accounts:
+            found_accounts = ["@lensculture", "@urbanromantix", "@magnumphotos"]
+            
+        # 3. On reconstruit sur UNE SEULE LIGNE (C'est ça qui répare Threads)
+        # On garde 3 uniques
+        unique = sorted(list(set(found_accounts)), key=found_accounts.index)[:3]
+        new_block = f"(cc {' '.join(unique)})"
+        
+        # 4. On remplace le vieux bloc cassé par le nouveau tout propre
+        return text.replace(original_block, new_block)
+        
+    return text
 
 def publish_to_instagram(image_url, full_text):
-    # 1. On force les @ juste avant l'envoi
+    # 1. Sécurité et Aplatissement
     secured_text = final_security_check(full_text)
-    # 2. On sépare
     caption, _ = split_content(secured_text)
     
     token = os.environ.get('IG_ACCESS_TOKEN')
@@ -204,9 +227,8 @@ def publish_to_instagram(image_url, full_text):
     except Exception as e: return False, str(e)
 
 def publish_to_threads(image_url, full_text):
-    # 1. On force les @ juste avant l'envoi
+    # 1. Sécurité et Aplatissement
     secured_text = final_security_check(full_text)
-    # 2. On sépare
     caption, alt_text = split_content(secured_text)
     
     token = os.environ.get('THREADS_ACCESS_TOKEN')
@@ -221,7 +243,6 @@ def publish_to_threads(image_url, full_text):
         r_pub = requests.post(f"https://graph.threads.net/v1.0/{th_id}/threads_publish", data={'creation_id': res['id'], 'access_token': token})
         return (True, "OK") if r_pub.status_code == 200 else (False, r_pub.text)
     except Exception as e: return False, str(e)
-
 
 # =================================================================
 # SECTION 4 : GESTION DE LA BASE DE DONNÉES
