@@ -46,10 +46,10 @@ init_db()
 
 
 # =================================================================
-# SECTION 2 : MOTEUR IA (NETTOYAGE REGEX + WHITELIST STRICTE)
+# SECTION 2 : MOTEUR IA (SCANNER DE MOTS-CLÉS & REECRITURE FORCÉE)
 # =================================================================
 def generate_ai_caption(image_url, galerie_nom):
-    """Génère la légende, nettoie le Markdown et force les liens valides via Regex."""
+    """Génère la légende et force les liens via une Whitelist stricte."""
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     
@@ -58,7 +58,7 @@ def generate_ai_caption(image_url, galerie_nom):
     manual_hashtag = config.get('custom_hashtag', '')
     base_tag = f"#{manual_hashtag}" if manual_hashtag else ""
 
-    # LISTE DE RÉFÉRENCE (Les seuls comptes autorisés)
+    # LISTE DE RÉFÉRENCE (Sans @, pour la recherche)
     SAFE_ACCOUNTS = [
         "archdaily", "architecture_hunter", "buildinglovers", "tv_buildings",
         "streetclassics", "urbanromantix", "raw_urbanshots", "street_avengers",
@@ -72,7 +72,7 @@ def generate_ai_caption(image_url, galerie_nom):
     TACHE : Légende virale et choix des mentions.
     
     RÈGLES STRICTES :
-    1. PAS DE MARKDOWN. Texte brut uniquement.
+    1. PAS DE MARKDOWN. Texte brut uniquement. Pas de ```.
     2. TITRE : Titre artistique Capitalisé entre guillemets.
     3. ANALYSE : 2 phrases sur l'esthétique.
     
@@ -104,8 +104,9 @@ def generate_ai_caption(image_url, galerie_nom):
         max_tokens=650, temperature=0.7
     )
     
-    # NETTOYAGE PRELIMINAIRE MARKDOWN
-    raw = response.choices[0].message.content.replace("```markdown", "").replace("```", "")
+    # 1. NETTOYAGE BRUTAL DU MARKDOWN
+    # On enlève ```markdown, ```, et les espaces autour
+    raw = response.choices[0].message.content.replace("```markdown", "").replace("```", "").strip()
     
     if "|||" in raw:
         parts = raw.split("|||")
@@ -115,35 +116,33 @@ def generate_ai_caption(image_url, galerie_nom):
         caption_part = raw
         alt_part = f"Photographie artistique de {galerie_nom} par David Ahmed."
 
-    # --- NETTOYAGE CHIRURGICAL (REGEX) ---
-    clean_cap = caption_part.strip()
-    lines = clean_cap.split('\n')
+    # 2. SCANNER ET RECONSTRUCTION
+    lines = caption_part.split('\n')
     final_lines = []
     
     for line in lines:
-        # On utilise Regex pour trouver "(cc ...)" en ignorant la casse
-        match = re.search(r'\(cc\s*(.*?)\)', line, re.IGNORECASE)
-        if match:
-            # On extrait le contenu entre parenthèses
-            content = match.group(1)
-            # On remplace les virgules par des espaces pour découper
-            words = content.replace(',', ' ').split()
+        line_lower = line.lower()
+        
+        # On détecte si c'est la ligne des mentions (contient "cc" ou des comptes connus)
+        is_mention_line = "cc" in line_lower or any(acc in line_lower for acc in SAFE_ACCOUNTS)
+        
+        if is_mention_line:
+            # ON SCANNE : Quels comptes de la liste sont présents dans cette ligne ?
+            # Peu importe si l'IA a mis des tirets, oublié le @, ou mis des virgules.
+            # Si "lensculture" est dans la ligne, on le garde.
+            found_accounts = [acc for acc in SAFE_ACCOUNTS if acc in line_lower.replace('-', '').replace('.', '')]
             
-            valid_mentions = []
-            for word in words:
-                # On nettoie le mot (enlève le @ s'il y est, met en minuscule)
-                clean_word = word.lstrip('@').lower()
-                # Si ce compte est dans notre liste SÛRE, on le garde et on force le @
-                if clean_word in SAFE_ACCOUNTS:
-                    valid_mentions.append(f"@{clean_word}")
+            # SAUVETAGE : Si l'IA a halluciné et qu'on ne trouve rien de connu
+            if not found_accounts:
+                found_accounts = ["lensculture", "magnumphotos", "urbanromantix"]
             
-            # Sauvetage : si l'IA n'a mis aucun compte valide, on met des défauts
-            if not valid_mentions:
-                 valid_mentions = ["@lensculture", "@magnumphotos", "@urbanromantix"]
-
-            # On reconstruit la ligne proprement avec les 3 premiers comptes valides
-            unique_mentions = sorted(list(set(valid_mentions)), key=valid_mentions.index)[:3]
-            final_lines.append(f"(cc {' '.join(unique_mentions)})")
+            # ON LIMITE A 3
+            selected = found_accounts[:3]
+            
+            # ON RECONSTRUIT PROPREMENT
+            # On crée une nouvelle ligne parfaite avec les @ forcés
+            new_line = f"(cc {' '.join(['@' + acc for acc in selected])})"
+            final_lines.append(new_line)
         else:
             final_lines.append(line)
             
