@@ -46,10 +46,10 @@ init_db()
 
 
 # =================================================================
-# SECTION 2 : MOTEUR IA (SCANNER DE MOTS-CLÉS & REECRITURE FORCÉE)
+# SECTION 2 : MOTEUR IA (RECONSTRUCTION TOTALE & ANTI-DOUBLONS)
 # =================================================================
 def generate_ai_caption(image_url, galerie_nom):
-    """Génère la légende et force les liens via une Whitelist stricte."""
+    """Génère la légende, supprime les lignes parasites et force les mentions."""
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     
@@ -58,7 +58,7 @@ def generate_ai_caption(image_url, galerie_nom):
     manual_hashtag = config.get('custom_hashtag', '')
     base_tag = f"#{manual_hashtag}" if manual_hashtag else ""
 
-    # LISTE DE RÉFÉRENCE (Sans @, pour la recherche)
+    # LISTE DE RÉFÉRENCE
     SAFE_ACCOUNTS = [
         "archdaily", "architecture_hunter", "buildinglovers", "tv_buildings",
         "streetclassics", "urbanromantix", "raw_urbanshots", "street_avengers",
@@ -71,32 +71,22 @@ def generate_ai_caption(image_url, galerie_nom):
     
     TACHE : Légende virale et choix des mentions.
     
-    RÈGLES STRICTES :
-    1. PAS DE MARKDOWN. Texte brut uniquement. Pas de ```.
-    2. TITRE : Titre artistique Capitalisé entre guillemets.
-    3. ANALYSE : 2 phrases sur l'esthétique.
+    RÈGLES CRITIQUES :
+    1. PAS DE MARKDOWN (Pas de ```, pas de gras).
+    2. NE PAS ÉCRIRE "Alt text:". Utilise le séparateur |||.
+    3. Séparateur OBLIGATOIRE "|||" entre la légende et la description visuelle.
     
-    (LAISSE UNE LIGNE VIDE ICI)
+    STRUCTURE :
+    "Titre Artistique"
+    [2 phrases d'analyse émotionnelle/technique]
     
-    4. QUESTION : Question ouverte.
+    [Question engageante]
     
-    5. MENTIONS :
-       Choisis 3 comptes pertinents dans cette liste : {', '.join(SAFE_ACCOUNTS)}.
-       FORMAT : (cc compte1 compte2 compte3)
-       
-    6. LIEN : {display_link}
-    7. HASHTAGS : 8 hashtags + {base_tag}.
-    
-    FORMAT DE SORTIE (Séparateur |||) :
-    "Titre"
-    [Analyse...]
-    
-    [Question]
-    (cc mention1 mention2 mention3)
-    [Lien]
+    (cc compte1 compte2 compte3)
+    {display_link}
     [Hashtags]
     |||
-    [Alt Text factuel]"""
+    [Description visuelle factuelle pour aveugles]"""
     
     response = client.chat.completions.create(
         model="gpt-4o",
@@ -105,48 +95,60 @@ def generate_ai_caption(image_url, galerie_nom):
     )
     
     # 1. NETTOYAGE BRUTAL DU MARKDOWN
-    # On enlève ```markdown, ```, et les espaces autour
     raw = response.choices[0].message.content.replace("```markdown", "").replace("```", "").strip()
     
+    # 2. SÉPARATION LÉGENDE / ALT TEXT
     if "|||" in raw:
         parts = raw.split("|||")
         caption_part = parts[0].strip()
         alt_part = parts[1].strip()
     else:
+        # Fallback si l'IA oublie le séparateur
         caption_part = raw
         alt_part = f"Photographie artistique de {galerie_nom} par David Ahmed."
 
-    # 2. SCANNER ET RECONSTRUCTION
+    # 3. SCANNER : On cherche les comptes valides dans TOUT le texte brut
+    found_accounts = []
+    text_for_search = caption_part.lower().replace("_", "").replace(".", "")
+    for acc in SAFE_ACCOUNTS:
+        # On cherche le nom du compte (ex: 'lensculture') dans le texte
+        if acc in text_for_search:
+            found_accounts.append(f"@{acc}")
+            
+    # Si rien trouvé, on met des défauts
+    if not found_accounts:
+        found_accounts = ["@lensculture", "@urbanromantix", "@magnumphotos"]
+    
+    # On garde 3 uniques
+    final_mentions_str = f"(cc {' '.join(sorted(list(set(found_accounts)), key=found_accounts.index)[:3])})"
+
+    # 4. RECONSTRUCTION LIGNE PAR LIGNE (Pour supprimer les doublons sales)
     lines = caption_part.split('\n')
-    final_lines = []
+    clean_lines = []
     
     for line in lines:
-        line_lower = line.lower()
-        
-        # On détecte si c'est la ligne des mentions (contient "cc" ou des comptes connus)
-        is_mention_line = "cc" in line_lower or any(acc in line_lower for acc in SAFE_ACCOUNTS)
-        
-        if is_mention_line:
-            # ON SCANNE : Quels comptes de la liste sont présents dans cette ligne ?
-            # Peu importe si l'IA a mis des tirets, oublié le @, ou mis des virgules.
-            # Si "lensculture" est dans la ligne, on le garde.
-            found_accounts = [acc for acc in SAFE_ACCOUNTS if acc in line_lower.replace('-', '').replace('.', '')]
+        l = line.strip().lower()
+        # SI la ligne ressemble à une tentative de mention (commence par (, ou cc, ou @) -> ON LA VIRE
+        if l.startswith("(") or l.startswith("cc") or l.startswith("@") or "alt text" in l:
+            continue
+        # SI la ligne est le lien (on le rajoutera proprement à la fin) -> ON LE VIRE
+        if "davidahmed.me" in l:
+            continue
             
-            # SAUVETAGE : Si l'IA a halluciné et qu'on ne trouve rien de connu
-            if not found_accounts:
-                found_accounts = ["lensculture", "magnumphotos", "urbanromantix"]
-            
-            # ON LIMITE A 3
-            selected = found_accounts[:3]
-            
-            # ON RECONSTRUIT PROPREMENT
-            # On crée une nouvelle ligne parfaite avec les @ forcés
-            new_line = f"(cc {' '.join(['@' + acc for acc in selected])})"
-            final_lines.append(new_line)
-        else:
-            final_lines.append(line)
-            
-    final_caption = "\n".join(final_lines)
+        clean_lines.append(line)
+    
+    # 5. ASSEMBLAGE FINAL PROPRE
+    # On remet tout dans l'ordre forcé : Texte > Mentions > Lien > Hashtags
+    # On retire les hashtags du texte nettoyé pour les mettre à la fin si besoin, 
+    # mais généralement l'IA les met à la fin. On va juste insérer Mentions + Lien avant la fin.
+    
+    # Astuce : on rejoint tout, et on ajoute nos blocs forcés à la fin des blocs de texte
+    body_text = "\n".join([l for l in clean_lines if not l.startswith("#") and l.strip() != ""]).strip()
+    hashtags = "\n".join([l for l in clean_lines if l.startswith("#")]).strip()
+    if not hashtags: hashtags = f"#StreetPhotography #{galerie_nom} {base_tag}"
+
+    final_caption = f"{body_text}\n\n{final_mentions_str}\n{display_link}\n{hashtags}"
+    
     return f"{final_caption}|||{alt_part}"
 
 
