@@ -44,7 +44,6 @@ def load_config():
 init_db()
 
 
-
 # =================================================================
 # SECTION 2 : MOTEUR IA (LISTE "SAFE" + NETTOYAGE BULLDOZER)
 # =================================================================
@@ -58,7 +57,7 @@ def generate_ai_caption(image_url, galerie_nom):
     manual_hashtag = config.get('custom_hashtag', '')
     base_tag = f"#{manual_hashtag}" if manual_hashtag else ""
     
-    instructions = f"""Tu es David Ahmed, photographe d'art. Analyse cette photo de {galerie_nom}.
+    instructions = f"""Tu es David Ahmed, photographe de rue. Analyse cette photo de {galerie_nom}.
     
     TACHE : Légende virale et choix des mentions.
     
