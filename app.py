@@ -123,6 +123,8 @@ def generate_ai_caption(image_url, galerie_nom):
             content_match = re.search(r'\(cc\s+(.*?)\)', line)
             if content_match:
                 content = content_match.group(1)
+		# On SUPPRIME les tirets (-) car ils cassent les liens sur Threads
+                content = content.replace(',', ' ').replace('-', '')
                 # On nettoie et on force le @ sur chaque mot
                 words = content.replace(',', ' ').split()
                 fixed_mentions = " ".join([w if w.startswith('@') else f"@{w}" for w in words])
