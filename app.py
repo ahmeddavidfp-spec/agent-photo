@@ -44,11 +44,14 @@ def load_config():
 init_db()
 
 
+
+
+
 # =================================================================
-# SECTION 2 : MOTEUR IA (FILTRAGE STRICT & LISTE BLANCHE)
+# SECTION 2 : MOTEUR IA (ANTI-MARKDOWN + RECONSTRUCTION DES TAGS)
 # =================================================================
 def generate_ai_caption(image_url, galerie_nom):
-    """Génère la légende et force des liens valides via une Whitelist."""
+    """Génère la légende, nettoie le Markdown et force les liens valides."""
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     
@@ -57,7 +60,7 @@ def generate_ai_caption(image_url, galerie_nom):
     manual_hashtag = config.get('custom_hashtag', '')
     base_tag = f"#{manual_hashtag}" if manual_hashtag else ""
 
-    # LISTE DE SÉCURITÉ (Comptes vérifiés qui existent vraiment)
+    # LISTE DE RÉFÉRENCE (Les seuls comptes autorisés car vérifiés)
     SAFE_ACCOUNTS = [
         "archdaily", "architecture_hunter", "buildinglovers", "tv_buildings",
         "streetclassics", "urbanromantix", "raw_urbanshots", "street_avengers",
@@ -70,27 +73,28 @@ def generate_ai_caption(image_url, galerie_nom):
     
     TACHE : Légende virale et choix des mentions.
     
-    RÈGLES DE RÉDACTION :
-    1. TITRE : Titre artistique Capitalisé entre guillemets.
-    2. ANALYSE : 2 phrases sur l'esthétique/émotion.
+    RÈGLES STRICTES :
+    1. PAS DE MARKDOWN (Pas de ```, pas de gras). Texte brut uniquement.
+    2. TITRE : Titre artistique Capitalisé entre guillemets.
+    3. ANALYSE : 2 phrases sur l'esthétique.
     
     (LAISSE UNE LIGNE VIDE ICI)
     
-    3. QUESTION : Question ouverte pour engager.
+    4. QUESTION : Question ouverte.
     
-    4. MENTIONS :
+    5. MENTIONS :
        Choisis 3 comptes pertinents (Archi, Street ou N&B).
-       FORMAT : (cc @compte1 @compte2 @compte3)
+       FORMAT : (cc compte1 compte2 compte3)
        
-    5. LIEN : {display_link}
-    6. HASHTAGS : 8 hashtags + {base_tag}.
+    6. LIEN : {display_link}
+    7. HASHTAGS : 8 hashtags + {base_tag}.
     
     FORMAT DE SORTIE (Séparateur |||) :
     "Titre"
     [Analyse...]
     
     [Question]
-    (cc @mention1 @mention2 @mention3)
+    (cc mention1 mention2 mention3)
     [Lien]
     [Hashtags]
     |||
@@ -102,7 +106,8 @@ def generate_ai_caption(image_url, galerie_nom):
         max_tokens=650, temperature=0.7
     )
     
-    raw = response.choices[0].message.content
+    # 1. NETTOYAGE IMMÉDIAT DU MARKDOWN (Supprime ```markdown et ```)
+    raw = response.choices[0].message.content.replace("```markdown", "").replace("```", "")
     
     if "|||" in raw:
         parts = raw.split("|||")
@@ -112,36 +117,28 @@ def generate_ai_caption(image_url, galerie_nom):
         caption_part = raw
         alt_part = f"Photographie artistique de {galerie_nom} par David Ahmed."
 
-    # --- NETTOYAGE ET VALIDATION ---
+    # 2. TRAITEMENT LIGNE PAR LIGNE
     clean_cap = caption_part.replace("PARTIE 1", "").replace("LÉGENDE", "").replace("Titre :", "").strip()
     lines = clean_cap.split('\n')
     final_lines = []
     
     for line in lines:
-        # On détecte la ligne "cc" (peu importe la casse)
-        if "cc" in line.lower():
-            # 1. On extrait tous les mots potentiels
-            # On nettoie la ligne de tout ce qui n'est pas du texte
-            clean_line = line.lower().replace('(cc', '').replace('cc', '').replace('(', '').replace(')', '').replace(':', '').replace(',', ' ').replace('@', ' ')
-            words = clean_line.split()
+        # On détecte la ligne des mentions (cc ...)
+        if "cc" in line.lower() or line.strip().lower().startswith("(cc"):
+            # On scanne la ligne pour voir quels comptes SÛRS sont mentionnés
+            detected_mentions = []
+            for safe_acc in SAFE_ACCOUNTS:
+                # Si le nom du compte (ex: lensculture) est caché dans la ligne, on le prend
+                if safe_acc in line.lower().replace("_", "").replace(".", "") or safe_acc in line.lower():
+                    detected_mentions.append(f"@{safe_acc}")
             
-            valid_mentions = []
-            for w in words:
-                # 2. On vérifie si le compte est dans notre LISTE DE SÉCURITÉ
-                # (On accepte aussi les correspondances partielles ex: 'magnum' pour 'magnumphotos')
-                match = next((safe for safe in SAFE_ACCOUNTS if w in safe or safe in w), None)
-                if match:
-                    valid_mentions.append(f"@{match}")
+            # Si l'IA a mis n'importe quoi et qu'on a rien trouvé, on met des valeurs par défaut
+            if not detected_mentions:
+                detected_mentions = ["@lensculture", "@magnumphotos", "@urbanromantix"]
             
-            # 3. Sauvetage : Si aucun compte valide trouvé, on met des défauts
-            if not valid_mentions:
-                valid_mentions = ["@lensculture", "@urbanromantix", "@magnumphotos"]
-            
-            # 4. On limite à 3 mentions uniques
-            unique_mentions = list(set(valid_mentions))[:3]
-            
-            # On reconstruit la ligne PROPREMENT (avec un petit emoji invisible pour debugger si besoin, ou juste texte)
-            final_lines.append(f"(cc {' '.join(unique_mentions)})")
+            # On limite à 3 et on reconstruit la ligne PROPREMENT
+            unique = list(set(detected_mentions))[:3]
+            final_lines.append(f"(cc {' '.join(unique)})")
         else:
             final_lines.append(line)
             
