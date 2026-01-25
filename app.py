@@ -152,11 +152,8 @@ def generate_ai_caption(image_url, galerie_nom):
     return f"{final_caption}|||{alt_part}"
 
 
-
-
-
 # =================================================================
-# SECTION 3 : LOGIQUE DES RÉSEAUX SOCIAUX
+# SECTION 3 : LOGIQUE DES RÉSEAUX SOCIAUX (AVEC SÉCURITÉ FINALE)
 # =================================================================
 def split_content(full_text):
     """Sépare la légende du Alt Text."""
@@ -165,8 +162,33 @@ def split_content(full_text):
         return parts[0].strip(), parts[1].strip()
     return full_text, "Art photography by David Ahmed"
 
+def final_security_check(text):
+    """Dernier contrôle douanier : Force les @ sur les comptes connus avant l'envoi."""
+    # Liste de sécurité (Les comptes qui DOIVENT avoir un @)
+    SAFE_ACCOUNTS = [
+        "archdaily", "architecture_hunter", "buildinglovers", "tv_buildings",
+        "streetclassics", "urbanromantix", "raw_urbanshots", "street_avengers",
+        "bnw_planet", "bnw_greatshots", "lensculture", "bnw_demand",
+        "magnumphotos", "somewheremagazine", "artofvisuals", "beautifuldestinations",
+        "natgeotravel", "moodygrams", "streetphotographyinternational"
+    ]
+    
+    # On parcourt la liste et on vérifie le texte
+    clean_text = text
+    for acc in SAFE_ACCOUNTS:
+        # Regex : Trouve le mot (ex: lensculture) s'il n'a PAS de @ devant
+        pattern = r'(?<!@)\b' + re.escape(acc) + r'\b'
+        # On remplace par @compte
+        clean_text = re.sub(pattern, f"@{acc}", clean_text, flags=re.IGNORECASE)
+        
+    return clean_text
+
 def publish_to_instagram(image_url, full_text):
-    caption, _ = split_content(full_text)
+    # 1. On nettoie le texte (Force les @)
+    secured_text = final_security_check(full_text)
+    # 2. On sépare (Caption / Alt Text)
+    caption, _ = split_content(secured_text)
+    
     token = os.environ.get('IG_ACCESS_TOKEN')
     ig_id = "17841453263147553" 
     try:
@@ -180,7 +202,11 @@ def publish_to_instagram(image_url, full_text):
     except Exception as e: return False, str(e)
 
 def publish_to_threads(image_url, full_text):
-    caption, alt_text = split_content(full_text)
+    # 1. On nettoie le texte (Force les @)
+    secured_text = final_security_check(full_text)
+    # 2. On sépare (Caption / Alt Text)
+    caption, alt_text = split_content(secured_text)
+    
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
     clean_url = image_url.split('?')[0] 
@@ -193,6 +219,8 @@ def publish_to_threads(image_url, full_text):
         r_pub = requests.post(f"https://graph.threads.net/v1.0/{th_id}/threads_publish", data={'creation_id': res['id'], 'access_token': token})
         return (True, "OK") if r_pub.status_code == 200 else (False, r_pub.text)
     except Exception as e: return False, str(e)
+
+
 
 # =================================================================
 # SECTION 4 : GESTION DE LA BASE DE DONNÉES
