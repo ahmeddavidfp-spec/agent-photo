@@ -17,8 +17,6 @@ def init_db():
     conn = get_db_connection()
     conn.execute('CREATE TABLE IF NOT EXISTS sent_photos (url TEXT PRIMARY KEY)')
     conn.execute('CREATE TABLE IF NOT EXISTS current_session (chat_id INTEGER PRIMARY KEY, last_url TEXT, last_caption TEXT)')
-    
-    # Table pour les posts programmés
     conn.execute('''CREATE TABLE IF NOT EXISTS scheduled_posts 
                     (id INTEGER PRIMARY KEY AUTOINCREMENT, 
                      chat_id INTEGER, 
@@ -44,7 +42,7 @@ def load_config():
 init_db()
 
 # =================================================================
-# SECTION 1.5 : OUTILS BASE DE DONNÉES (DÉPLACÉS ICI POUR ÉVITER LES ERREURS)
+# SECTION 1.5 : TOUS LES OUTILS (DÉPLACÉS ICI POUR ÉVITER LES ERREURS)
 # =================================================================
 def get_session(chat_id):
     conn = get_db_connection()
@@ -276,7 +274,7 @@ def publish_to_threads(image_url, full_text):
     except Exception as e: return False, str(e)
 
 # =================================================================
-# SECTION 5 : TÂCHE DE FOND (ASYNC PUBLISH)
+# SECTION 5 : TÂCHE DE FOND (ASYNC PUBLISH) & INTERFACE
 # =================================================================
 def background_publish(chat_id, token, mode, image_url, caption):
     """Exécute la publication en arrière-plan et notifie l'utilisateur à la fin."""
@@ -403,7 +401,6 @@ def telegram_webhook():
         elif action.startswith("select_"): 
             send_suggestion(chat_id, action.split("_")[1])
         else:
-            # GESTION DES CLICS DE PUBLICATION
             session = get_session(chat_id)
             if session:
                 mode = None
@@ -416,14 +413,10 @@ def telegram_webhook():
                     return jsonify({"status": "ok"})
 
                 if mode:
-                    # 1. On répond TOUT DE SUITE à Telegram
                     requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ **Traitement en cours...** (Threads peut prendre 1 min)"})
-                    
-                    # 2. On lance le travail en arrière-plan
                     threading.Thread(target=background_publish, args=(chat_id, token, mode, session[0], session[1])).start()
             else:
                  requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": "⚠️ **Session expirée.**\nClique sur 'Menu' et génère une nouvelle photo."})
-
         return jsonify({"status": "ok"})
 
     if text:
