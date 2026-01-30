@@ -44,6 +44,81 @@ def load_config():
 init_db()
 
 # =================================================================
+# SECTION 1.5 : OUTILS BASE DE DONNÉES (DÉPLACÉS ICI POUR ÉVITER LES ERREURS)
+# =================================================================
+def get_session(chat_id):
+    conn = get_db_connection()
+    res = conn.execute('SELECT last_url, last_caption FROM current_session WHERE chat_id = ?', (chat_id,)).fetchone()
+    conn.close()
+    return res
+
+def save_session(chat_id, url, cap):
+    conn = get_db_connection()
+    conn.execute('INSERT OR REPLACE INTO current_session VALUES (?, ?, ?)', (chat_id, url, cap))
+    conn.commit()
+    conn.close()
+
+def mark_photo_as_sent(url, galerie):
+    date_jour = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_db_connection()
+    conn.execute('INSERT OR IGNORE INTO sent_photos (url, galerie, date_envoi) VALUES (?, ?, ?)', (url, galerie, date_jour))
+    conn.commit()
+    conn.close()
+
+def get_db_stats():
+    conn = get_db_connection()
+    stats = conn.execute('SELECT galerie, COUNT(*) FROM sent_photos GROUP BY galerie').fetchall()
+    conn.close()
+    if not stats: return "Base vide."
+    msg = "📁 **RÉSUMÉ DES PUBLICATIONS :**\n"
+    for s in stats:
+        name = s[0].capitalize() if s[0] else "Inconnue"
+        msg += f"- {name} : {s[1]} photos\n"
+    return msg
+
+def export_db_to_csv():
+    conn = get_db_connection()
+    cursor = conn.execute('SELECT * FROM sent_photos')
+    file_path = '/tmp/export.csv'
+    with open(file_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['url', 'galerie', 'date_envoi'])
+        writer.writerows(cursor.fetchall())
+    conn.close()
+    return file_path
+
+def renew_threads_token():
+    client_secret = os.environ.get('THREADS_CLIENT_SECRET')
+    current_token = os.environ.get('THREADS_ACCESS_TOKEN')
+    if not client_secret: return False, "SECRET manquant"
+    try:
+        r = requests.get("https://graph.threads.net/access_token", params={"grant_type": "th_exchange_token", "client_secret": client_secret, "access_token": current_token})
+        res = r.json()
+        if "access_token" in res: return True, (res['access_token'], res.get('expires_in', 0) // 86400)
+        return False, res
+    except Exception as e: return False, str(e)
+
+def get_token_status():
+    status_msg = "📊 **ÉTAT DES ACCÈS**\n"
+    for label, env_name, url in [("IG/FB", "IG_ACCESS_TOKEN", "https://graph.facebook.com/debug_token"), ("Threads", "THREADS_ACCESS_TOKEN", "https://graph.threads.net/debug_token")]:
+        tk = os.environ.get(env_name)
+        if tk:
+            try:
+                r = requests.get(url, params={"input_token": tk, "access_token": tk}, timeout=5).json()
+                exp = r.get('data', {}).get('expires_at')
+                if not exp: status_msg += f"✅ {label} : Permanent\n"
+                else:
+                    days = (datetime.datetime.fromtimestamp(exp) - datetime.datetime.now()).days
+                    status_msg += f"⏳ {label} : {days} jours\n"
+            except: status_msg += f"⚠️ {label} : Vérif impossible\n"
+        else: status_msg += f"❌ {label} : Manquant\n"
+    return status_msg
+
+def get_belgium_offset():
+    month = datetime.datetime.now().month
+    return 2 if 4 <= month <= 10 else 1
+
+# =================================================================
 # SECTION 2 : MOTEUR IA
 # =================================================================
 def generate_ai_caption(image_url, galerie_nom):
@@ -242,6 +317,50 @@ def background_publish(chat_id, token, mode, image_url, caption):
         requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": final_msg, "parse_mode": "Markdown"})
     except: pass
 
+def send_galerie_menu(chat_id):
+    config = load_config()
+    token = os.environ.get('TELEGRAM_TOKEN')
+    status = get_token_status()
+    conn = get_db_connection()
+    sent_urls = [row[0] for row in conn.execute('SELECT url FROM sent_photos').fetchall()]
+    conn.close()
+    keyboard = [[{"text": "📈 Stats", "callback_data": "view_stats"}, 
+                 {"text": "📥 Export", "callback_data": "export_db_btn"}, 
+                 {"text": "🔄 Renew", "callback_data": "renew_threads_btn"}]]
+    buttons = []
+    for g in config.get('galeries', []):
+        try:
+            soup = BeautifulSoup(requests.get(f"{config.get('site_url')}/{g}", timeout=10).text, 'html.parser')
+            imgs = [img.get('src') for img in soup.find_all('img') if img.get('src')]
+            valid = [s if s.startswith('http') else f"{config.get('site_url')}{s}" for s in imgs]
+            count = f"{len([u for u in valid if u in sent_urls])}/{len(valid)}"
+            buttons.append({"text": f"{g.capitalize()} {count}", "callback_data": f"select_{g}"})
+        except: buttons.append({"text": g.capitalize(), "callback_data": f"select_{g}"})
+    for i in range(0, len(buttons), 2): keyboard.append(buttons[i:i + 2])
+    requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": f"{status}\n---\nQuelle galerie ?", "reply_markup": {"inline_keyboard": keyboard}})
+
+def send_suggestion(chat_id, galerie_nom):
+    token = os.environ.get('TELEGRAM_TOKEN')
+    config = load_config()
+    soup = BeautifulSoup(requests.get(f"{config.get('site_url')}/{galerie_nom}").text, 'html.parser')
+    valid = [s if s.startswith('http') else f"{config.get('site_url')}{s}" for s in [img.get('src') for img in soup.find_all('img') if img.get('src')]]
+    conn = get_db_connection()
+    sent = [row[0] for row in conn.execute('SELECT url FROM sent_photos').fetchall()]
+    conn.close()
+    avail = [u for u in valid if u not in sent]
+    if not avail:
+        requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": "Galerie vide."})
+        return
+    img_url = random.choice(avail)
+    full_content = generate_ai_caption(img_url, galerie_nom)
+    save_session(chat_id, img_url, full_content)
+    visible_caption = full_content.split("|||")[0]
+    kb = [[{"text": "🚀 Publier sur les deux", "callback_data": "pub_both"}],
+          [{"text": "📅 Programmer", "callback_data": "schedule_btn"}],
+          [{"text": "📸 Insta", "callback_data": "pub_ig"}, {"text": "🧵 Threads", "callback_data": "pub_th"}],
+          [{"text": "🔄 Autre", "callback_data": f"select_{galerie_nom}"}, {"text": "⬅️ Menu", "callback_data": "menu"}]]
+    requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendPhoto", json={"chat_id": chat_id, "photo": img_url, "caption": visible_caption, "reply_markup": {"inline_keyboard": kb}})
+
 @app.route("/telegram-webhook", methods=['POST'])
 def telegram_webhook():
     data = request.json
@@ -297,8 +416,8 @@ def telegram_webhook():
                     return jsonify({"status": "ok"})
 
                 if mode:
-                    # 1. On répond TOUT DE SUITE à Telegram pour ne pas timeout
-                    requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ **Traitement en cours...** (Cela peut prendre 1 minute pour Threads)"})
+                    # 1. On répond TOUT DE SUITE à Telegram
+                    requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ **Traitement en cours...** (Threads peut prendre 1 min)"})
                     
                     # 2. On lance le travail en arrière-plan
                     threading.Thread(target=background_publish, args=(chat_id, token, mode, session[0], session[1])).start()
@@ -339,25 +458,33 @@ def telegram_webhook():
     return jsonify({"status": "ok"})
 
 # =================================================================
-# SECTION 4 : BASE DE DONNÉES & UTILITAIRES
+# SECTION 7 : PLANIFICATEUR (SCHEDULER 20s)
 # =================================================================
-def mark_photo_as_sent(url, galerie):
-    date_jour = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn = get_db_connection()
-    conn.execute('INSERT OR IGNORE INTO sent_photos (url, galerie, date_envoi) VALUES (?, ?, ?)', (url, galerie, date_jour))
-    conn.commit()
-    conn.close()
+def scheduler_loop():
+    while True:
+        try:
+            conn = get_db_connection()
+            rows = conn.execute("SELECT id, chat_id, image_url, caption, run_at FROM scheduled_posts WHERE status='pending'").fetchall()
+            now_utc = datetime.datetime.utcnow()
+            for row in rows:
+                post_id, chat_id, img, full_text, run_at_str = row
+                run_at = datetime.datetime.strptime(run_at_str, "%Y-%m-%d %H:%M:%S")
+                if now_utc >= run_at:
+                    token = os.environ.get('TELEGRAM_TOKEN')
+                    ok_ig, res_ig = publish_to_instagram(img, full_text)
+                    ok_th, res_th = publish_to_threads(img, full_text)
+                    status = 'sent' if (ok_ig and ok_th) else 'error'
+                    conn.execute("UPDATE scheduled_posts SET status = ? WHERE id = ?", (status, post_id))
+                    conn.commit()
+                    msg = "⏰ **Post Programmé Exécuté !**\n"
+                    msg += f"IG: {'✅' if ok_ig else '❌'} | TH: {'✅' if ok_th else '❌'}"
+                    requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
+                    if ok_ig or ok_th: mark_photo_as_sent(img, "Programmé")
+            conn.close()
+        except Exception as e: print(f"Scheduler error: {e}")
+        time.sleep(20)
 
-def renew_threads_token():
-    client_secret = os.environ.get('THREADS_CLIENT_SECRET')
-    current_token = os.environ.get('THREADS_ACCESS_TOKEN')
-    if not client_secret: return False, "SECRET manquant"
-    try:
-        r = requests.get("[https://graph.threads.net/access_token](https://graph.threads.net/access_token)", params={"grant_type": "th_exchange_token", "client_secret": client_secret, "access_token": current_token})
-        res = r.json()
-        if "access_token" in res: return True, (res['access_token'], res.get('expires_in', 0) // 86400)
-        return False, res
-    except Exception as e: return False, str(e)
+threading.Thread(target=scheduler_loop, daemon=True).start()
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
