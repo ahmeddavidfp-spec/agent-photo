@@ -42,7 +42,7 @@ def load_config():
 init_db()
 
 # =================================================================
-# SECTION 1.5 : TOUS LES OUTILS (DÉPLACÉS ICI POUR ÉVITER LES ERREURS)
+# SECTION 1.5 : OUTILS DB & UTILITAIRES (EN HAUT DU FICHIER)
 # =================================================================
 def get_session(chat_id):
     conn = get_db_connection()
@@ -120,7 +120,6 @@ def get_belgium_offset():
 # SECTION 2 : MOTEUR IA
 # =================================================================
 def generate_ai_caption(image_url, galerie_nom):
-    """Génère la légende, supprime les lignes parasites et force les mentions."""
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     
@@ -226,7 +225,7 @@ def final_security_check(text):
 def wait_for_media_finish(container_id, token):
     url = f"[https://graph.threads.net/v1.0/](https://graph.threads.net/v1.0/){container_id}"
     params = {'fields': 'status,error_message', 'access_token': token}
-    for _ in range(12): # 60 secondes max
+    for _ in range(12): 
         try:
             r = requests.get(url, params=params)
             data = r.json()
@@ -277,7 +276,6 @@ def publish_to_threads(image_url, full_text):
 # SECTION 5 : TÂCHE DE FOND (ASYNC PUBLISH) & INTERFACE
 # =================================================================
 def background_publish(chat_id, token, mode, image_url, caption):
-    """Exécute la publication en arrière-plan et notifie l'utilisateur à la fin."""
     ok_ig = ok_th = False
     res_ig = res_th = "Non demandé"
 
@@ -287,7 +285,6 @@ def background_publish(chat_id, token, mode, image_url, caption):
     if mode in ["both", "th"]:
         ok_th, res_th = publish_to_threads(image_url, caption)
 
-    # Construction du rapport final
     final_msg = ""
     if mode == "both":
         if ok_ig and ok_th:
@@ -310,7 +307,6 @@ def background_publish(chat_id, token, mode, image_url, caption):
             mark_photo_as_sent(image_url, "Auto")
         else: final_msg = f"❌ **Erreur Threads :** {res_th}"
 
-    # Envoi du rapport final
     try:
         requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": final_msg, "parse_mode": "Markdown"})
     except: pass
