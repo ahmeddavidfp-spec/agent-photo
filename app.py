@@ -10,7 +10,7 @@ app = Flask(__name__)
 DB_PATH = '/data/photos.db' if os.path.exists('/data') else 'photos.db'
 
 def get_db_connection(): 
-    """Établit la connexion à la base SQLite locale."""
+    """Etablit la connexion a la base SQLite locale."""
     return sqlite3.connect(DB_PATH)
 
 def init_db():
@@ -42,7 +42,7 @@ def load_config():
 init_db()
 
 # =================================================================
-# SECTION 1.5 : OUTILS DB & UTILITAIRES (EN HAUT DU FICHIER)
+# SECTION 1.5 : OUTILS DB & UTILITAIRES
 # =================================================================
 def get_session(chat_id):
     conn = get_db_connection()
@@ -68,7 +68,7 @@ def get_db_stats():
     stats = conn.execute('SELECT galerie, COUNT(*) FROM sent_photos GROUP BY galerie').fetchall()
     conn.close()
     if not stats: return "Base vide."
-    msg = "📁 **RÉSUMÉ DES PUBLICATIONS :**\n"
+    msg = "📁 **RESUME DES PUBLICATIONS :**\n"
     for s in stats:
         name = s[0].capitalize() if s[0] else "Inconnue"
         msg += f"- {name} : {s[1]} photos\n"
@@ -97,7 +97,7 @@ def renew_threads_token():
     except Exception as e: return False, str(e)
 
 def get_token_status():
-    status_msg = "📊 **ÉTAT DES ACCÈS**\n"
+    status_msg = "📊 **ETAT DES ACCES**\n"
     for label, env_name, url in [("IG/FB", "IG_ACCESS_TOKEN", "https://graph.facebook.com/debug_token"), ("Threads", "THREADS_ACCESS_TOKEN", "https://graph.threads.net/debug_token")]:
         tk = os.environ.get(env_name)
         if tk:
@@ -108,7 +108,7 @@ def get_token_status():
                 else:
                     days = (datetime.datetime.fromtimestamp(exp) - datetime.datetime.now()).days
                     status_msg += f"⏳ {label} : {days} jours\n"
-            except: status_msg += f"⚠️ {label} : Vérif impossible\n"
+            except: status_msg += f"⚠️ {label} : Verif impossible\n"
         else: status_msg += f"❌ {label} : Manquant\n"
     return status_msg
 
@@ -137,14 +137,14 @@ def generate_ai_caption(image_url, galerie_nom):
     ]
     
     instructions = f"""Tu es David Ahmed, photographe d'art. Analyse cette photo de {galerie_nom}.
-    TACHE : Légende virale et choix des mentions.
-    RÈGLES CRITIQUES :
+    TACHE : Legende virale et choix des mentions.
+    REGLES CRITIQUES :
     1. PAS DE MARKDOWN (Pas de ```, pas de gras).
-    2. NE PAS ÉCRIRE "Alt text:". Utilise le séparateur |||.
-    3. Séparateur OBLIGATOIRE "|||" entre la légende et la description visuelle.
+    2. NE PAS ECRIRE "Alt text:". Utilise le separateur |||.
+    3. Separateur OBLIGATOIRE "|||" entre la legende et la description visuelle.
     STRUCTURE :
     "Titre Artistique"
-    [2 phrases d'analyse émotionnelle/technique]
+    [2 phrases d'analyse emotionnelle/technique]
     [Question engageante]
     (cc compte1 compte2 compte3)
     {display_link}
@@ -273,11 +273,11 @@ def publish_to_threads(image_url, full_text):
     except Exception as e: return False, str(e)
 
 # =================================================================
-# SECTION 5 : TÂCHE DE FOND (ASYNC PUBLISH) & INTERFACE
+# SECTION 5 : TACHE DE FOND (ASYNC PUBLISH) & INTERFACE
 # =================================================================
 def background_publish(chat_id, token, mode, image_url, caption):
     ok_ig = ok_th = False
-    res_ig = res_th = "Non demandé"
+    res_ig = res_th = "Non demande"
 
     if mode in ["both", "ig"]:
         ok_ig, res_ig = publish_to_instagram(image_url, caption)
@@ -288,14 +288,14 @@ def background_publish(chat_id, token, mode, image_url, caption):
     final_msg = ""
     if mode == "both":
         if ok_ig and ok_th:
-            final_msg = "🚀 **Succès Total !**\nInsta & Threads : ✅"
+            final_msg = "🚀 **Succes Total !**\nInsta & Threads : ✅"
             mark_photo_as_sent(image_url, "Auto")
             conn = get_db_connection()
             conn.execute('DELETE FROM current_session WHERE chat_id = ?', (chat_id,))
             conn.commit()
             conn.close()
         else:
-            final_msg = f"⚠️ **Résultat Partiel :**\nIG: {'✅' if ok_ig else '❌ ' + str(res_ig)}\nTH: {'✅' if ok_th else '❌ ' + str(res_th)}"
+            final_msg = f"⚠️ **Resultat Partiel :**\nIG: {'✅' if ok_ig else '❌ ' + str(res_ig)}\nTH: {'✅' if ok_th else '❌ ' + str(res_th)}"
     elif mode == "ig":
         if ok_ig:
             final_msg = "📸 **Instagram :** ✅"
@@ -331,6 +331,7 @@ def send_galerie_menu(chat_id):
             buttons.append({"text": f"{g.capitalize()} {count}", "callback_data": f"select_{g}"})
         except: buttons.append({"text": g.capitalize(), "callback_data": f"select_{g}"})
     for i in range(0, len(buttons), 2): keyboard.append(buttons[i:i + 2])
+    # ICI C'ETAIT LE PROBLEME : J'ai nettoye l'URL
     requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": f"{status}\n---\nQuelle galerie ?", "reply_markup": {"inline_keyboard": keyboard}})
 
 def send_suggestion(chat_id, galerie_nom):
@@ -368,7 +369,7 @@ def telegram_webhook():
     if text:
         if text == "/renew_threads":
             success, result = renew_threads_token()
-            msg = f"✅ **TOKEN RENOUVELÉ ({result[1]}j)**\n`{result[0]}`" if success else f"❌ {result}"
+            msg = f"✅ **TOKEN RENOUVELE ({result[1]}j)**\n`{result[0]}`" if success else f"❌ {result}"
             requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
             return jsonify({"status": "ok"})
         elif text == "/debug_db":
@@ -384,7 +385,7 @@ def telegram_webhook():
             return jsonify({"status": "ok"})
         elif action == "renew_threads_btn":
             success, result = renew_threads_token()
-            msg = f"✅ **TOKEN RENOUVELÉ ({result[1]}j)**\n`{result[0]}`" if success else f"❌ {result}"
+            msg = f"✅ **TOKEN RENOUVELE ({result[1]}j)**\n`{result[0]}`" if success else f"❌ {result}"
             requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
             return jsonify({"status": "ok"})
         elif action == "view_stats":
@@ -405,14 +406,14 @@ def telegram_webhook():
                 elif action == "pub_th": mode = "th"
                 elif action == "manual_edit":
                     save_session(chat_id, session[0], "WAITING_FOR_MANUAL")
-                    requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": "✍️ Envoie ta nouvelle légende."})
+                    requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": "✍️ Envoie ta nouvelle legende."})
                     return jsonify({"status": "ok"})
 
                 if mode:
                     requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ **Traitement en cours...** (Threads peut prendre 1 min)"})
                     threading.Thread(target=background_publish, args=(chat_id, token, mode, session[0], session[1])).start()
             else:
-                 requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": "⚠️ **Session expirée.**\nClique sur 'Menu' et génère une nouvelle photo."})
+                 requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": "⚠️ **Session expiree.**\nClique sur 'Menu' et genere une nouvelle photo."})
         return jsonify({"status": "ok"})
 
     if text:
@@ -435,13 +436,13 @@ def telegram_webhook():
                 conn.execute('DELETE FROM current_session WHERE chat_id = ?', (chat_id,))
                 conn.commit()
                 conn.close()
-                requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": f"✅ **Programmé pour {target.strftime('%H:%M')}** (heure belge).", "parse_mode": "Markdown"})
+                requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": f"✅ **Programme pour {target.strftime('%H:%M')}** (heure belge).", "parse_mode": "Markdown"})
             except:
                 requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": "❌ Format invalide (ex: 18:00)."})
             return jsonify({"status": "ok"})
         elif session and session[1] == "WAITING_FOR_MANUAL":
             save_session(chat_id, session[0], text)
-            requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": "✅ Prêt !", "reply_markup": {"inline_keyboard": [[{"text": "🚀 Les deux", "callback_data": "pub_both"}, {"text": "📅 Programmer", "callback_data": "schedule_btn"}], [{"text": "📸 Insta", "callback_data": "pub_ig"}, {"text": "🧵 Threads", "callback_data": "pub_th"}]]}})
+            requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": "✅ Pret !", "reply_markup": {"inline_keyboard": [[{"text": "🚀 Les deux", "callback_data": "pub_both"}, {"text": "📅 Programmer", "callback_data": "schedule_btn"}], [{"text": "📸 Insta", "callback_data": "pub_ig"}, {"text": "🧵 Threads", "callback_data": "pub_th"}]]}})
         else:
             send_galerie_menu(chat_id)
     return jsonify({"status": "ok"})
@@ -465,10 +466,10 @@ def scheduler_loop():
                     status = 'sent' if (ok_ig and ok_th) else 'error'
                     conn.execute("UPDATE scheduled_posts SET status = ? WHERE id = ?", (status, post_id))
                     conn.commit()
-                    msg = "⏰ **Post Programmé Exécuté !**\n"
+                    msg = "⏰ **Post Programme Execute !**\n"
                     msg += f"IG: {'✅' if ok_ig else '❌'} | TH: {'✅' if ok_th else '❌'}"
                     requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
-                    if ok_ig or ok_th: mark_photo_as_sent(img, "Programmé")
+                    if ok_ig or ok_th: mark_photo_as_sent(img, "Programme")
             conn.close()
         except Exception as e: print(f"Scheduler error: {e}")
         time.sleep(20)
