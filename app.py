@@ -9,6 +9,12 @@ from openai import OpenAI
 app = Flask(__name__)
 DB_PATH = '/data/photos.db' if os.path.exists('/data') else 'photos.db'
 
+# --- CONSTANTES DE SECURITE (POUR EVITER LE FORMATAGE AUTOMATIQUE) ---
+# On coupe les URL en deux pour que le chat ne les casse pas
+TG_API = "https://" + "api.telegram.org/bot"
+FB_API = "https://" + "graph.facebook.com/v21.0/"
+TH_API = "https://" + "graph.threads.net/v1.0/"
+
 def get_db_connection(): 
     """Etablit la connexion a la base SQLite locale."""
     return sqlite3.connect(DB_PATH)
@@ -90,7 +96,9 @@ def renew_threads_token():
     current_token = os.environ.get('THREADS_ACCESS_TOKEN')
     if not client_secret: return False, "SECRET manquant"
     try:
-        r = requests.get("https://graph.threads.net/access_token", params={"grant_type": "th_exchange_token", "client_secret": client_secret, "access_token": current_token})
+        # Construction URL safe
+        url = "https://" + "graph.threads.net/access_token"
+        r = requests.get(url, params={"grant_type": "th_exchange_token", "client_secret": client_secret, "access_token": current_token})
         res = r.json()
         if "access_token" in res: return True, (res['access_token'], res.get('expires_in', 0) // 86400)
         return False, res
@@ -98,7 +106,11 @@ def renew_threads_token():
 
 def get_token_status():
     status_msg = "📊 **ETAT DES ACCES**\n"
-    for label, env_name, url in [("IG/FB", "IG_ACCESS_TOKEN", "https://graph.facebook.com/debug_token"), ("Threads", "THREADS_ACCESS_TOKEN", "https://graph.threads.net/debug_token")]:
+    # URLs safe
+    fb_debug = "https://" + "graph.facebook.com/debug_token"
+    th_debug = "https://" + "graph.threads.net/debug_token"
+    
+    for label, env_name, url in [("IG/FB", "IG_ACCESS_TOKEN", fb_debug), ("Threads", "THREADS_ACCESS_TOKEN", th_debug)]:
         tk = os.environ.get(env_name)
         if tk:
             try:
@@ -191,7 +203,7 @@ def generate_ai_caption(image_url, galerie_nom):
     return f"{final_caption}|||{alt_part}"
 
 # =================================================================
-# SECTION 3 : LOGIQUE RESEAUX (AVEC POLLING)
+# SECTION 3 : LOGIQUE RESEAUX (AVEC POLLING ET URLS SAFE)
 # =================================================================
 def split_content(full_text):
     if "|||" in full_text:
@@ -223,7 +235,7 @@ def final_security_check(text):
     return text
 
 def wait_for_media_finish(container_id, token):
-    url = f"[https://graph.threads.net/v1.0/](https://graph.threads.net/v1.0/){container_id}"
+    url = f"{TH_API}{container_id}"
     params = {'fields': 'status,error_message', 'access_token': token}
     for _ in range(12): 
         try:
@@ -241,12 +253,12 @@ def publish_to_instagram(image_url, full_text):
     token = os.environ.get('IG_ACCESS_TOKEN')
     ig_id = "17841453263147553" 
     try:
-        r = requests.post(f"[https://graph.facebook.com/v21.0/](https://graph.facebook.com/v21.0/){ig_id}/media", 
+        r = requests.post(f"{FB_API}{ig_id}/media", 
                           data={'image_url': image_url, 'caption': caption, 'access_token': token})
         c_id = r.json().get('id')
         if not c_id: return False, r.json()
         time.sleep(10)
-        requests.post(f"[https://graph.facebook.com/v21.0/](https://graph.facebook.com/v21.0/){ig_id}/media_publish", data={'creation_id': c_id, 'access_token': token})
+        requests.post(f"{FB_API}{ig_id}/media_publish", data={'creation_id': c_id, 'access_token': token})
         return True, "OK"
     except Exception as e: return False, str(e)
 
@@ -257,7 +269,7 @@ def publish_to_threads(image_url, full_text):
     th_id = os.environ.get('THREADS_USER_ID')
     clean_url = image_url.split('?')[0]
     try:
-        url = f"[https://graph.threads.net/v1.0/](https://graph.threads.net/v1.0/){th_id}/threads"
+        url = f"{TH_API}{th_id}/threads"
         headers = {'Content-Type': 'application/json'}
         payload = {'media_type': 'IMAGE', 'image_url': clean_url, 'text': caption[:490], 'access_token': token}
         r = requests.post(url, json=payload, headers=headers)
@@ -267,7 +279,7 @@ def publish_to_threads(image_url, full_text):
         
         if not wait_for_media_finish(container_id, token): return False, "Timeout: Image processing failed."
         
-        r_pub = requests.post(f"[https://graph.threads.net/v1.0/](https://graph.threads.net/v1.0/){th_id}/threads_publish", 
+        r_pub = requests.post(f"{TH_API}{th_id}/threads_publish", 
                               data={'creation_id': container_id, 'access_token': token})
         return (True, "OK") if r_pub.status_code == 200 else (False, r_pub.text)
     except Exception as e: return False, str(e)
@@ -308,7 +320,8 @@ def background_publish(chat_id, token, mode, image_url, caption):
         else: final_msg = f"❌ **Erreur Threads :** {res_th}"
 
     try:
-        requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": final_msg, "parse_mode": "Markdown"})
+        # UTILISATION DES VARIABLES SAFE (PLUS DE FORMATAGE POSSIBLE)
+        requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": final_msg, "parse_mode": "Markdown"})
     except: pass
 
 def send_galerie_menu(chat_id):
@@ -331,8 +344,9 @@ def send_galerie_menu(chat_id):
             buttons.append({"text": f"{g.capitalize()} {count}", "callback_data": f"select_{g}"})
         except: buttons.append({"text": g.capitalize(), "callback_data": f"select_{g}"})
     for i in range(0, len(buttons), 2): keyboard.append(buttons[i:i + 2])
-    # ICI C'ETAIT LE PROBLEME : J'ai nettoye l'URL
-    requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": f"{status}\n---\nQuelle galerie ?", "reply_markup": {"inline_keyboard": keyboard}})
+    
+    # URL SAFE
+    requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": f"{status}\n---\nQuelle galerie ?", "reply_markup": {"inline_keyboard": keyboard}})
 
 def send_suggestion(chat_id, galerie_nom):
     token = os.environ.get('TELEGRAM_TOKEN')
@@ -344,7 +358,7 @@ def send_suggestion(chat_id, galerie_nom):
     conn.close()
     avail = [u for u in valid if u not in sent]
     if not avail:
-        requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": "Galerie vide."})
+        requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": "Galerie vide."})
         return
     img_url = random.choice(avail)
     full_content = generate_ai_caption(img_url, galerie_nom)
@@ -354,7 +368,9 @@ def send_suggestion(chat_id, galerie_nom):
           [{"text": "📅 Programmer", "callback_data": "schedule_btn"}],
           [{"text": "📸 Insta", "callback_data": "pub_ig"}, {"text": "🧵 Threads", "callback_data": "pub_th"}],
           [{"text": "🔄 Autre", "callback_data": f"select_{galerie_nom}"}, {"text": "⬅️ Menu", "callback_data": "menu"}]]
-    requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendPhoto", json={"chat_id": chat_id, "photo": img_url, "caption": visible_caption, "reply_markup": {"inline_keyboard": kb}})
+    
+    # URL SAFE
+    requests.post(f"{TG_API}{token}/sendPhoto", json={"chat_id": chat_id, "photo": img_url, "caption": visible_caption, "reply_markup": {"inline_keyboard": kb}})
 
 @app.route("/telegram-webhook", methods=['POST'])
 def telegram_webhook():
@@ -370,10 +386,10 @@ def telegram_webhook():
         if text == "/renew_threads":
             success, result = renew_threads_token()
             msg = f"✅ **TOKEN RENOUVELE ({result[1]}j)**\n`{result[0]}`" if success else f"❌ {result}"
-            requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
+            requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
             return jsonify({"status": "ok"})
         elif text == "/debug_db":
-            requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": get_db_stats(), "parse_mode": "Markdown"})
+            requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": get_db_stats(), "parse_mode": "Markdown"})
             return jsonify({"status": "ok"})
 
     if action:
@@ -381,18 +397,18 @@ def telegram_webhook():
             session = get_session(chat_id)
             if session:
                 save_session(chat_id, session[0], f"WAITING_SCHEDULE|{session[1]}")
-                requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": "📅 **Heure ?** (HH:MM)", "parse_mode": "Markdown"})
+                requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": "📅 **Heure ?** (HH:MM)", "parse_mode": "Markdown"})
             return jsonify({"status": "ok"})
         elif action == "renew_threads_btn":
             success, result = renew_threads_token()
             msg = f"✅ **TOKEN RENOUVELE ({result[1]}j)**\n`{result[0]}`" if success else f"❌ {result}"
-            requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
+            requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
             return jsonify({"status": "ok"})
         elif action == "view_stats":
-            requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": get_db_stats(), "parse_mode": "Markdown"})
+            requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": get_db_stats(), "parse_mode": "Markdown"})
         elif action == "export_db_btn":
             path = export_db_to_csv()
-            with open(path, 'rb') as f: requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendDocument", data={"chat_id": chat_id}, files={"document": f})
+            with open(path, 'rb') as f: requests.post(f"{TG_API}{token}/sendDocument", data={"chat_id": chat_id}, files={"document": f})
         elif action == "menu": 
             send_galerie_menu(chat_id)
         elif action.startswith("select_"): 
@@ -406,14 +422,15 @@ def telegram_webhook():
                 elif action == "pub_th": mode = "th"
                 elif action == "manual_edit":
                     save_session(chat_id, session[0], "WAITING_FOR_MANUAL")
-                    requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": "✍️ Envoie ta nouvelle legende."})
+                    requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": "✍️ Envoie ta nouvelle legende."})
                     return jsonify({"status": "ok"})
 
                 if mode:
-                    requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ **Traitement en cours...** (Threads peut prendre 1 min)"})
+                    # URL SAFE
+                    requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ **Traitement en cours...** (Threads peut prendre 1 min)"})
                     threading.Thread(target=background_publish, args=(chat_id, token, mode, session[0], session[1])).start()
             else:
-                 requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": "⚠️ **Session expiree.**\nClique sur 'Menu' et genere une nouvelle photo."})
+                 requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": "⚠️ **Session expiree.**\nClique sur 'Menu' et genere une nouvelle photo."})
         return jsonify({"status": "ok"})
 
     if text:
@@ -436,13 +453,13 @@ def telegram_webhook():
                 conn.execute('DELETE FROM current_session WHERE chat_id = ?', (chat_id,))
                 conn.commit()
                 conn.close()
-                requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": f"✅ **Programme pour {target.strftime('%H:%M')}** (heure belge).", "parse_mode": "Markdown"})
+                requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": f"✅ **Programme pour {target.strftime('%H:%M')}** (heure belge).", "parse_mode": "Markdown"})
             except:
-                requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": "❌ Format invalide (ex: 18:00)."})
+                requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": "❌ Format invalide (ex: 18:00)."})
             return jsonify({"status": "ok"})
         elif session and session[1] == "WAITING_FOR_MANUAL":
             save_session(chat_id, session[0], text)
-            requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": "✅ Pret !", "reply_markup": {"inline_keyboard": [[{"text": "🚀 Les deux", "callback_data": "pub_both"}, {"text": "📅 Programmer", "callback_data": "schedule_btn"}], [{"text": "📸 Insta", "callback_data": "pub_ig"}, {"text": "🧵 Threads", "callback_data": "pub_th"}]]}})
+            requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": "✅ Pret !", "reply_markup": {"inline_keyboard": [[{"text": "🚀 Les deux", "callback_data": "pub_both"}, {"text": "📅 Programmer", "callback_data": "schedule_btn"}], [{"text": "📸 Insta", "callback_data": "pub_ig"}, {"text": "🧵 Threads", "callback_data": "pub_th"}]]}})
         else:
             send_galerie_menu(chat_id)
     return jsonify({"status": "ok"})
@@ -468,7 +485,7 @@ def scheduler_loop():
                     conn.commit()
                     msg = "⏰ **Post Programme Execute !**\n"
                     msg += f"IG: {'✅' if ok_ig else '❌'} | TH: {'✅' if ok_th else '❌'}"
-                    requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
+                    requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
                     if ok_ig or ok_th: mark_photo_as_sent(img, "Programme")
             conn.close()
         except Exception as e: print(f"Scheduler error: {e}")
