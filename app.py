@@ -265,28 +265,53 @@ def publish_to_instagram(image_url, full_text):
         requests.post(f"{FB_API}{ig_id}/media_publish", data={'creation_id': c_id, 'access_token': token})
         return True, "OK"
     except Exception as e: return False, str(e)
-
+    
 def publish_to_threads(image_url, full_text):
     secured_text = final_security_check(full_text)
     caption, _ = split_content(secured_text)
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
-    clean_url = image_url.split('?')[0]
+    clean_url = image_url.split('?')[0] # Enleve les parametres apres .jpg
+    
+    # --- LOGS DE DEBUG (POUR TROUVER L'ERREUR CODE 1) ---
+    logger.info(f"🧐 DEBUG THREADS | ID User: {th_id}")
+    logger.info(f"🧐 DEBUG THREADS | URL Image: {clean_url}")
+    logger.info(f"🧐 DEBUG THREADS | Token present: {'Oui' if token else 'NON'}")
+    
+    if not th_id or not token:
+        return False, "ID User ou Token manquant dans Render"
+    
     try:
+        # Etape 1 : Creation du conteneur
         url = f"{TH_API}{th_id}/threads"
         headers = {'Content-Type': 'application/json'}
         payload = {'media_type': 'IMAGE', 'image_url': clean_url, 'text': caption[:490], 'access_token': token}
+        
+        logger.info(f"📤 Envoi Requete Creation...")
         r = requests.post(url, json=payload, headers=headers)
         res = r.json()
-        if 'id' not in res: return False, res
+        
+        if 'id' not in res: 
+            logger.error(f"❌ Erreur Creation Conteneur : {res}")
+            return False, res
+            
         container_id = res['id']
+        logger.info(f"✅ Conteneur cree : {container_id} | Attente publication...")
         
-        if not wait_for_media_finish(container_id, token): return False, "Timeout: Image processing failed."
+        # Etape 2 : Attente (Polling)
+        if not wait_for_media_finish(container_id, token): 
+            return False, "Timeout: Image processing failed (L'image est peut-etre trop lourde ou inaccessible)."
         
+        # Etape 3 : Publication
         r_pub = requests.post(f"{TH_API}{th_id}/threads_publish", 
                               data={'creation_id': container_id, 'access_token': token})
-        return (True, "OK") if r_pub.status_code == 200 else (False, r_pub.text)
-    except Exception as e: return False, str(e)
+        
+        if r_pub.status_code == 200:
+            return True, "OK"
+        else:
+            return False, r_pub.text
+            
+    except Exception as e: return False, str(e)    
 
 
 
