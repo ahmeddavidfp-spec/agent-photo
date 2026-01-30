@@ -263,7 +263,7 @@ def publish_to_instagram(image_url, full_text):
         return True, "OK"
     except Exception as e: return False, str(e)
 
-# --- MODIFICATION ICI UNIQUEMENT (POUR CONTOURNER LE BUG IMAGE EUROPE) ---
+# --- FONCTION MODIFIEE AVEC DELAI (CORRECTION ERROR CODE 24) ---
 def publish_to_threads(image_url, full_text):
     secured_text = final_security_check(full_text)
     caption, _ = split_content(secured_text)
@@ -271,7 +271,6 @@ def publish_to_threads(image_url, full_text):
     th_id = os.environ.get('THREADS_USER_ID')
     clean_url = image_url.split('?')[0]
     
-    # LOGS
     logger.info(f"🧐 DEBUG THREADS | ID: {th_id} | Mode: TEXTE+LIEN (Force)")
     
     if not th_id or not token: return False, "ID ou Token manquant"
@@ -280,7 +279,7 @@ def publish_to_threads(image_url, full_text):
         # On construit le texte avec le lien
         text_payload = f"{caption[:400]}\n\n(Voir la photo : {clean_url})"
 
-        # Etape 1 : Creation du conteneur TEXT (Au lieu de IMAGE)
+        # Etape 1 : Creation du conteneur TEXTE
         url = f"{TH_API}{th_id}/threads"
         headers = {'Content-Type': 'application/json'}
         payload = {
@@ -300,7 +299,12 @@ def publish_to_threads(image_url, full_text):
         container_id = res['id']
         logger.info(f"✅ Conteneur cree : {container_id}")
         
-        # Etape 2 : Publication immediate (pas d'attente necessaire pour texte)
+        # --- CORRECTION ICI : ON ATTEND 5s AVANT DE PUBLIER ---
+        # Meme pour du texte, Meta a besoin de temps pour generer l'apercu du lien
+        logger.info("⏳ Attente 5s (Propagation Link Preview)...")
+        time.sleep(5) 
+        
+        # Etape 2 : Publication
         r_pub = requests.post(f"{TH_API}{th_id}/threads_publish", 
                               data={'creation_id': container_id, 'access_token': token})
         
