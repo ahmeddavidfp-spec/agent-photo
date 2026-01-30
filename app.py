@@ -264,6 +264,7 @@ def publish_to_instagram(image_url, full_text):
     except Exception as e: return False, str(e)
 
 # --- FONCTION MODIFIEE AVEC DELAI (CORRECTION ERROR CODE 24) ---
+# --- FONCTION CORRIGEE (LIMITE 500 CARACTERES) ---
 def publish_to_threads(image_url, full_text):
     secured_text = final_security_check(full_text)
     caption, _ = split_content(secured_text)
@@ -276,8 +277,16 @@ def publish_to_threads(image_url, full_text):
     if not th_id or not token: return False, "ID ou Token manquant"
     
     try:
+        # CALCUL DE SECURITE POUR LA LIMITE DE 500 CARACTERES
+        # Une URL Squarespace peut faire 100-150 caracteres.
+        # On coupe la legende a 300 caracteres pour laisser de la place au lien.
+        max_caption_len = 500 - len(clean_url) - 50 # 50 chars de marge de securite
+        if max_caption_len < 50: max_caption_len = 300 # Sécurité minimum
+
+        short_caption = caption[:max_caption_len] + "..." if len(caption) > max_caption_len else caption
+        
         # On construit le texte avec le lien
-        text_payload = f"{caption[:400]}\n\n(Voir la photo : {clean_url})"
+        text_payload = f"{short_caption}\n\n(Voir la photo : {clean_url})"
 
         # Etape 1 : Creation du conteneur TEXTE
         url = f"{TH_API}{th_id}/threads"
@@ -288,13 +297,29 @@ def publish_to_threads(image_url, full_text):
             'access_token': token
         }
         
-        logger.info(f"📤 Envoi Requete Threads (Texte)...")
+        logger.info(f"📤 Envoi Requete Threads (Taille texte: {len(text_payload)})...")
         r = requests.post(url, json=payload, headers=headers)
         res = r.json()
         
         if 'id' not in res: 
             logger.error(f"❌ Erreur Creation Threads : {res}")
             return False, res
+            
+        container_id = res['id']
+        logger.info(f"✅ Conteneur cree : {container_id}")
+        
+        # Attente propagation lien
+        logger.info("⏳ Attente 5s (Propagation Link Preview)...")
+        time.sleep(5) 
+        
+        # Etape 2 : Publication
+        r_pub = requests.post(f"{TH_API}{th_id}/threads_publish", 
+                              data={'creation_id': container_id, 'access_token': token})
+        
+        if r_pub.status_code == 200: return True, "OK (Mode Lien)"
+        else: return False, r_pub.text
+            
+    except Exception as e: return False, str(e)
             
         container_id = res['id']
         logger.info(f"✅ Conteneur cree : {container_id}")
