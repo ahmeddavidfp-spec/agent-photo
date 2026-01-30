@@ -1,7 +1,11 @@
-import os, requests, yaml, random, sqlite3, time, datetime, csv, threading, re
+import os, requests, yaml, random, sqlite3, time, datetime, csv, threading, re, logging, sys
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 from openai import OpenAI
+
+# CONFIGURATION DES LOGS (POUR VOIR LES ERREURS DANS RENDER)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', stream=sys.stdout)
+logger = logging.getLogger()
 
 # =================================================================
 # SECTION 1 : CONFIGURATION ET INITIALISATION
@@ -284,45 +288,72 @@ def publish_to_threads(image_url, full_text):
         return (True, "OK") if r_pub.status_code == 200 else (False, r_pub.text)
     except Exception as e: return False, str(e)
 
+
+
 # =================================================================
 # SECTION 5 : TACHE DE FOND (ASYNC PUBLISH) & INTERFACE
 # =================================================================
 def background_publish(chat_id, token, mode, image_url, caption):
-    ok_ig = ok_th = False
-    res_ig = res_th = "Non demande"
-
-    if mode in ["both", "ig"]:
-        ok_ig, res_ig = publish_to_instagram(image_url, caption)
+    logger.info(f"🚀 DEMARRAGE TACHE DE FOND | Mode: {mode} | ChatID: {chat_id}")
     
-    if mode in ["both", "th"]:
-        ok_th, res_th = publish_to_threads(image_url, caption)
-
-    final_msg = ""
-    if mode == "both":
-        if ok_ig and ok_th:
-            final_msg = "🚀 **Succes Total !**\nInsta & Threads : ✅"
-            mark_photo_as_sent(image_url, "Auto")
-            conn = get_db_connection()
-            conn.execute('DELETE FROM current_session WHERE chat_id = ?', (chat_id,))
-            conn.commit()
-            conn.close()
-        else:
-            final_msg = f"⚠️ **Resultat Partiel :**\nIG: {'✅' if ok_ig else '❌ ' + str(res_ig)}\nTH: {'✅' if ok_th else '❌ ' + str(res_th)}"
-    elif mode == "ig":
-        if ok_ig:
-            final_msg = "📸 **Instagram :** ✅"
-            mark_photo_as_sent(image_url, "Auto")
-        else: final_msg = f"❌ **Erreur Insta :** {res_ig}"
-    elif mode == "th":
-        if ok_th:
-            final_msg = "🧵 **Threads :** ✅"
-            mark_photo_as_sent(image_url, "Auto")
-        else: final_msg = f"❌ **Erreur Threads :** {res_th}"
-
     try:
-        # UTILISATION DES VARIABLES SAFE (PLUS DE FORMATAGE POSSIBLE)
+        ok_ig = False
+        ok_th = False
+        res_ig = "Non demande"
+        res_th = "Non demande"
+
+        # 1. Publication Instagram
+        if mode in ["both", "ig"]:
+            logger.info("📸 Tentative envoi Instagram...")
+            ok_ig, res_ig = publish_to_instagram(image_url, caption)
+            logger.info(f"📸 Resultat IG: {ok_ig} | Msg: {res_ig}")
+        
+        # 2. Publication Threads
+        if mode in ["both", "th"]:
+            logger.info("🧵 Tentative envoi Threads...")
+            ok_th, res_th = publish_to_threads(image_url, caption)
+            logger.info(f"🧵 Resultat TH: {ok_th} | Msg: {res_th}")
+
+        # 3. Construction du message final
+        final_msg = ""
+        if mode == "both":
+            if ok_ig and ok_th:
+                final_msg = "🚀 **Succes Total !**\nInsta & Threads : ✅"
+                mark_photo_as_sent(image_url, "Auto")
+                
+                # Nettoyage session
+                try:
+                    conn = get_db_connection()
+                    conn.execute('DELETE FROM current_session WHERE chat_id = ?', (chat_id,))
+                    conn.commit()
+                    conn.close()
+                except Exception as e:
+                    logger.error(f"⚠️ Erreur nettoyage DB: {e}")
+
+            else:
+                final_msg = f"⚠️ **Resultat Partiel :**\nIG: {'✅' if ok_ig else '❌ ' + str(res_ig)}\nTH: {'✅' if ok_th else '❌ ' + str(res_th)}"
+        
+        elif mode == "ig":
+            if ok_ig:
+                final_msg = "📸 **Instagram :** ✅"
+                mark_photo_as_sent(image_url, "Auto")
+            else: final_msg = f"❌ **Erreur Insta :** {res_ig}"
+            
+        elif mode == "th":
+            if ok_th:
+                final_msg = "🧵 **Threads :** ✅"
+                mark_photo_as_sent(image_url, "Auto")
+            else: final_msg = f"❌ **Erreur Threads :** {res_th}"
+
+        # 4. Envoi de la confirmation Telegram
+        logger.info(f"📨 Envoi confirmation Telegram : {final_msg}")
         requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": final_msg, "parse_mode": "Markdown"})
-    except: pass
+
+    except Exception as e:
+        # 5. GESTION DU CRASH TOTAL (C'est ca qui manquait !)
+        logger.error(f"🔥 CRASH CRITIQUE DANS LE THREAD : {str(e)}", exc_info=True)
+        error_msg = f"🔥 **Erreur Critique du Serveur**\nLe processus a plante.\n\n`{str(e)}`"
+        requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": error_msg, "parse_mode": "Markdown"})
 
 def send_galerie_menu(chat_id):
     config = load_config()
@@ -345,7 +376,6 @@ def send_galerie_menu(chat_id):
         except: buttons.append({"text": g.capitalize(), "callback_data": f"select_{g}"})
     for i in range(0, len(buttons), 2): keyboard.append(buttons[i:i + 2])
     
-    # URL SAFE
     requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": f"{status}\n---\nQuelle galerie ?", "reply_markup": {"inline_keyboard": keyboard}})
 
 def send_suggestion(chat_id, galerie_nom):
@@ -369,7 +399,6 @@ def send_suggestion(chat_id, galerie_nom):
           [{"text": "📸 Insta", "callback_data": "pub_ig"}, {"text": "🧵 Threads", "callback_data": "pub_th"}],
           [{"text": "🔄 Autre", "callback_data": f"select_{galerie_nom}"}, {"text": "⬅️ Menu", "callback_data": "menu"}]]
     
-    # URL SAFE
     requests.post(f"{TG_API}{token}/sendPhoto", json={"chat_id": chat_id, "photo": img_url, "caption": visible_caption, "reply_markup": {"inline_keyboard": kb}})
 
 @app.route("/telegram-webhook", methods=['POST'])
@@ -381,6 +410,10 @@ def telegram_webhook():
     chat_id = data.get("message", {}).get("chat", {}).get("id") or data.get("callback_query", {}).get("message", {}).get("chat", {}).get("id")
     text = data.get("message", {}).get("text", "").strip()
     action = data.get("callback_query", {}).get("data", "")
+
+    # LOGGING DES ENTREES (Pour savoir ce qui se passe)
+    if text: logger.info(f"📩 Recu texte : {text}")
+    if action: logger.info(f"🔘 Recu action : {action}")
 
     if text:
         if text == "/renew_threads":
@@ -426,8 +459,9 @@ def telegram_webhook():
                     return jsonify({"status": "ok"})
 
                 if mode:
-                    # URL SAFE
-                    requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ **Traitement en cours...** (Threads peut prendre 1 min)"})
+                    # Message d'attente
+                    requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ **Traitement en cours...** (Je regarde les logs)"})
+                    # Lancement Tache de fond
                     threading.Thread(target=background_publish, args=(chat_id, token, mode, session[0], session[1])).start()
             else:
                  requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": "⚠️ **Session expiree.**\nClique sur 'Menu' et genere une nouvelle photo."})
@@ -463,6 +497,8 @@ def telegram_webhook():
         else:
             send_galerie_menu(chat_id)
     return jsonify({"status": "ok"})
+
+
 
 # =================================================================
 # SECTION 7 : PLANIFICATEUR (SCHEDULER 20s)
