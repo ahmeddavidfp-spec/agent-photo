@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 from openai import OpenAI
 
-# CONFIGURATION DES LOGS (POUR VOIR LES ERREURS DANS RENDER)
+# CONFIGURATION DES LOGS
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', stream=sys.stdout)
 logger = logging.getLogger()
 
@@ -13,13 +13,12 @@ logger = logging.getLogger()
 app = Flask(__name__)
 DB_PATH = '/data/photos.db' if os.path.exists('/data') else 'photos.db'
 
-# --- CONSTANTES DE SECURITE ---
+# CONSTANTES URL (Safe)
 TG_API = "https://" + "api.telegram.org/bot"
 FB_API = "https://" + "graph.facebook.com/v21.0/"
 TH_API = "https://" + "graph.threads.net/v1.0/"
 
 def get_db_connection(): 
-    """Etablit la connexion a la base SQLite locale."""
     return sqlite3.connect(DB_PATH)
 
 def init_db():
@@ -263,8 +262,7 @@ def publish_to_instagram(image_url, full_text):
         return True, "OK"
     except Exception as e: return False, str(e)
 
-# --- FONCTION MODIFIEE AVEC DELAI (CORRECTION ERROR CODE 24) ---
-# --- FONCTION CORRIGEE (LIMITE 500 CARACTERES) ---
+# --- FONCTION SECURISEE (MODE LIEN + LIMITE 500 CHARS + DELAI) ---
 def publish_to_threads(image_url, full_text):
     secured_text = final_security_check(full_text)
     caption, _ = split_content(secured_text)
@@ -277,18 +275,17 @@ def publish_to_threads(image_url, full_text):
     if not th_id or not token: return False, "ID ou Token manquant"
     
     try:
-        # CALCUL DE SECURITE POUR LA LIMITE DE 500 CARACTERES
-        # Une URL Squarespace peut faire 100-150 caracteres.
-        # On coupe la legende a 300 caracteres pour laisser de la place au lien.
-        max_caption_len = 500 - len(clean_url) - 50 # 50 chars de marge de securite
-        if max_caption_len < 50: max_caption_len = 300 # Sécurité minimum
+        # 1. CALCUL DE SECURITE (LIMITE 500 CARACTERES)
+        # Une URL Squarespace est longue, on coupe la legende pour laisser la place.
+        max_caption_len = 500 - len(clean_url) - 50 
+        if max_caption_len < 50: max_caption_len = 300 
 
         short_caption = caption[:max_caption_len] + "..." if len(caption) > max_caption_len else caption
         
-        # On construit le texte avec le lien
+        # 2. Construction du texte
         text_payload = f"{short_caption}\n\n(Voir la photo : {clean_url})"
 
-        # Etape 1 : Creation du conteneur TEXTE
+        # 3. Creation du conteneur
         url = f"{TH_API}{th_id}/threads"
         headers = {'Content-Type': 'application/json'}
         payload = {
@@ -297,7 +294,7 @@ def publish_to_threads(image_url, full_text):
             'access_token': token
         }
         
-        logger.info(f"📤 Envoi Requete Threads (Taille texte: {len(text_payload)})...")
+        logger.info(f"📤 Envoi Requete Threads (Taille: {len(text_payload)})...")
         r = requests.post(url, json=payload, headers=headers)
         res = r.json()
         
@@ -308,28 +305,11 @@ def publish_to_threads(image_url, full_text):
         container_id = res['id']
         logger.info(f"✅ Conteneur cree : {container_id}")
         
-        # Attente propagation lien
+        # 4. PAUSE DE 5 SECONDES (CRITIQUE POUR EVITER ERROR 24)
         logger.info("⏳ Attente 5s (Propagation Link Preview)...")
         time.sleep(5) 
         
-        # Etape 2 : Publication
-        r_pub = requests.post(f"{TH_API}{th_id}/threads_publish", 
-                              data={'creation_id': container_id, 'access_token': token})
-        
-        if r_pub.status_code == 200: return True, "OK (Mode Lien)"
-        else: return False, r_pub.text
-            
-    except Exception as e: return False, str(e)
-            
-        container_id = res['id']
-        logger.info(f"✅ Conteneur cree : {container_id}")
-        
-        # --- CORRECTION ICI : ON ATTEND 5s AVANT DE PUBLIER ---
-        # Meme pour du texte, Meta a besoin de temps pour generer l'apercu du lien
-        logger.info("⏳ Attente 5s (Propagation Link Preview)...")
-        time.sleep(5) 
-        
-        # Etape 2 : Publication
+        # 5. Publication
         r_pub = requests.post(f"{TH_API}{th_id}/threads_publish", 
                               data={'creation_id': container_id, 'access_token': token})
         
