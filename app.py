@@ -1,4 +1,4 @@
-import os, requests, yaml, random, sqlite3, time, datetime, csv, threading, re, logging, sys
+import os, requests, yaml, random, sqlite3, time, datetime, csv, threading, re, logging, sys, urllib.parse
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 from openai import OpenAI
@@ -7,13 +7,10 @@ from openai import OpenAI
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', stream=sys.stdout)
 logger = logging.getLogger()
 
-# =================================================================
-# SECTION 1 : CONFIGURATION ET INITIALISATION
-# =================================================================
 app = Flask(__name__)
 DB_PATH = '/data/photos.db' if os.path.exists('/data') else 'photos.db'
 
-# CONSTANTES URL (Safe)
+# CONSTANTES URL
 TG_API = "https://" + "api.telegram.org/bot"
 FB_API = "https://" + "graph.facebook.com/v21.0/"
 TH_API = "https://" + "graph.threads.net/v1.0/"
@@ -26,19 +23,11 @@ def init_db():
     conn.execute('CREATE TABLE IF NOT EXISTS sent_photos (url TEXT PRIMARY KEY)')
     conn.execute('CREATE TABLE IF NOT EXISTS current_session (chat_id INTEGER PRIMARY KEY, last_url TEXT, last_caption TEXT)')
     conn.execute('''CREATE TABLE IF NOT EXISTS scheduled_posts 
-                    (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                     chat_id INTEGER, 
-                     image_url TEXT, 
-                     caption TEXT, 
-                     run_at TEXT, 
-                     status TEXT DEFAULT 'pending')''')
-    
+                    (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER, image_url TEXT, caption TEXT, run_at TEXT, status TEXT DEFAULT 'pending')''')
     cursor = conn.execute('PRAGMA table_info(sent_photos)')
-    existing_columns = [column[1] for column in cursor.fetchall()]
-    if 'galerie' not in existing_columns:
-        conn.execute('ALTER TABLE sent_photos ADD COLUMN galerie TEXT')
-    if 'date_envoi' not in existing_columns:
-        conn.execute('ALTER TABLE sent_photos ADD COLUMN date_envoi TEXT')
+    cols = [column[1] for column in cursor.fetchall()]
+    if 'galerie' not in cols: conn.execute('ALTER TABLE sent_photos ADD COLUMN galerie TEXT')
+    if 'date_envoi' not in cols: conn.execute('ALTER TABLE sent_photos ADD COLUMN date_envoi TEXT')
     conn.commit()
     conn.close()
 
@@ -49,9 +38,7 @@ def load_config():
 
 init_db()
 
-# =================================================================
-# SECTION 1.5 : OUTILS DB & UTILITAIRES
-# =================================================================
+# --- OUTILS ---
 def get_session(chat_id):
     conn = get_db_connection()
     res = conn.execute('SELECT last_url, last_caption FROM current_session WHERE chat_id = ?', (chat_id,)).fetchone()
@@ -65,9 +52,8 @@ def save_session(chat_id, url, cap):
     conn.close()
 
 def mark_photo_as_sent(url, galerie):
-    date_jour = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn = get_db_connection()
-    conn.execute('INSERT OR IGNORE INTO sent_photos (url, galerie, date_envoi) VALUES (?, ?, ?)', (url, galerie, date_jour))
+    conn.execute('INSERT OR IGNORE INTO sent_photos (url, galerie, date_envoi) VALUES (?, ?, ?)', (url, galerie, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     conn.commit()
     conn.close()
 
@@ -76,140 +62,62 @@ def get_db_stats():
     stats = conn.execute('SELECT galerie, COUNT(*) FROM sent_photos GROUP BY galerie').fetchall()
     conn.close()
     if not stats: return "Base vide."
-    msg = "📁 **RESUME DES PUBLICATIONS :**\n"
-    for s in stats:
-        name = s[0].capitalize() if s[0] else "Inconnue"
-        msg += f"- {name} : {s[1]} photos\n"
+    msg = "📁 **RESUME :**\n"
+    for s in stats: msg += f"- {s[0].capitalize() if s[0] else 'Inconnue'} : {s[1]}\n"
     return msg
 
 def export_db_to_csv():
     conn = get_db_connection()
-    cursor = conn.execute('SELECT * FROM sent_photos')
-    file_path = '/tmp/export.csv'
-    with open(file_path, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(['url', 'galerie', 'date_envoi'])
-        writer.writerows(cursor.fetchall())
+    cur = conn.execute('SELECT * FROM sent_photos')
+    path = '/tmp/export.csv'
+    with open(path, 'w', newline='') as f:
+        csv.writer(f).writerow(['url', 'galerie', 'date'])
+        csv.writer(f).writerows(cur.fetchall())
     conn.close()
-    return file_path
+    return path
 
 def renew_threads_token():
-    client_secret = os.environ.get('THREADS_CLIENT_SECRET')
-    current_token = os.environ.get('THREADS_ACCESS_TOKEN')
-    if not client_secret: return False, "SECRET manquant"
     try:
         url = "https://" + "graph.threads.net/access_token"
-        r = requests.get(url, params={"grant_type": "th_exchange_token", "client_secret": client_secret, "access_token": current_token})
+        r = requests.get(url, params={"grant_type": "th_exchange_token", "client_secret": os.environ.get('THREADS_CLIENT_SECRET'), "access_token": os.environ.get('THREADS_ACCESS_TOKEN')})
         res = r.json()
         if "access_token" in res: return True, (res['access_token'], res.get('expires_in', 0) // 86400)
         return False, res
     except Exception as e: return False, str(e)
 
 def get_token_status():
-    status_msg = "📊 **ETAT DES ACCES**\n"
+    msg = "📊 **ETAT**\n"
     fb_debug = "https://" + "graph.facebook.com/debug_token"
     th_debug = "https://" + "graph.threads.net/debug_token"
-    
-    for label, env_name, url in [("IG/FB", "IG_ACCESS_TOKEN", fb_debug), ("Threads", "THREADS_ACCESS_TOKEN", th_debug)]:
-        tk = os.environ.get(env_name)
+    for lbl, env, url in [("IG", "IG_ACCESS_TOKEN", fb_debug), ("TH", "THREADS_ACCESS_TOKEN", th_debug)]:
+        tk = os.environ.get(env)
         if tk:
             try:
-                r = requests.get(url, params={"input_token": tk, "access_token": tk}, timeout=5).json()
-                exp = r.get('data', {}).get('expires_at')
-                if not exp: status_msg += f"✅ {label} : Permanent\n"
-                else:
-                    days = (datetime.datetime.fromtimestamp(exp) - datetime.datetime.now()).days
-                    status_msg += f"⏳ {label} : {days} jours\n"
-            except: status_msg += f"⚠️ {label} : Verif impossible\n"
-        else: status_msg += f"❌ {label} : Manquant\n"
-    return status_msg
+                exp = requests.get(url, params={"input_token": tk, "access_token": tk}, timeout=5).json().get('data', {}).get('expires_at')
+                msg += f"✅ {lbl} : {((datetime.datetime.fromtimestamp(exp)-datetime.datetime.now()).days) if exp else 'OK'}\n"
+            except: msg += f"⚠️ {lbl} : Erreur\n"
+        else: msg += f"❌ {lbl} : Manquant\n"
+    return msg
 
-def get_belgium_offset():
-    month = datetime.datetime.now().month
-    return 2 if 4 <= month <= 10 else 1
-
-# =================================================================
-# SECTION 2 : MOTEUR IA
-# =================================================================
+# --- IA ---
 def generate_ai_caption(image_url, galerie_nom):
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-    config = load_config()
+    cfg = load_config()
+    link = f"{cfg.get('site_url', '').replace('https://', '').rstrip('/')}/{galerie_nom}"
     
-    base_url = config.get('site_url', 'davidahmed.me').replace('https://', '').replace('http://', '').rstrip('/')
-    display_link = f"{base_url}/{galerie_nom}"
-    manual_hashtag = config.get('custom_hashtag', '')
-    base_tag = f"#{manual_hashtag}" if manual_hashtag else ""
-
-    SAFE_ACCOUNTS = [
-        "archdaily", "architecture_hunter", "buildinglovers", "tv_buildings",
-        "streetclassics", "urbanromantix", "raw_urbanshots", "street_avengers",
-        "bnw_planet", "bnw_greatshots", "lensculture", "bnw_demand",
-        "magnumphotos", "somewheremagazine", "artofvisuals", "beautifuldestinations",
-        "natgeotravel", "moodygrams", "streetphotographyinternational"
-    ]
+    instr = f"""Tu es David Ahmed, photographe d'art. Analyse cette photo de {galerie_nom}.
+    Output: Titre, 2 phrases analyse, question, (cc mentions), {link}, hashtags.
+    Separe la description visuelle par |||."""
     
-    instructions = f"""Tu es David Ahmed, photographe d'art. Analyse cette photo de {galerie_nom}.
-    TACHE : Legende virale et choix des mentions.
-    REGLES CRITIQUES :
-    1. PAS DE MARKDOWN (Pas de ```, pas de gras).
-    2. NE PAS ECRIRE "Alt text:". Utilise le separateur |||.
-    3. Separateur OBLIGATOIRE "|||" entre la legende et la description visuelle.
-    STRUCTURE :
-    "Titre Artistique"
-    [2 phrases d'analyse emotionnelle/technique]
-    [Question engageante]
-    (cc compte1 compte2 compte3)
-    {display_link}
-    [Hashtags]
-    |||
-    [Description visuelle factuelle pour aveugles]"""
-    
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": [{"type": "text", "text": instructions}, {"type": "image_url", "image_url": {"url": image_url, "detail": "high"}}]}],
-        max_tokens=650, temperature=0.7
-    )
-    
-    raw = response.choices[0].message.content.replace("```markdown", "").replace("```", "").strip()
-    if "|||" in raw:
-        parts = raw.split("|||")
-        caption_part = parts[0].strip()
-        alt_part = parts[1].strip()
-    else:
-        caption_part = raw
-        alt_part = f"Photographie artistique de {galerie_nom} par David Ahmed."
+    try:
+        res = client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": [{"type": "text", "text": instr}, {"type": "image_url", "image_url": {"url": image_url}}]}], max_tokens=650)
+        raw = res.choices[0].message.content.replace("```", "")
+        return raw if "|||" in raw else f"{raw}|||Photo de {galerie_nom}"
+    except: return f"Photo de {galerie_nom}\n\n{link}|||Art photography"
 
-    found_accounts = []
-    text_for_search = caption_part.lower().replace("_", "").replace(".", "")
-    for acc in SAFE_ACCOUNTS:
-        if acc in text_for_search: found_accounts.append(f"@{acc}")
-            
-    if not found_accounts: found_accounts = ["@lensculture", "@urbanromantix", "@magnumphotos"]
-    final_mentions_str = f"(cc {' '.join(sorted(list(set(found_accounts)), key=found_accounts.index)[:3])})"
-
-    lines = caption_part.split('\n')
-    clean_lines = []
-    for line in lines:
-        l = line.strip().lower()
-        if l.startswith("(") or l.startswith("cc") or l.startswith("@") or "alt text" in l: continue
-        if "davidahmed.me" in l: continue
-        clean_lines.append(line)
-    
-    body_text = "\n".join([l for l in clean_lines if not l.startswith("#") and l.strip() != ""]).strip()
-    hashtags = "\n".join([l for l in clean_lines if l.startswith("#")]).strip()
-    if not hashtags: hashtags = f"#StreetPhotography #{galerie_nom} {base_tag}"
-
-    final_caption = f"{body_text}\n\n{final_mentions_str}\n{display_link}\n{hashtags}"
-    return f"{final_caption}|||{alt_part}"
-
-# =================================================================
-# SECTION 3 : LOGIQUE RESEAUX
-# =================================================================
-def split_content(full_text):
-    if "|||" in full_text:
-        parts = full_text.split("|||")
-        return parts[0].strip(), parts[1].strip()
-    return full_text, "Art photography by David Ahmed"
+# --- RESEAUX ---
+def split_content(txt):
+    return (txt.split("|||")[0].strip(), txt.split("|||")[1].strip()) if "|||" in txt else (txt, "Art photo")
 
 def final_security_check(text):
     return text
@@ -227,21 +135,20 @@ def wait_for_media_finish(container_id, token):
         except: time.sleep(5)
     return False
 
+# --- FIX TINYURL ---
 def get_tiny_url(long_url):
-    """Raccourcisseur TinyURL robuste"""
+    """Raccourcisseur TinyURL robuste avec encodage"""
     try:
-        # On utilise l'API publique de TinyURL
-        api_url = f"[https://tinyurl.com/api-create.php?url=](https://tinyurl.com/api-create.php?url=){long_url}"
-        r = requests.get(api_url, timeout=10)
+        # Encodage necessaire pour les URL Squarespace
+        encoded_url = urllib.parse.quote(long_url)
+        r = requests.get(f"[http://tinyurl.com/api-create.php?url=](http://tinyurl.com/api-create.php?url=){long_url}", timeout=10)
         if r.status_code == 200 and "http" in r.text:
             return r.text.strip()
     except Exception as e:
-        logger.error(f"Erreur TinyURL: {e}")
-    # Si echec, on retourne l'URL originale mais tronquee pour eviter le crash
-    return long_url
+        logger.error(f"TinyURL Error: {e}")
+    return long_url # Fallback
 
 def publish_to_instagram(image_url, full_text):
-    # Instagram ne change pas, il marche
     caption, _ = split_content(full_text)
     token = os.environ.get('IG_ACCESS_TOKEN')
     ig_id = "17841453263147553" 
@@ -255,51 +162,41 @@ def publish_to_instagram(image_url, full_text):
         return True, "OK"
     except Exception as e: return False, str(e)
 
-# --- FONCTION THREADS CORRIGEE (BONNE PHOTO + JOLI LIEN) ---
+# --- FONCTION THREADS CORRIGEE (ORDRE DES LIENS) ---
 def publish_to_threads(image_url, full_text):
     caption, _ = split_content(full_text)
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
     
-    # URL propre de l'image (sans parametres)
-    clean_image_url = image_url.split('?')[0]
+    clean_url = image_url.split('?')[0] + "?format=1000w"
     
-    logger.info(f"🧐 DEBUG THREADS | ID: {th_id} | Mode: PHOTO+TINYURL")
+    logger.info(f"🧐 DEBUG THREADS | ID: {th_id} | Mode: TINYURL PRIORITY")
     
     if not th_id or not token: return False, "ID ou Token manquant"
     
     try:
-        # 1. LIEN DU SITE (Branding)
-        pretty_site_link = "[https://www.davidahmed.me](https://www.davidahmed.me)"
+        # 1. LIEN DU SITE (Branding Texte)
+        # On enleve https:// pour que Threads ne le considere pas comme LE lien principal
+        pretty_site_link = "davidahmed.me"
         match = re.search(r'(davidahmed\.me/[\w-]+)', full_text)
         if match:
-            # On extrait le lien de la galerie pour l'afficher proprement
-            pretty_site_link = f"https://www.{match.group(1).replace('www.', '')}"
+            pretty_site_link = match.group(1).replace('www.', '').replace('https://', '')
 
-        # 2. LIEN DE L'IMAGE (Technique pour l'apercu)
-        # On raccourcit l'URL de l'image pour qu'elle soit toute petite
-        short_image_link = get_tiny_url(clean_image_url)
+        # 2. LIEN DE L'IMAGE (TinyURL)
+        short_image_link = get_tiny_url(clean_url)
         logger.info(f"🔗 TinyURL genere : {short_image_link}")
 
-        # 3. CONSTRUCTION DU TEXTE
-        # IMPORTANT : Threads utilise le DERNIER lien pour générer l'aperçu.
-        # Donc on met le TinyURL de l'image à la fin.
+        # 3. CONSTRUCTION INTELLIGENTE
+        # On met le TinyURL a la fin, c'est lui qui doit generer l'apercu.
+        # On met le lien du site en "visuel" au milieu.
         
-        # Calcul de la taille max pour la legende
-        len_branding = len(pretty_site_link)
-        len_tiny = len(short_image_link)
-        max_caption = 500 - len_branding - len_tiny - 50 # Marge
-        if max_caption < 50: max_caption = 250
-
-        short_caption = caption[:max_caption] + "..." if len(caption) > max_caption else caption
+        max_len = 500 - len(pretty_site_link) - len(short_image_link) - 50 
+        if max_len < 50: max_len = 200 
+        short_caption = caption[:max_len] + "..." if len(caption) > max_len else caption
         
-        # Le format final :
-        # Légende
-        # 🌍 Lien du site (Cliquable pour les gens)
-        # 📸 Lien de l'image (Sert a generer la carte, on le met en petit)
-        text_payload = f"{short_caption}\n\n🌍 {pretty_site_link}\n📸 {short_image_link}"
+        text_payload = f"{short_caption}\n\n🌍 {pretty_site_link}\n👇 {short_image_link}"
 
-        # Etape 1 : Creation du conteneur TEXTE
+        # 4. ENVOI
         url = f"{TH_API}{th_id}/threads"
         headers = {'Content-Type': 'application/json'}
         payload = {
@@ -319,11 +216,9 @@ def publish_to_threads(image_url, full_text):
         container_id = res['id']
         logger.info(f"✅ Conteneur cree : {container_id}")
         
-        # Etape 2 : Pause
         logger.info("⏳ Attente 5s (Generation apercu)...")
         time.sleep(5) 
         
-        # Etape 3 : Publication
         r_pub = requests.post(f"{TH_API}{th_id}/threads_publish", 
                               data={'creation_id': container_id, 'access_token': token})
         
