@@ -19,7 +19,7 @@ FB_API = "https://" + "graph.facebook.com/v21.0/"
 TH_API = "https://" + "graph.threads.net/v1.0/"
 
 def get_db_connection(): 
-    # CORRECTION DB LOCKED : On ajoute un timeout
+    # Timeout de 30s pour éviter le verrouillage de la DB
     return sqlite3.connect(DB_PATH, timeout=30.0)
 
 def init_db():
@@ -250,17 +250,23 @@ def wait_for_media_finish(container_id, token):
 
 # --- NOUVELLE FONCTION LIEN COURT (ROBUSTE) ---
 def get_short_url(long_url):
-    """Genere un lien court propre sans faire planter requests"""
+    """Genere un lien court proprement via params (évite les erreurs d'encodage)"""
     try:
-        # Utilisation de params pour eviter l'erreur "No connection adapters"
-        r = requests.get("[http://tinyurl.com/api-create.php](http://tinyurl.com/api-create.php)", params={"url": long_url}, timeout=10)
+        # 1. Essai Is.gd (Souvent plus rapide/fiable pour les images)
+        r = requests.get("https://is.gd/create.php", params={"format": "simple", "url": long_url}, timeout=10)
         if r.status_code == 200 and r.text.startswith("http"):
             return r.text.strip()
-    except Exception as e:
-        logger.error(f"⚠️ Erreur TinyURL : {e}")
-    
-    # Si TinyURL echoue, on retourne l'URL originale
-    return long_url
+    except: pass
+
+    try:
+        # 2. Fallback TinyURL (Via params = pas d'erreur de caractères)
+        r = requests.get("http://tinyurl.com/api-create.php", params={"url": long_url}, timeout=10)
+        if r.status_code == 200 and r.text.startswith("http"):
+            return r.text.strip()
+    except: pass
+
+    return long_url # Si tout échoue, on renvoie l'original
+
 
 def publish_to_instagram(image_url, full_text):
     secured_text = final_security_check(full_text)
@@ -278,65 +284,58 @@ def publish_to_instagram(image_url, full_text):
     except Exception as e: return False, str(e)
 
 # --- FONCTION THREADS CORRIGEE (BONNE PHOTO + LIEN COURT) ---
+# --- FONCTION THREADS (RETRY + BONNE PHOTO) ---
 def publish_to_threads(image_url, full_text):
     caption, _ = split_content(full_text)
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
     
-    # URL propre
+    # Nettoyage URL + format haute qualité
     clean_url = image_url.split('?')[0] + "?format=1000w"
     
-    logger.info(f"🧐 DEBUG THREADS | ID: {th_id} | Mode: RETRY+SHORTLINK")
+    logger.info(f"🧐 DEBUG THREADS | ID: {th_id} | Mode: IS.GD PRIORITY")
     
     if not th_id or not token: return False, "ID ou Token manquant"
     
     try:
-        # 1. Genere le lien court pour l'image
-        short_image_link = get_short_url(clean_url)
-        logger.info(f"🔗 Lien Court Genere: {short_image_link}")
-
-        # 2. Cherche le lien "Sexy" du site (ex: davidahmed.me/munich)
+        # 1. LIEN DU SITE (Texte seul pour ne pas déclencher l'aperçu)
         pretty_site = "davidahmed.me"
         match = re.search(r'(davidahmed\.me/[\w-]+)', full_text)
         if match: pretty_site = match.group(1).replace('www.', '').replace('https://', '')
 
-        # 3. Construit le texte
-        # On met le lien court IMAGE a la fin pour que Threads l'utilise en apercu
-        max_len = 500 - len(pretty_site) - len(short_image_link) - 50
-        if max_len < 50: max_len = 250
+        # 2. LIEN DE L'IMAGE (Raccourci pour l'aperçu)
+        short_image_link = get_short_url(clean_url)
+        logger.info(f"🔗 Lien Court Genere: {short_image_link}")
+
+        # 3. CONSTRUCTION DU TEXTE
+        # Le lien court est A LA FIN pour forcer l'aperçu de l'image
+        max_len = 500 - len(pretty_site) - len(short_image_link) - 50 
+        if max_len < 50: max_len = 200 
         short_caption = caption[:max_len] + "..." if len(caption) > max_len else caption
         
         text_payload = f"{short_caption}\n\n🌍 {pretty_site}\n👇 {short_image_link}"
 
-        # 4. Creation (Retry Loop)
-        container_id = None
+        # 4. CREATION CONTENEUR (Retry Loop pour erreur Code 2)
         url = f"{TH_API}{th_id}/threads"
-        headers = {'Content-Type': 'application/json'}
-        payload = {'media_type': 'TEXT', 'text': text_payload, 'access_token': token}
-        
-        r = requests.post(url, json=payload, headers=headers)
+        r = requests.post(url, json={'media_type': 'TEXT', 'text': text_payload, 'access_token': token})
         res = r.json()
-        if 'id' in res:
-            container_id = res['id']
-            logger.info(f"✅ Conteneur cree: {container_id}")
-        else:
-            return False, res
-
-        # 5. Attente et Publication avec Retry
+        
+        if 'id' not in res: return False, res
+        container_id = res['id']
+        logger.info(f"✅ Conteneur cree: {container_id}")
+        
+        # 5. ATTENTE ET PUBLICATION (Patience...)
         logger.info("⏳ Attente 15s (Traitement Meta)...")
         time.sleep(15)
         
         for attempt in range(1, 4):
-            logger.info(f"🚀 Tentative Publication {attempt}/3...")
+            logger.info(f"🚀 Tentative {attempt}/3...")
             r_pub = requests.post(f"{TH_API}{th_id}/threads_publish", 
                                   data={'creation_id': container_id, 'access_token': token})
-            
             if r_pub.status_code == 200: return True, "OK"
+            time.sleep(10) # Pause entre les essais
             
-            logger.warning(f"⚠️ Echec {attempt}: {r_pub.text}")
-            time.sleep(10)
-            
-        return False, "Echec apres 3 tentatives"
+        return False, "Echec Timeout"
             
     except Exception as e: return False, str(e)
 
