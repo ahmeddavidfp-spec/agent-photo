@@ -212,26 +212,6 @@ def split_content(full_text):
     return full_text, "Art photography by David Ahmed"
 
 def final_security_check(text):
-    SAFE_ACCOUNTS = [
-        "archdaily", "architecture_hunter", "buildinglovers", "tv_buildings",
-        "streetclassics", "urbanromantix", "raw_urbanshots", "street_avengers",
-        "bnw_planet", "bnw_greatshots", "lensculture", "bnw_demand",
-        "magnumphotos", "somewheremagazine", "artofvisuals", "beautifuldestinations",
-        "natgeotravel", "moodygrams", "streetphotographyinternational"
-    ]
-    match = re.search(r'\(cc\s*(.*?)\)', text, flags=re.IGNORECASE | re.DOTALL)
-    if match:
-        original_block = match.group(0)
-        content_inside = match.group(1)
-        words = content_inside.replace(',', ' ').split()
-        found_accounts = []
-        for word in words:
-            clean_word = word.lower().replace('@', '').strip()
-            if clean_word in SAFE_ACCOUNTS: found_accounts.append(f"@{clean_word}")
-        if not found_accounts: found_accounts = ["@lensculture", "@urbanromantix", "@magnumphotos"]
-        unique = sorted(list(set(found_accounts)), key=found_accounts.index)[:3]
-        new_block = f"(cc {' '.join(unique)})"
-        return text.replace(original_block, new_block)
     return text
 
 def wait_for_media_finish(container_id, token):
@@ -248,16 +228,21 @@ def wait_for_media_finish(container_id, token):
     return False
 
 def get_tiny_url(long_url):
-    """Raccourcit l'URL Squarespace pour l'esthetique"""
+    """Raccourcisseur TinyURL robuste"""
     try:
-        r = requests.get(f"[http://tinyurl.com/api-create.php?url=](http://tinyurl.com/api-create.php?url=){long_url}", timeout=5)
-        return r.text
-    except:
-        return long_url
+        # On utilise l'API publique de TinyURL
+        api_url = f"[https://tinyurl.com/api-create.php?url=](https://tinyurl.com/api-create.php?url=){long_url}"
+        r = requests.get(api_url, timeout=10)
+        if r.status_code == 200 and "http" in r.text:
+            return r.text.strip()
+    except Exception as e:
+        logger.error(f"Erreur TinyURL: {e}")
+    # Si echec, on retourne l'URL originale mais tronquee pour eviter le crash
+    return long_url
 
 def publish_to_instagram(image_url, full_text):
-    secured_text = final_security_check(full_text)
-    caption, _ = split_content(secured_text)
+    # Instagram ne change pas, il marche
+    caption, _ = split_content(full_text)
     token = os.environ.get('IG_ACCESS_TOKEN')
     ig_id = "17841453263147553" 
     try:
@@ -270,43 +255,49 @@ def publish_to_instagram(image_url, full_text):
         return True, "OK"
     except Exception as e: return False, str(e)
 
-# --- FONCTION MODIFIEE POUR LE BRANDING "SEXY" ---
+# --- FONCTION THREADS CORRIGEE (BONNE PHOTO + JOLI LIEN) ---
 def publish_to_threads(image_url, full_text):
-    secured_text = final_security_check(full_text)
-    caption, _ = split_content(secured_text)
+    caption, _ = split_content(full_text)
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
     
-    # URL de base optimisée pour squarespace
-    if "squarespace" in image_url:
-        clean_url = image_url.split('?')[0] + "?format=1000w"
-    else:
-        clean_url = image_url.split('?')[0]
+    # URL propre de l'image (sans parametres)
+    clean_image_url = image_url.split('?')[0]
     
-    logger.info(f"🧐 DEBUG THREADS | ID: {th_id} | Mode: BRANDING+LIEN")
+    logger.info(f"🧐 DEBUG THREADS | ID: {th_id} | Mode: PHOTO+TINYURL")
     
     if not th_id or not token: return False, "ID ou Token manquant"
     
     try:
-        # 1. Extraction du lien BRANDING (ex: davidahmed.me/new-york)
-        pretty_link = "[https://www.davidahmed.me](https://www.davidahmed.me)"
+        # 1. LIEN DU SITE (Branding)
+        pretty_site_link = "[https://www.davidahmed.me](https://www.davidahmed.me)"
         match = re.search(r'(davidahmed\.me/[\w-]+)', full_text)
         if match:
-            pretty_link = f"https://www.{match.group(1).replace('www.', '')}"
+            # On extrait le lien de la galerie pour l'afficher proprement
+            pretty_site_link = f"https://www.{match.group(1).replace('www.', '')}"
 
-        # 2. Raccourcissement du lien IMAGE (pour l'apercu)
-        short_image_link = get_tiny_url(clean_url)
+        # 2. LIEN DE L'IMAGE (Technique pour l'apercu)
+        # On raccourcit l'URL de l'image pour qu'elle soit toute petite
+        short_image_link = get_tiny_url(clean_image_url)
+        logger.info(f"🔗 TinyURL genere : {short_image_link}")
 
-        # 3. Calcul de la taille (Limite 500 chars)
-        # On doit caser : Caption + Lien Site + Lien Image
-        max_len = 500 - len(pretty_link) - len(short_image_link) - 50 
-        if max_len < 50: max_len = 200 
-
-        short_caption = caption[:max_len] + "..." if len(caption) > max_len else caption
+        # 3. CONSTRUCTION DU TEXTE
+        # IMPORTANT : Threads utilise le DERNIER lien pour générer l'aperçu.
+        # Donc on met le TinyURL de l'image à la fin.
         
-        # 4. CONSTRUCTION DU TEXTE FINAL
-        # Visuel : "Titre... 🌍 davidahmed.me/galerie 👇 tinyurl..."
-        text_payload = f"{short_caption}\n\n🌍 {pretty_link}\n👇 {short_image_link}"
+        # Calcul de la taille max pour la legende
+        len_branding = len(pretty_site_link)
+        len_tiny = len(short_image_link)
+        max_caption = 500 - len_branding - len_tiny - 50 # Marge
+        if max_caption < 50: max_caption = 250
+
+        short_caption = caption[:max_caption] + "..." if len(caption) > max_caption else caption
+        
+        # Le format final :
+        # Légende
+        # 🌍 Lien du site (Cliquable pour les gens)
+        # 📸 Lien de l'image (Sert a generer la carte, on le met en petit)
+        text_payload = f"{short_caption}\n\n🌍 {pretty_site_link}\n📸 {short_image_link}"
 
         # Etape 1 : Creation du conteneur TEXTE
         url = f"{TH_API}{th_id}/threads"
@@ -317,7 +308,7 @@ def publish_to_threads(image_url, full_text):
             'access_token': token
         }
         
-        logger.info(f"📤 Envoi Requete Threads (Taille: {len(text_payload)})...")
+        logger.info(f"📤 Envoi Requete Threads...")
         r = requests.post(url, json=payload, headers=headers)
         res = r.json()
         
@@ -328,58 +319,47 @@ def publish_to_threads(image_url, full_text):
         container_id = res['id']
         logger.info(f"✅ Conteneur cree : {container_id}")
         
-        # Etape 2 : Pause de 5 secondes (Indispensable)
-        logger.info("⏳ Attente 5s (Propagation Link Preview)...")
+        # Etape 2 : Pause
+        logger.info("⏳ Attente 5s (Generation apercu)...")
         time.sleep(5) 
         
         # Etape 3 : Publication
         r_pub = requests.post(f"{TH_API}{th_id}/threads_publish", 
                               data={'creation_id': container_id, 'access_token': token})
         
-        if r_pub.status_code == 200: return True, "OK (Mode Branding)"
+        if r_pub.status_code == 200: return True, "OK (Mode TinyURL)"
         else: return False, r_pub.text
             
     except Exception as e: return False, str(e)
 
 # =================================================================
-# SECTION 5 : TACHE DE FOND (ASYNC PUBLISH) & INTERFACE
+# SECTION 5 : TACHE DE FOND
 # =================================================================
 def background_publish(chat_id, token, mode, image_url, caption):
     logger.info(f"🚀 DEMARRAGE TACHE DE FOND | Mode: {mode} | ChatID: {chat_id}")
-    
     try:
         ok_ig = False
         ok_th = False
         res_ig = "Non demande"
         res_th = "Non demande"
 
-        # 1. Publication Instagram
         if mode in ["both", "ig"]:
-            logger.info("📸 Tentative envoi Instagram...")
             ok_ig, res_ig = publish_to_instagram(image_url, caption)
-            logger.info(f"📸 Resultat IG: {ok_ig} | Msg: {res_ig}")
         
-        # 2. Publication Threads
         if mode in ["both", "th"]:
-            logger.info("🧵 Tentative envoi Threads...")
             ok_th, res_th = publish_to_threads(image_url, caption)
-            logger.info(f"🧵 Resultat TH: {ok_th} | Msg: {res_th}")
 
-        # 3. Construction du message final
         final_msg = ""
         if mode == "both":
             if ok_ig and ok_th:
                 final_msg = "🚀 **Succes Total !**\nInsta & Threads : ✅"
                 mark_photo_as_sent(image_url, "Auto")
-                
                 try:
                     conn = get_db_connection()
                     conn.execute('DELETE FROM current_session WHERE chat_id = ?', (chat_id,))
                     conn.commit()
                     conn.close()
-                except Exception as e:
-                    logger.error(f"⚠️ Erreur nettoyage DB: {e}")
-
+                except: pass
             else:
                 final_msg = f"⚠️ **Resultat Partiel :**\nIG: {'✅' if ok_ig else '❌ ' + str(res_ig)}\nTH: {'✅' if ok_th else '❌ ' + str(res_th)}"
         
@@ -395,14 +375,11 @@ def background_publish(chat_id, token, mode, image_url, caption):
                 mark_photo_as_sent(image_url, "Auto")
             else: final_msg = f"❌ **Erreur Threads :** {res_th}"
 
-        # 4. Envoi de la confirmation Telegram
-        logger.info(f"📨 Envoi confirmation Telegram : {final_msg}")
         requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": final_msg, "parse_mode": "Markdown"})
 
     except Exception as e:
-        logger.error(f"🔥 CRASH CRITIQUE DANS LE THREAD : {str(e)}", exc_info=True)
-        error_msg = f"🔥 **Erreur Critique du Serveur**\nLe processus a plante.\n\n`{str(e)}`"
-        requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": error_msg, "parse_mode": "Markdown"})
+        logger.error(f"🔥 CRASH : {str(e)}", exc_info=True)
+        requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": f"🔥 Erreur : {str(e)}", "parse_mode": "Markdown"})
 
 def send_galerie_menu(chat_id):
     config = load_config()
@@ -460,7 +437,6 @@ def telegram_webhook():
     text = data.get("message", {}).get("text", "").strip()
     action = data.get("callback_query", {}).get("data", "")
 
-    # LOGGING DES ENTREES (Pour savoir ce qui se passe)
     if text: logger.info(f"📩 Recu texte : {text}")
     if action: logger.info(f"🔘 Recu action : {action}")
 
@@ -508,9 +484,7 @@ def telegram_webhook():
                     return jsonify({"status": "ok"})
 
                 if mode:
-                    # Message d'attente
-                    requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ **Traitement en cours...** (Je regarde les logs)"})
-                    # Lancement Tache de fond
+                    requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": "⏳ **Traitement en cours...**"})
                     threading.Thread(target=background_publish, args=(chat_id, token, mode, session[0], session[1])).start()
             else:
                  requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": "⚠️ **Session expiree.**\nClique sur 'Menu' et genere une nouvelle photo."})
@@ -547,9 +521,7 @@ def telegram_webhook():
             send_galerie_menu(chat_id)
     return jsonify({"status": "ok"})
 
-# =================================================================
-# SECTION 7 : PLANIFICATEUR (SCHEDULER 20s)
-# =================================================================
+# Scheduler
 def scheduler_loop():
     while True:
         try:
@@ -571,7 +543,7 @@ def scheduler_loop():
                     requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
                     if ok_ig or ok_th: mark_photo_as_sent(img, "Programme")
             conn.close()
-        except Exception as e: print(f"Scheduler error: {e}")
+        except: pass
         time.sleep(20)
 
 threading.Thread(target=scheduler_loop, daemon=True).start()
