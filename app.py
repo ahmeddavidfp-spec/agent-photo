@@ -104,34 +104,111 @@ def get_token_status():
 
 # --- IA ANALYSE EXPERT ---
 
+
+
+
+
+
+# --- IA (INSTRUCTIONS NETTOYEES) ---
 def generate_ai_caption(image_url, galerie_nom):
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
-    galerie_link = f"{config.get('site_url').rstrip('/')}/{galerie_nom}"
+    
+    base_url = config.get('site_url', 'davidahmed.me').replace('https://', '').replace('http://', '').rstrip('/')
+    display_link = f"{base_url}/{galerie_nom}"
     manual_hashtag = config.get('custom_hashtag', '')
-    extra_tag = f"+ {manual_hashtag}" if manual_hashtag else ""
+    base_tag = f"#{manual_hashtag}" if manual_hashtag else ""
+
+    SAFE_ACCOUNTS = [
+        "archdaily", "architecture_hunter", "buildinglovers", "tv_buildings",
+        "streetclassics", "urbanromantix", "raw_urbanshots", "street_avengers",
+        "bnw_planet", "bnw_greatshots", "lensculture", "bnw_demand",
+        "magnumphotos", "somewheremagazine", "artofvisuals", "beautifuldestinations",
+        "natgeotravel", "moodygrams", "streetphotographyinternational"
+    ]
     
+    # INSTRUCTIONS : ON INTERDIT EXPLICITEMENT LE MOT "TITRE"
     instructions = f"""Tu es David Ahmed, photographe de rue. Analyse cette photo de {galerie_nom}.
+    TACHE : Legende virale et choix des mentions.
+    REGLES CRITIQUES :
+    1. PAS DE MARKDOWN (Pas de ```, pas de gras).
+    2. NE PAS ECRIRE "Alt text:" ni "Titre:". Commence directement par le texte artistique.
+    3. Separateur OBLIGATOIRE "|||" entre la legende et la description visuelle.
     STRUCTURE :
-    1. Titre évocateur (MAJUSCULE au début, PAS de gras, PAS de **).
-    2. Analyse technique (2-3 phrases sur lumière/composition, PAS de gras).
-    3. (Saut de ligne)
-    4. Série complète sur : {galerie_link}
-    5. (Saut de ligne)
-    6. 5 hashtags variés {extra_tag}."""
+    [Titre Artistique (Sans le mot 'Titre:')]
+    [2 phrases d'analyse emotionnelle/technique]
+    (Saut de ligne)
+    [Question engageante]
+    (Saut de ligne)
+    (cc compte1 compte2 compte3)
+    {display_link}
+    [Hashtags]
+    |||
+    [Description visuelle factuelle pour aveugles]"""
     
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": [{"type": "text", "text": instructions}, {"type": "image_url", "image_url": {"url": image_url, "detail": "high"}}]}],
-        max_tokens=500, temperature=0.7
-    )
-    
-    raw_caption = response.choices[0].message.content
-    
-    # --- NETTOYAGE DE SÉCURITÉ ---
-    # On retire les doubles astérisques que l'IA ajoute parfois pour le gras
-    clean_caption = raw_caption.replace("**", "").replace("__", "")
-    return clean_caption
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": [{"type": "text", "text": instructions}, {"type": "image_url", "image_url": {"url": image_url, "detail": "high"}}]}],
+            max_tokens=650, temperature=0.7
+        )
+        
+        raw = response.choices[0].message.content.replace("```markdown", "").replace("```", "").strip()
+        
+        # NETTOYAGE FORCE : On efface "Titre:" ou "Title:" s'il est au debut
+        raw = re.sub(r'^(Titre|Title)\s*:\s*', '', raw, flags=re.IGNORECASE)
+
+        if "|||" in raw:
+            parts = raw.split("|||")
+            caption_part = parts[0].strip()
+            alt_part = parts[1].strip()
+        else:
+            caption_part = raw
+            alt_part = f"Photographie artistique de {galerie_nom} par David Ahmed."
+
+        found_accounts = []
+        text_for_search = caption_part.lower().replace("_", "").replace(".", "")
+        for acc in SAFE_ACCOUNTS:
+            if acc in text_for_search: found_accounts.append(f"@{acc}")
+                
+        if not found_accounts: found_accounts = ["@lensculture", "@urbanromantix", "@magnumphotos"]
+        final_mentions_str = f"(cc {' '.join(sorted(list(set(found_accounts)), key=found_accounts.index)[:3])})"
+
+        lines = caption_part.split('\n')
+        clean_lines = []
+        for line in lines:
+            l = line.strip().lower()
+            if l.startswith("(") or l.startswith("cc") or l.startswith("@") or "alt text" in l: continue
+            if "davidahmed.me" in l: continue
+            # Nettoyage ligne par ligne aussi
+            line = re.sub(r'^Titre\s*:\s*', '', line, flags=re.IGNORECASE)
+            clean_lines.append(line)
+        
+        body_text = "\n".join([l for l in clean_lines if not l.startswith("#") and l.strip() != ""]).strip()
+        hashtags = "\n".join([l for l in clean_lines if l.startswith("#")]).strip()
+        if not hashtags: hashtags = f"#StreetPhotography #{galerie_nom} {base_tag}"
+
+        final_caption = f"{body_text}\n\n{final_mentions_str}\n{display_link}\n{hashtags}"
+        return f"{final_caption}|||{alt_part}"
+        
+    except Exception as e: return f"Photo de {galerie_nom}\n\n{link}|||Art photography"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # --- RESEAUX ---
 def split_content(txt):
@@ -184,56 +261,21 @@ def publish_to_instagram(image_url, full_text):
     except Exception as e: return False, str(e)
 
 # --- FONCTION THREADS (MODE SIMPLE: JUSTE LA PHOTO) ---
-def publish_to_threads(image_url, full_text):
-    caption, _ = split_content(full_text)
+def publish_to_threads(image_url, caption):
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
-    
-    clean_url = image_url.split('?')[0] + "?format=1000w"
-    
-    logger.info(f"🧐 DEBUG THREADS | ID: {th_id} | Mode: PHOTO ONLY")
-    
-    if not th_id or not token: return False, "Token manquant"
-    
+    clean_url = image_url.split('?')[0]
     try:
-        # 1. GENERATION LIEN IMAGE
-        short_image_link = get_short_url(clean_url)
-        logger.info(f"🔗 Lien Image : {short_image_link}")
-
-        # 2. CONSTRUCTION DU TEXTE
-        # On supprime tout lien "davidahmed" du texte brut pour eviter les conflits
-        clean_caption = caption.replace("davidahmed.me", "").replace("https://", "")
-        
-        # Calcul taille
-        max_len = 500 - len(short_image_link) - 20
-        if max_len < 50: max_len = 250 
-        short_caption = clean_caption[:max_len] + "..." if len(clean_caption) > max_len else clean_caption
-        
-        # Format: Legende + Lien Image (Seul lien actif)
-        text_payload = f"{short_caption}\n\n👇\n{short_image_link}"
-
-        # 3. CREATION
-        url = f"{TH_API}{th_id}/threads"
-        r = requests.post(url, json={'media_type': 'TEXT', 'text': text_payload, 'access_token': token})
+        url = f"https://graph.threads.net/v1.0/{th_id}/threads"
+        r = requests.post(url, data={'media_type': 'IMAGE', 'image_url': clean_url, 'text': caption, 'access_token': token}, timeout=30)
         res = r.json()
-        
         if 'id' not in res: return False, res
-        container_id = res['id']
-        logger.info(f"✅ Conteneur cree: {container_id}")
-        
-        # 4. ATTENTE
-        logger.info("⏳ Attente 15s...")
-        time.sleep(15)
-        
-        for attempt in range(1, 4):
-            r_pub = requests.post(f"{TH_API}{th_id}/threads_publish", 
-                                  data={'creation_id': container_id, 'access_token': token})
-            if r_pub.status_code == 200: return True, "OK"
-            time.sleep(10)
-            
-        return False, "Timeout"
-            
+        time.sleep(15) 
+        pub_url = f"https://graph.threads.net/v1.0/{th_id}/threads_publish"
+        r_pub = requests.post(pub_url, data={'creation_id': res['id'], 'access_token': token}, timeout=30)
+        return (True, "OK") if r_pub.status_code == 200 else (False, r_pub.text)
     except Exception as e: return False, str(e)
+
 
 # =================================================================
 # SECTION 5 : BACKEND
