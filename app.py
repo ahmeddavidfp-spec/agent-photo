@@ -208,10 +208,12 @@ def get_token_status():
 # SECTION 5 : INTELLIGENCE ARTIFICIELLE (OPENAI)
 # =================================================================
 
+# --- IA (MODE BILINGUE + CONCIS) ---
 def generate_ai_caption(image_url, galerie_nom):
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     
+    # Construction du lien propre
     base_url = config.get('site_url', 'davidahmed.me').replace('https://', '').replace('http://', '').rstrip('/')
     display_link = f"{base_url}/{galerie_nom}"
     manual_hashtag = config.get('custom_hashtag', '')
@@ -225,24 +227,28 @@ def generate_ai_caption(image_url, galerie_nom):
         "natgeotravel", "moodygrams", "streetphotographyinternational"
     ]
     
-    # Instructions strictes : pas de "Titre:"
-    instructions = f"""Tu es David Ahmed, photographe de rue. Analyse cette photo de {galerie_nom}.
-    TACHE : Legende virale et choix des mentions.
-    REGLES CRITIQUES :
-    1. PAS DE MARKDOWN (Pas de ```, pas de gras).
-    2. NE PAS ECRIRE "Alt text:" ni "Titre:". Commence directement par le texte artistique.
-    3. Separateur OBLIGATOIRE "|||" entre la legende et la description visuelle.
-    STRUCTURE :
-    [Titre Artistique (Sans le mot 'Titre:')]
-    [2 phrases d'analyse emotionnelle/technique]
-    (Saut de ligne)
-    [Question engageante]
-    (Saut de ligne)
-    (cc compte1 compte2 compte3)
+    # INSTRUCTIONS : BILINGUE (EN/FR) + COURT (POUR THREADS)
+    instructions = f"""You are David Ahmed, fine art photographer. Analyze this photo of {galerie_nom}.
+    TASK: Write a viral caption in English AND French.
+    CRITICAL RULES:
+    1. START with English. THEN French.
+    2. KEEP IT SHORT. Total output must be under 450 characters (for Threads).
+    3. NO 'Title:' or 'Description:' labels. Just the art text.
+    4. NO Markdown.
+    5. SEPARATOR "|||" for Alt Text at the end.
+    
+    STRUCTURE:
+    [Artistic Title EN]
+    [1 punchy sentence about the vibe EN]
+    
+    [Titre Artistique FR]
+    [1 phrase percutante sur l'ambiance FR]
+    
+    (cc account1 account2)
     {display_link}
-    [Hashtags]
+    [3-4 Hashtags max]
     |||
-    [Description visuelle factuelle pour aveugles]"""
+    [Visual description for accessibility]"""
     
     try:
         response = client.chat.completions.create(
@@ -253,8 +259,8 @@ def generate_ai_caption(image_url, galerie_nom):
         
         raw = response.choices[0].message.content.replace("```markdown", "").replace("```", "").strip()
         
-        # Nettoyage de sécurité : on enlève "Titre:" s'il apparaît quand même
-        raw = re.sub(r'^(Titre|Title)\s*:\s*', '', raw, flags=re.IGNORECASE)
+        # Nettoyage des labels IA eventuels
+        raw = re.sub(r'^(Titre|Title|Caption)\s*:\s*', '', raw, flags=re.IGNORECASE)
 
         if "|||" in raw:
             parts = raw.split("|||")
@@ -262,25 +268,26 @@ def generate_ai_caption(image_url, galerie_nom):
             alt_part = parts[1].strip()
         else:
             caption_part = raw
-            alt_part = f"Photographie artistique de {galerie_nom} par David Ahmed."
+            alt_part = f"Fine art photography of {galerie_nom} by David Ahmed."
 
-        # Gestion des mentions
+        # Mentions
         found_accounts = []
         text_for_search = caption_part.lower().replace("_", "").replace(".", "")
         for acc in SAFE_ACCOUNTS:
             if acc in text_for_search: found_accounts.append(f"@{acc}")
-                
         if not found_accounts: found_accounts = ["@lensculture", "@urbanromantix", "@magnumphotos"]
-        final_mentions_str = f"(cc {' '.join(sorted(list(set(found_accounts)), key=found_accounts.index)[:3])})"
+        
+        # On garde peu de mentions pour sauver de la place
+        final_mentions_str = f"(cc {' '.join(found_accounts[:2])})" 
 
-        # Nettoyage ligne par ligne
+        # Nettoyage final du texte
         lines = caption_part.split('\n')
         clean_lines = []
         for line in lines:
             l = line.strip().lower()
+            # On supprime les mentions et liens gérés manuellement
             if l.startswith("(") or l.startswith("cc") or l.startswith("@") or "alt text" in l: continue
             if "davidahmed.me" in l: continue
-            line = re.sub(r'^Titre\s*:\s*', '', line, flags=re.IGNORECASE)
             clean_lines.append(line)
         
         body_text = "\n".join([l for l in clean_lines if not l.startswith("#") and l.strip() != ""]).strip()
@@ -291,8 +298,7 @@ def generate_ai_caption(image_url, galerie_nom):
         return f"{final_caption}|||{alt_part}"
         
     except Exception as e:
-        # Fallback en cas d'erreur API
-        return f"Photo de {galerie_nom}\n\n{display_link}|||Art photography"
+        return f"Photo of {galerie_nom}\nPhoto de {galerie_nom}\n\n{display_link}|||Art photography"
 
 
 # =================================================================
@@ -319,50 +325,45 @@ def publish_to_instagram(image_url, full_text):
         return True, "OK"
     except Exception as e: return False, str(e)
 
-# --- FONCTION THREADS (MODE NATIVE IMAGE) ---
+# --- FONCTION THREADS (NATIVE IMAGE + TEXTE BILINGUE) ---
 def publish_to_threads(image_url, full_text):
     caption, _ = split_content(full_text)
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
     
-    # Nettoyage URL pour Squarespace
     clean_url = image_url.split('?')[0] + "?format=1000w"
     
-    logger.info(f"🧐 DEBUG THREADS | ID: {th_id} | Mode: NATIVE IMAGE UPLOAD")
+    logger.info(f"🧐 DEBUG THREADS | ID: {th_id} | Mode: NATIVE IMAGE + BILINGUE")
     
     if not th_id or not token: return False, "Token manquant"
     
     try:
         # 1. PREPARATION DU TEXTE
-        # On nettoie le texte pour ne garder que l'artistique (pas de lien moche)
-        clean_caption = caption.replace("davidahmed.me", "").replace("https://", "").strip()
+        # On garde le lien davidahmed.me cette fois !
+        # On enleve juste le "https://" pour faire joli
+        clean_caption = caption.replace("https://", "").strip()
         
-        # Sécurité longueur (500 chars max)
-        if len(clean_caption) > 490: 
+        # Securite Longueur (Threads = 500 chars max)
+        if len(clean_caption) > 495: 
             clean_caption = clean_caption[:490] + "..."
 
-        # 2. CREATION CONTENEUR TYPE 'IMAGE'
-        # C'est ici que ça se joue : on dit à Threads "Ceci est une IMAGE"
+        # 2. CREATION CONTENEUR IMAGE
         url = f"{TH_API}{th_id}/threads"
         payload = {
-            'media_type': 'IMAGE',       # <--- FORCE L'IMAGE
-            'image_url': clean_url,      # <--- L'URL SOURCE
-            'text': clean_caption,       # <--- LE TEXTE EN DESSOUS
+            'media_type': 'IMAGE',       
+            'image_url': clean_url,      
+            'text': clean_caption,       
             'access_token': token
         }
         
         r = requests.post(url, json=payload)
         res = r.json()
         
-        if 'id' not in res: 
-            logger.error(f"❌ Erreur Threads : {res}")
-            return False, res
-            
+        if 'id' not in res: return False, res 
         container_id = res['id']
         logger.info(f"✅ Conteneur Image cree: {container_id}")
         
-        # 3. ATTENTE (CRITIQUE)
-        # Il faut laisser le temps aux serveurs Meta de télécharger l'image
+        # 3. ATTENTE UPLOAD (25s pour etre sur)
         logger.info("⏳ Attente 25s (Upload Meta)...")
         time.sleep(25) 
         
@@ -370,13 +371,10 @@ def publish_to_threads(image_url, full_text):
         for attempt in range(1, 4):
             r_pub = requests.post(f"{TH_API}{th_id}/threads_publish", 
                                   data={'creation_id': container_id, 'access_token': token})
-            
             if r_pub.status_code == 200: return True, "OK"
-            
-            logger.warning(f"⚠️ Retry {attempt} (Code {r_pub.status_code})...")
             time.sleep(10)
             
-        return False, "Timeout Publication"
+        return False, "Timeout"
             
     except Exception as e: return False, str(e)
 
