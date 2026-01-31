@@ -191,9 +191,6 @@ def generate_ai_caption(image_url, galerie_nom):
 
 
 
-
-
-
 # --- RESEAUX ---
 def split_content(txt):
     return (txt.split("|||")[0].strip(), txt.split("|||")[1].strip()) if "|||" in txt else (txt, "Art photo")
