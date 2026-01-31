@@ -319,62 +319,64 @@ def publish_to_instagram(image_url, full_text):
         return True, "OK"
     except Exception as e: return False, str(e)
 
+# --- FONCTION THREADS (MODE NATIVE IMAGE) ---
 def publish_to_threads(image_url, full_text):
-    """
-    Publie sur Threads en mode 'Photo Only' :
-    - Utilise un raccourcisseur fiable (is.gd)
-    - Met le lien image à la fin
-    - Retire le lien du site pour forcer l'aperçu image
-    """
     caption, _ = split_content(full_text)
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
     
-    # URL Squarespace propre (haute qualité)
+    # Nettoyage URL pour Squarespace
     clean_url = image_url.split('?')[0] + "?format=1000w"
     
-    logger.info(f"🧐 DEBUG THREADS | ID: {th_id} | Mode: PHOTO ONLY")
+    logger.info(f"🧐 DEBUG THREADS | ID: {th_id} | Mode: NATIVE IMAGE UPLOAD")
     
     if not th_id or not token: return False, "Token manquant"
     
     try:
-        # 1. Génération Lien Court Image
-        short_image_link = get_short_url(clean_url)
-        logger.info(f"🔗 Lien Image : {short_image_link}")
-
-        # 2. Construction du Texte
-        # Suppression du lien site pour éviter les conflits d'aperçu
-        clean_caption = caption.replace("davidahmed.me", "").replace("https://", "")
+        # 1. PREPARATION DU TEXTE
+        # On nettoie le texte pour ne garder que l'artistique (pas de lien moche)
+        clean_caption = caption.replace("davidahmed.me", "").replace("https://", "").strip()
         
-        # Calcul taille max (500 chars)
-        max_len = 500 - len(short_image_link) - 20
-        if max_len < 50: max_len = 250 
-        short_caption = clean_caption[:max_len] + "..." if len(clean_caption) > max_len else clean_caption
-        
-        # Format : Légende + Flèche + Lien Image
-        text_payload = f"{short_caption}\n\n👇\n{short_image_link}"
+        # Sécurité longueur (500 chars max)
+        if len(clean_caption) > 490: 
+            clean_caption = clean_caption[:490] + "..."
 
-        # 3. Création du conteneur (Retry en cas d'erreur code 2)
+        # 2. CREATION CONTENEUR TYPE 'IMAGE'
+        # C'est ici que ça se joue : on dit à Threads "Ceci est une IMAGE"
         url = f"{TH_API}{th_id}/threads"
-        r = requests.post(url, json={'media_type': 'TEXT', 'text': text_payload, 'access_token': token})
+        payload = {
+            'media_type': 'IMAGE',       # <--- FORCE L'IMAGE
+            'image_url': clean_url,      # <--- L'URL SOURCE
+            'text': clean_caption,       # <--- LE TEXTE EN DESSOUS
+            'access_token': token
+        }
+        
+        r = requests.post(url, json=payload)
         res = r.json()
         
-        if 'id' not in res: return False, res
+        if 'id' not in res: 
+            logger.error(f"❌ Erreur Threads : {res}")
+            return False, res
+            
         container_id = res['id']
-        logger.info(f"✅ Conteneur créé: {container_id}")
+        logger.info(f"✅ Conteneur Image cree: {container_id}")
         
-        # 4. Attente (Critique pour Threads)
-        logger.info("⏳ Attente 15s...")
-        time.sleep(15)
+        # 3. ATTENTE (CRITIQUE)
+        # Il faut laisser le temps aux serveurs Meta de télécharger l'image
+        logger.info("⏳ Attente 25s (Upload Meta)...")
+        time.sleep(25) 
         
-        # 5. Publication avec Retry Loop
+        # 4. PUBLICATION
         for attempt in range(1, 4):
             r_pub = requests.post(f"{TH_API}{th_id}/threads_publish", 
                                   data={'creation_id': container_id, 'access_token': token})
+            
             if r_pub.status_code == 200: return True, "OK"
+            
+            logger.warning(f"⚠️ Retry {attempt} (Code {r_pub.status_code})...")
             time.sleep(10)
             
-        return False, "Timeout après 3 essais"
+        return False, "Timeout Publication"
             
     except Exception as e: return False, str(e)
 
