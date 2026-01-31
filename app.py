@@ -248,24 +248,20 @@ def wait_for_media_finish(container_id, token):
         except: time.sleep(5)
     return False
 
-# --- NOUVELLE FONCTION LIEN COURT (ROBUSTE) ---
+# --- RACCOURCISSEUR SIMPLE & EFFICACE ---
 def get_short_url(long_url):
-    """Genere un lien court proprement via params (évite les erreurs d'encodage)"""
+    """Raccourcit le lien via TinyURL en mode texte brut"""
     try:
-        # 1. Essai Is.gd (Souvent plus rapide/fiable pour les images)
-        r = requests.get("https://is.gd/create.php", params={"format": "simple", "url": long_url}, timeout=10)
+        # On nettoie l'URL
+        clean = long_url.strip()
+        # Appel API simple
+        api = f"http://tinyurl.com/api-create.php?url={clean}"
+        r = requests.get(api, timeout=10)
         if r.status_code == 200 and r.text.startswith("http"):
-            return r.text.strip()
-    except: pass
-
-    try:
-        # 2. Fallback TinyURL (Via params = pas d'erreur de caractères)
-        r = requests.get("http://tinyurl.com/api-create.php", params={"url": long_url}, timeout=10)
-        if r.status_code == 200 and r.text.startswith("http"):
-            return r.text.strip()
-    except: pass
-
-    return long_url # Si tout échoue, on renvoie l'original
+            return r.text
+    except Exception as e:
+        logger.error(f"Shortener Fail: {e}")
+    return long_url # Si ca rate, on garde l'original
 
 
 def publish_to_instagram(image_url, full_text):
@@ -283,61 +279,79 @@ def publish_to_instagram(image_url, full_text):
         return True, "OK"
     except Exception as e: return False, str(e)
 
-# --- FONCTION THREADS CORRIGEE (BONNE PHOTO + LIEN COURT) ---
-# --- FONCTION THREADS (RETRY + BONNE PHOTO) ---
+
+
+
+
+
+
+# --- FONCTION THREADS (FORCE PHOTO APERCU) ---
 def publish_to_threads(image_url, full_text):
     caption, _ = split_content(full_text)
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
     
-    # Nettoyage URL + format haute qualité
+    # URL Image Propre
     clean_url = image_url.split('?')[0] + "?format=1000w"
     
-    logger.info(f"🧐 DEBUG THREADS | ID: {th_id} | Mode: IS.GD PRIORITY")
+    logger.info(f"🧐 DEBUG THREADS | ID: {th_id} | Mode: FORCE PHOTO")
     
-    if not th_id or not token: return False, "ID ou Token manquant"
+    if not th_id or not token: return False, "Token manquant"
     
     try:
-        # 1. LIEN DU SITE (Texte seul pour ne pas déclencher l'aperçu)
-        pretty_site = "davidahmed.me"
-        match = re.search(r'(davidahmed\.me/[\w-]+)', full_text)
-        if match: pretty_site = match.group(1).replace('www.', '').replace('https://', '')
-
-        # 2. LIEN DE L'IMAGE (Raccourci pour l'aperçu)
+        # 1. GENERATION LIEN COURT (IMAGE)
         short_image_link = get_short_url(clean_url)
-        logger.info(f"🔗 Lien Court Genere: {short_image_link}")
+        logger.info(f"🔗 Lien Image Court: {short_image_link}")
+
+        # 2. BRANDING (NON-CLIQUABLE)
+        # On recupere le nom du site
+        site_name = "davidahmed . me" # Par defaut avec espaces
+        match = re.search(r'(davidahmed\.me/[\w-]+)', full_text)
+        if match:
+            # On transforme "davidahmed.me/galerie" en "davidahmed . me / galerie"
+            # Les espaces forcent Threads a ignorer ce lien pour l'apercu
+            raw_site = match.group(1).replace('www.', '').replace('https://', '')
+            site_name = raw_site.replace('.', ' . ').replace('/', ' / ')
 
         # 3. CONSTRUCTION DU TEXTE
-        # Le lien court est A LA FIN pour forcer l'aperçu de l'image
-        max_len = 500 - len(pretty_site) - len(short_image_link) - 50 
+        # Structure : Legende + Branding (Texte) + Lien Image (Cliquable & Apercu)
+        
+        # Coupe intelligente (Limite 500 chars)
+        max_len = 500 - len(site_name) - len(short_image_link) - 50 
         if max_len < 50: max_len = 200 
         short_caption = caption[:max_len] + "..." if len(caption) > max_len else caption
         
-        text_payload = f"{short_caption}\n\n🌍 {pretty_site}\n👇 {short_image_link}"
+        # Le lien de l'image est le SEUL vrai lien, donc l'apercu sera la photo !
+        text_payload = f"{short_caption}\n\n🌍 {site_name}\n👇 {short_image_link}"
 
-        # 4. CREATION CONTENEUR (Retry Loop pour erreur Code 2)
+        # 4. CREATION CONTENEUR (Retry Loop)
+        container_id = None
         url = f"{TH_API}{th_id}/threads"
         r = requests.post(url, json={'media_type': 'TEXT', 'text': text_payload, 'access_token': token})
         res = r.json()
         
-        if 'id' not in res: return False, res
-        container_id = res['id']
-        logger.info(f"✅ Conteneur cree: {container_id}")
-        
-        # 5. ATTENTE ET PUBLICATION (Patience...)
-        logger.info("⏳ Attente 15s (Traitement Meta)...")
+        if 'id' in res:
+            container_id = res['id']
+            logger.info(f"✅ Conteneur cree: {container_id}")
+        else:
+            return False, res
+
+        # 5. ATTENTE & ENVOI
+        logger.info("⏳ Attente 15s (Traitement)...")
         time.sleep(15)
         
         for attempt in range(1, 4):
-            logger.info(f"🚀 Tentative {attempt}/3...")
             r_pub = requests.post(f"{TH_API}{th_id}/threads_publish", 
                                   data={'creation_id': container_id, 'access_token': token})
             if r_pub.status_code == 200: return True, "OK"
-            time.sleep(10) # Pause entre les essais
+            time.sleep(10)
             
         return False, "Echec Timeout"
             
     except Exception as e: return False, str(e)
+
+
+
 
 # =================================================================
 # SECTION 5 : TACHE DE FOND (ASYNC PUBLISH) & INTERFACE
