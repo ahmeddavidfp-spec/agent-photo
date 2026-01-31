@@ -102,21 +102,36 @@ def get_token_status():
         else: msg += f"❌ {lbl} : Manquant\n"
     return msg
 
-# --- IA ---
+# --- IA ANALYSE EXPERT ---
+
 def generate_ai_caption(image_url, galerie_nom):
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-    cfg = load_config()
-    link = f"{cfg.get('site_url', '').replace('https://', '').rstrip('/')}/{galerie_nom}"
+    config = load_config()
+    galerie_link = f"{config.get('site_url').rstrip('/')}/{galerie_nom}"
+    manual_hashtag = config.get('custom_hashtag', '')
+    extra_tag = f"+ {manual_hashtag}" if manual_hashtag else ""
     
-    instr = f"""Tu es David Ahmed, photographe d'art. Analyse cette photo de {galerie_nom}.
-    Output: Titre, 2 phrases analyse, question, (cc mentions), {link}, hashtags.
-    Separe la description visuelle par |||."""
+    instructions = f"""Tu es David Ahmed, photographe de rue. Analyse cette photo de {galerie_nom}.
+    STRUCTURE :
+    1. Titre évocateur (MAJUSCULE au début, PAS de gras, PAS de **).
+    2. Analyse technique (2-3 phrases sur lumière/composition, PAS de gras).
+    3. (Saut de ligne)
+    4. Série complète sur : {galerie_link}
+    5. (Saut de ligne)
+    6. 5 hashtags variés {extra_tag}."""
     
-    try:
-        res = client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": [{"type": "text", "text": instr}, {"type": "image_url", "image_url": {"url": image_url}}]}], max_tokens=650)
-        raw = res.choices[0].message.content.replace("```", "")
-        return raw if "|||" in raw else f"{raw}|||Photo de {galerie_nom}"
-    except: return f"Photo de {galerie_nom}\n\n{link}|||Art photography"
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": [{"type": "text", "text": instructions}, {"type": "image_url", "image_url": {"url": image_url, "detail": "high"}}]}],
+        max_tokens=500, temperature=0.7
+    )
+    
+    raw_caption = response.choices[0].message.content
+    
+    # --- NETTOYAGE DE SÉCURITÉ ---
+    # On retire les doubles astérisques que l'IA ajoute parfois pour le gras
+    clean_caption = raw_caption.replace("**", "").replace("__", "")
+    return clean_caption
 
 # --- RESEAUX ---
 def split_content(txt):
@@ -138,18 +153,21 @@ def wait_for_media_finish(container_id, token):
         except: time.sleep(5)
     return False
 
-# --- SHORTENER ROBUSTE (IS.GD) ---
+# --- SHORTENER ROBUSTE ET CORRIGE ---
 def get_short_url(long_url):
-    """Utilise is.gd pour raccourcir (fiable pour les images)"""
+    """Utilise is.gd via params pour eviter l'erreur connection adapters"""
     try:
-        clean_url = long_url.strip()
-        safe_url = urllib.parse.quote(clean_url)
-        r = requests.get(f"[https://is.gd/create.php?format=simple&url=](https://is.gd/create.php?format=simple&url=){safe_url}", timeout=10)
+        # On passe l'URL via le dictionnaire params, requests gere l'encodage
+        r = requests.get("https://is.gd/create.php", params={"format": "simple", "url": long_url.strip()}, timeout=10)
+        
         if r.status_code == 200 and r.text.startswith("http"):
             return r.text.strip()
+            
     except Exception as e:
         logger.error(f"Shortener Error: {e}")
-    return long_url 
+        
+    # Si echec, on renvoie l'original (ce qui fera un lien long mais fonctionnel)
+    return long_url
 
 def publish_to_instagram(image_url, full_text):
     caption, _ = split_content(full_text)
