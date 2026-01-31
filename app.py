@@ -19,7 +19,9 @@ FB_API = "https://" + "graph.facebook.com/v21.0/"
 TH_API = "https://" + "graph.threads.net/v1.0/"
 
 def get_db_connection(): 
-    return sqlite3.connect(DB_PATH)
+    """Etablit la connexion a la base SQLite avec un timeout de 30s."""
+    conn = sqlite3.connect(DB_PATH, timeout=30.0) # <--- LE FIX EST ICI
+    return conn
 
 def init_db():
     conn = get_db_connection()
