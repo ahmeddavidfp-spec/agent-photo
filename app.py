@@ -247,6 +247,14 @@ def wait_for_media_finish(container_id, token):
         except: time.sleep(5)
     return False
 
+def get_tiny_url(long_url):
+    """Raccourcit l'URL Squarespace pour l'esthetique"""
+    try:
+        r = requests.get(f"[http://tinyurl.com/api-create.php?url=](http://tinyurl.com/api-create.php?url=){long_url}", timeout=5)
+        return r.text
+    except:
+        return long_url
+
 def publish_to_instagram(image_url, full_text):
     secured_text = final_security_check(full_text)
     caption, _ = split_content(secured_text)
@@ -262,30 +270,45 @@ def publish_to_instagram(image_url, full_text):
         return True, "OK"
     except Exception as e: return False, str(e)
 
-# --- FONCTION SECURISEE (MODE LIEN + LIMITE 500 CHARS + DELAI) ---
+# --- FONCTION MODIFIEE POUR LE BRANDING "SEXY" ---
 def publish_to_threads(image_url, full_text):
     secured_text = final_security_check(full_text)
     caption, _ = split_content(secured_text)
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
-    clean_url = image_url.split('?')[0]
     
-    logger.info(f"🧐 DEBUG THREADS | ID: {th_id} | Mode: TEXTE+LIEN (Force)")
+    # URL de base optimisée pour squarespace
+    if "squarespace" in image_url:
+        clean_url = image_url.split('?')[0] + "?format=1000w"
+    else:
+        clean_url = image_url.split('?')[0]
+    
+    logger.info(f"🧐 DEBUG THREADS | ID: {th_id} | Mode: BRANDING+LIEN")
     
     if not th_id or not token: return False, "ID ou Token manquant"
     
     try:
-        # 1. CALCUL DE SECURITE (LIMITE 500 CARACTERES)
-        # Une URL Squarespace est longue, on coupe la legende pour laisser la place.
-        max_caption_len = 500 - len(clean_url) - 50 
-        if max_caption_len < 50: max_caption_len = 300 
+        # 1. Extraction du lien BRANDING (ex: davidahmed.me/new-york)
+        pretty_link = "[https://www.davidahmed.me](https://www.davidahmed.me)"
+        match = re.search(r'(davidahmed\.me/[\w-]+)', full_text)
+        if match:
+            pretty_link = f"https://www.{match.group(1).replace('www.', '')}"
 
-        short_caption = caption[:max_caption_len] + "..." if len(caption) > max_caption_len else caption
+        # 2. Raccourcissement du lien IMAGE (pour l'apercu)
+        short_image_link = get_tiny_url(clean_url)
+
+        # 3. Calcul de la taille (Limite 500 chars)
+        # On doit caser : Caption + Lien Site + Lien Image
+        max_len = 500 - len(pretty_link) - len(short_image_link) - 50 
+        if max_len < 50: max_len = 200 
+
+        short_caption = caption[:max_len] + "..." if len(caption) > max_len else caption
         
-        # 2. Construction du texte
-        text_payload = f"{short_caption}\n\n(Voir la photo : {clean_url})"
+        # 4. CONSTRUCTION DU TEXTE FINAL
+        # Visuel : "Titre... 🌍 davidahmed.me/galerie 👇 tinyurl..."
+        text_payload = f"{short_caption}\n\n🌍 {pretty_link}\n👇 {short_image_link}"
 
-        # 3. Creation du conteneur
+        # Etape 1 : Creation du conteneur TEXTE
         url = f"{TH_API}{th_id}/threads"
         headers = {'Content-Type': 'application/json'}
         payload = {
@@ -305,15 +328,15 @@ def publish_to_threads(image_url, full_text):
         container_id = res['id']
         logger.info(f"✅ Conteneur cree : {container_id}")
         
-        # 4. PAUSE DE 5 SECONDES (CRITIQUE POUR EVITER ERROR 24)
+        # Etape 2 : Pause de 5 secondes (Indispensable)
         logger.info("⏳ Attente 5s (Propagation Link Preview)...")
         time.sleep(5) 
         
-        # 5. Publication
+        # Etape 3 : Publication
         r_pub = requests.post(f"{TH_API}{th_id}/threads_publish", 
                               data={'creation_id': container_id, 'access_token': token})
         
-        if r_pub.status_code == 200: return True, "OK (Mode Lien)"
+        if r_pub.status_code == 200: return True, "OK (Mode Branding)"
         else: return False, r_pub.text
             
     except Exception as e: return False, str(e)
