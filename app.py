@@ -1,4 +1,4 @@
-import os, requests, yaml, random, sqlite3, time, datetime, csv, threading, re, logging, sys, urllib.parse
+import os, requests, yaml, random, sqlite3, time, datetime, csv, threading, re, logging, sys
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 from openai import OpenAI
@@ -7,6 +7,9 @@ from openai import OpenAI
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', stream=sys.stdout)
 logger = logging.getLogger()
 
+# =================================================================
+# SECTION 1 : CONFIGURATION ET INITIALISATION
+# =================================================================
 app = Flask(__name__)
 DB_PATH = '/data/photos.db' if os.path.exists('/data') else 'photos.db'
 
@@ -135,18 +138,26 @@ def wait_for_media_finish(container_id, token):
         except: time.sleep(5)
     return False
 
-# --- FIX TINYURL ---
-def get_tiny_url(long_url):
-    """Raccourcisseur TinyURL robuste avec encodage"""
+# --- FIX SHORTENER (METHODE ROBUSTE) ---
+def get_short_url(long_url):
+    """Essaie TinyURL, sinon is.gd"""
+    
+    # 1. Essai TinyURL (Methode params = pas d'erreur d'encodage)
     try:
-        # Encodage necessaire pour les URL Squarespace
-        encoded_url = urllib.parse.quote(long_url)
-        r = requests.get(f"[http://tinyurl.com/api-create.php?url=](http://tinyurl.com/api-create.php?url=){long_url}", timeout=10)
-        if r.status_code == 200 and "http" in r.text:
+        r = requests.get("[http://tinyurl.com/api-create.php](http://tinyurl.com/api-create.php)", params={"url": long_url}, timeout=5)
+        if r.status_code == 200 and r.text.startswith("http"):
             return r.text.strip()
-    except Exception as e:
-        logger.error(f"TinyURL Error: {e}")
-    return long_url # Fallback
+    except: pass
+
+    # 2. Essai is.gd (Backup)
+    try:
+        r = requests.get("[https://is.gd/create.php](https://is.gd/create.php)", params={"format": "simple", "url": long_url}, timeout=5)
+        if r.status_code == 200 and r.text.startswith("http"):
+            return r.text.strip()
+    except: pass
+
+    # 3. Echec total (On renvoie l'original)
+    return long_url
 
 def publish_to_instagram(image_url, full_text):
     caption, _ = split_content(full_text)
@@ -162,38 +173,37 @@ def publish_to_instagram(image_url, full_text):
         return True, "OK"
     except Exception as e: return False, str(e)
 
-# --- FONCTION THREADS CORRIGEE (ORDRE DES LIENS) ---
+# --- FONCTION THREADS ---
 def publish_to_threads(image_url, full_text):
     caption, _ = split_content(full_text)
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
     
+    # URL Squarespace 1000px
     clean_url = image_url.split('?')[0] + "?format=1000w"
     
-    logger.info(f"🧐 DEBUG THREADS | ID: {th_id} | Mode: TINYURL PRIORITY")
+    logger.info(f"🧐 DEBUG THREADS | ID: {th_id}")
     
     if not th_id or not token: return False, "ID ou Token manquant"
     
     try:
-        # 1. LIEN DU SITE (Branding Texte)
-        # On enleve https:// pour que Threads ne le considere pas comme LE lien principal
+        # 1. LIEN DU SITE (Branding)
         pretty_site_link = "davidahmed.me"
         match = re.search(r'(davidahmed\.me/[\w-]+)', full_text)
         if match:
             pretty_site_link = match.group(1).replace('www.', '').replace('https://', '')
 
-        # 2. LIEN DE L'IMAGE (TinyURL)
-        short_image_link = get_tiny_url(clean_url)
-        logger.info(f"🔗 TinyURL genere : {short_image_link}")
+        # 2. LIEN DE L'IMAGE (Shortener Robuste)
+        short_image_link = get_short_url(clean_url)
+        logger.info(f"🔗 Lien raccourci : {short_image_link}")
 
-        # 3. CONSTRUCTION INTELLIGENTE
-        # On met le TinyURL a la fin, c'est lui qui doit generer l'apercu.
-        # On met le lien du site en "visuel" au milieu.
-        
+        # 3. CONSTRUCTION
+        # On calcule la place restante
         max_len = 500 - len(pretty_site_link) - len(short_image_link) - 50 
         if max_len < 50: max_len = 200 
         short_caption = caption[:max_len] + "..." if len(caption) > max_len else caption
         
+        # Le format qui force l'apercu de l'image (Lien image a la fin)
         text_payload = f"{short_caption}\n\n🌍 {pretty_site_link}\n👇 {short_image_link}"
 
         # 4. ENVOI
@@ -205,7 +215,6 @@ def publish_to_threads(image_url, full_text):
             'access_token': token
         }
         
-        logger.info(f"📤 Envoi Requete Threads...")
         r = requests.post(url, json=payload, headers=headers)
         res = r.json()
         
@@ -216,13 +225,13 @@ def publish_to_threads(image_url, full_text):
         container_id = res['id']
         logger.info(f"✅ Conteneur cree : {container_id}")
         
-        logger.info("⏳ Attente 5s (Generation apercu)...")
+        logger.info("⏳ Attente 5s (Propagation Link Preview)...")
         time.sleep(5) 
         
         r_pub = requests.post(f"{TH_API}{th_id}/threads_publish", 
                               data={'creation_id': container_id, 'access_token': token})
         
-        if r_pub.status_code == 200: return True, "OK (Mode TinyURL)"
+        if r_pub.status_code == 200: return True, "OK"
         else: return False, r_pub.text
             
     except Exception as e: return False, str(e)
@@ -231,7 +240,7 @@ def publish_to_threads(image_url, full_text):
 # SECTION 5 : TACHE DE FOND
 # =================================================================
 def background_publish(chat_id, token, mode, image_url, caption):
-    logger.info(f"🚀 DEMARRAGE TACHE DE FOND | Mode: {mode} | ChatID: {chat_id}")
+    logger.info(f"🚀 START JOB | Mode: {mode}")
     try:
         ok_ig = False
         ok_th = False
