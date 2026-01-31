@@ -106,10 +106,6 @@ def get_token_status():
 
 
 
-
-
-
-# --- IA (INSTRUCTIONS NETTOYEES) ---
 def generate_ai_caption(image_url, galerie_nom):
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
@@ -198,18 +194,6 @@ def generate_ai_caption(image_url, galerie_nom):
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 # --- RESEAUX ---
 def split_content(txt):
     return (txt.split("|||")[0].strip(), txt.split("|||")[1].strip()) if "|||" in txt else (txt, "Art photo")
@@ -261,21 +245,56 @@ def publish_to_instagram(image_url, full_text):
     except Exception as e: return False, str(e)
 
 # --- FONCTION THREADS (MODE SIMPLE: JUSTE LA PHOTO) ---
-def publish_to_threads(image_url, caption):
+def publish_to_threads(image_url, full_text):
+    caption, _ = split_content(full_text)
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
-    clean_url = image_url.split('?')[0]
+    
+    clean_url = image_url.split('?')[0] + "?format=1000w"
+    
+    logger.info(f"🧐 DEBUG THREADS | ID: {th_id} | Mode: PHOTO ONLY")
+    
+    if not th_id or not token: return False, "Token manquant"
+    
     try:
-        url = f"https://graph.threads.net/v1.0/{th_id}/threads"
-        r = requests.post(url, data={'media_type': 'IMAGE', 'image_url': clean_url, 'text': caption, 'access_token': token}, timeout=30)
-        res = r.json()
-        if 'id' not in res: return False, res
-        time.sleep(15) 
-        pub_url = f"https://graph.threads.net/v1.0/{th_id}/threads_publish"
-        r_pub = requests.post(pub_url, data={'creation_id': res['id'], 'access_token': token}, timeout=30)
-        return (True, "OK") if r_pub.status_code == 200 else (False, r_pub.text)
-    except Exception as e: return False, str(e)
+        # 1. GENERATION LIEN IMAGE
+        short_image_link = get_short_url(clean_url)
+        logger.info(f"🔗 Lien Image : {short_image_link}")
 
+        # 2. CONSTRUCTION DU TEXTE
+        # On supprime tout lien "davidahmed" du texte brut pour eviter les conflits
+        clean_caption = caption.replace("davidahmed.me", "").replace("https://", "")
+        
+        # Calcul taille
+        max_len = 500 - len(short_image_link) - 20
+        if max_len < 50: max_len = 250 
+        short_caption = clean_caption[:max_len] + "..." if len(clean_caption) > max_len else clean_caption
+        
+        # Format: Legende + Lien Image (Seul lien actif)
+        text_payload = f"{short_caption}\n\n👇\n{short_image_link}"
+
+        # 3. CREATION
+        url = f"{TH_API}{th_id}/threads"
+        r = requests.post(url, json={'media_type': 'TEXT', 'text': text_payload, 'access_token': token})
+        res = r.json()
+        
+        if 'id' not in res: return False, res
+        container_id = res['id']
+        logger.info(f"✅ Conteneur cree: {container_id}")
+        
+        # 4. ATTENTE
+        logger.info("⏳ Attente 15s...")
+        time.sleep(15)
+        
+        for attempt in range(1, 4):
+            r_pub = requests.post(f"{TH_API}{th_id}/threads_publish", 
+                                  data={'creation_id': container_id, 'access_token': token})
+            if r_pub.status_code == 200: return True, "OK"
+            time.sleep(10)
+            
+        return False, "Timeout"
+            
+    except Exception as e: return False, str(e)
 
 # =================================================================
 # SECTION 5 : BACKEND
