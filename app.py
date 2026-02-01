@@ -213,6 +213,11 @@ def get_token_status():
 # =================================================================
 
 # --- IA (MODE BILINGUE + SEO 3-TIERS) ---
+# =================================================================
+# SECTION 5 : INTELLIGENCE ARTIFICIELLE (OPENAI)
+# =================================================================
+
+# --- IA (MODE BILINGUE + SEO 3-TIERS + HOOKS ACCROCHEURS) ---
 def generate_ai_caption(image_url, galerie_nom):
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
@@ -231,29 +236,34 @@ def generate_ai_caption(image_url, galerie_nom):
         "natgeotravel", "moodygrams", "streetphotographyinternational"
     ]
     
-    # INSTRUCTIONS : BILINGUE + SEO "3 TIERS"
+    # INSTRUCTIONS : ON EXIGE DES TITRES "HOOK" (ACCROCHEURS)
     instructions = f"""You are David Ahmed, fine art photographer. Analyze this photo of {galerie_nom}.
-    TASK: Write a viral caption in English AND French with high-performance SEO.
+    TASK: Write a viral caption with a **STOP-SCROLLING HOOK** and high-performance SEO.
     
     CRITICAL RULES:
     1. START with English. THEN French.
-    2. KEEP IT SHORT. Total output must be under 480 characters (strict for Threads).
-    3. NO labels like 'Title:', 'Caption:', 'English:', 'French:'.
+    2. KEEP IT SHORT. Total output must be under 480 characters.
+    3. NO labels like 'Title:', 'Caption:'.
     4. NO Markdown.
     5. SEPARATOR "|||" for Alt Text at the end.
     
+    TITLE STRATEGY (The "Hook"):
+    - DO NOT use generic descriptions (e.g. "View of a bridge", "Serenity on shore").
+    - DO use JOURNALISTIC, EMOTIONAL or INTRIGUING hooks to stop the scroll.
+    - Examples: "Why silence matters", "The chaos we ignore", "A moment frozen in time", "New York's hidden side".
+    
     HASHTAG STRATEGY (The "3-Tier Method"):
-    - Tier 1 (Niche): Specific style tags (e.g. #bnw_planet, #minimalism, #urban_geometry)
-    - Tier 2 (Location): Specific spot (e.g. #BrooklynHeights instead of just #NYC, #GothicQuarter)
-    - Tier 3 (Tech/Vibe): e.g. #StreetClassics, #FineArtPhotography, #HighContrast
-    *Generate 5 to 7 highly relevant hashtags total.*
+    - Tier 1 (Niche): #bnw_planet, #minimalism...
+    - Tier 2 (Location): #BrooklynHeights, #GothicQuarter (Be specific)...
+    - Tier 3 (Tech/Vibe): #StreetClassics, #FineArtPhotography...
+    *Generate 5 to 7 hashtags.*
 
     STRUCTURE:
-    [Artistic Title EN]
-    [1 punchy sentence about the vibe EN]
+    [STOP-SCROLLING HOOK EN]
+    [1 context sentence EN]
     
-    [Titre Artistique FR]
-    [1 phrase percutante sur l'ambiance FR]
+    [ACCROCHE PERCUTANTE FR]
+    [1 phrase de contexte FR]
     
     (cc account1 account2)
     {display_link}
@@ -270,8 +280,8 @@ def generate_ai_caption(image_url, galerie_nom):
         
         raw = response.choices[0].message.content.replace("```markdown", "").replace("```", "").strip()
         
-        # Nettoyage des labels IA eventuels
-        raw = re.sub(r'^(Titre|Title|Caption|English|French)\s*:\s*', '', raw, flags=re.IGNORECASE)
+        # Nettoyage des labels IA
+        raw = re.sub(r'^(Titre|Title|Caption|English|French|Hook)\s*:\s*', '', raw, flags=re.IGNORECASE)
 
         if "|||" in raw:
             parts = raw.split("|||")
@@ -288,25 +298,20 @@ def generate_ai_caption(image_url, galerie_nom):
             if acc in text_for_search: found_accounts.append(f"@{acc}")
         if not found_accounts: found_accounts = ["@lensculture", "@urbanromantix", "@magnumphotos"]
         
-        # On garde peu de mentions pour sauver de la place
         final_mentions_str = f"(cc {' '.join(found_accounts[:2])})" 
 
-        # Nettoyage final du texte
+        # Nettoyage final
         lines = caption_part.split('\n')
         clean_lines = []
         for line in lines:
             l = line.strip().lower()
-            # On supprime les mentions et liens gérés manuellement
             if l.startswith("(") or l.startswith("cc") or l.startswith("@") or "alt text" in l: continue
             if "davidahmed.me" in l: continue
             clean_lines.append(line)
         
         body_text = "\n".join([l for l in clean_lines if not l.startswith("#") and l.strip() != ""]).strip()
-        
-        # Extraction des hashtags générés par l'IA (Tier 1/2/3)
         hashtags = "\n".join([l for l in clean_lines if l.startswith("#")]).strip()
         
-        # Fallback de sécurité si l'IA oublie les hashtags
         if not hashtags: hashtags = f"#StreetPhotography #{galerie_nom} #FineArt {base_tag}"
 
         final_caption = f"{body_text}\n\n{final_mentions_str}\n{display_link}\n{hashtags}"
@@ -314,6 +319,7 @@ def generate_ai_caption(image_url, galerie_nom):
         
     except Exception as e:
         return f"Photo of {galerie_nom}\nPhoto de {galerie_nom}\n\n{display_link}|||Art photography"
+
 
 # =================================================================
 # SECTION 6 : PUBLICATION RESEAUX SOCIAUX
