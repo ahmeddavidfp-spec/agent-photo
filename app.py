@@ -208,7 +208,11 @@ def get_token_status():
 # SECTION 5 : INTELLIGENCE ARTIFICIELLE (OPENAI)
 # =================================================================
 
-# --- IA (MODE BILINGUE + CONCIS) ---
+# =================================================================
+# SECTION 5 : INTELLIGENCE ARTIFICIELLE (OPENAI)
+# =================================================================
+
+# --- IA (MODE BILINGUE + SEO 3-TIERS) ---
 def generate_ai_caption(image_url, galerie_nom):
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
@@ -227,16 +231,23 @@ def generate_ai_caption(image_url, galerie_nom):
         "natgeotravel", "moodygrams", "streetphotographyinternational"
     ]
     
-    # INSTRUCTIONS : BILINGUE (EN/FR) + COURT (POUR THREADS)
+    # INSTRUCTIONS : BILINGUE + SEO "3 TIERS"
     instructions = f"""You are David Ahmed, fine art photographer. Analyze this photo of {galerie_nom}.
-    TASK: Write a viral caption in English AND French.
+    TASK: Write a viral caption in English AND French with high-performance SEO.
+    
     CRITICAL RULES:
     1. START with English. THEN French.
-    2. KEEP IT SHORT. Total output must be under 450 characters (for Threads).
-    3. NO 'Title:' or 'Description:' labels. Just the art text.
+    2. KEEP IT SHORT. Total output must be under 480 characters (strict for Threads).
+    3. NO labels like 'Title:', 'Caption:', 'English:', 'French:'.
     4. NO Markdown.
     5. SEPARATOR "|||" for Alt Text at the end.
     
+    HASHTAG STRATEGY (The "3-Tier Method"):
+    - Tier 1 (Niche): Specific style tags (e.g. #bnw_planet, #minimalism, #urban_geometry)
+    - Tier 2 (Location): Specific spot (e.g. #BrooklynHeights instead of just #NYC, #GothicQuarter)
+    - Tier 3 (Tech/Vibe): e.g. #StreetClassics, #FineArtPhotography, #HighContrast
+    *Generate 5 to 7 highly relevant hashtags total.*
+
     STRUCTURE:
     [Artistic Title EN]
     [1 punchy sentence about the vibe EN]
@@ -246,7 +257,7 @@ def generate_ai_caption(image_url, galerie_nom):
     
     (cc account1 account2)
     {display_link}
-    [3-4 Hashtags max]
+    [The 3-Tier Hashtags]
     |||
     [Visual description for accessibility]"""
     
@@ -260,7 +271,7 @@ def generate_ai_caption(image_url, galerie_nom):
         raw = response.choices[0].message.content.replace("```markdown", "").replace("```", "").strip()
         
         # Nettoyage des labels IA eventuels
-        raw = re.sub(r'^(Titre|Title|Caption)\s*:\s*', '', raw, flags=re.IGNORECASE)
+        raw = re.sub(r'^(Titre|Title|Caption|English|French)\s*:\s*', '', raw, flags=re.IGNORECASE)
 
         if "|||" in raw:
             parts = raw.split("|||")
@@ -291,15 +302,18 @@ def generate_ai_caption(image_url, galerie_nom):
             clean_lines.append(line)
         
         body_text = "\n".join([l for l in clean_lines if not l.startswith("#") and l.strip() != ""]).strip()
+        
+        # Extraction des hashtags générés par l'IA (Tier 1/2/3)
         hashtags = "\n".join([l for l in clean_lines if l.startswith("#")]).strip()
-        if not hashtags: hashtags = f"#StreetPhotography #{galerie_nom} {base_tag}"
+        
+        # Fallback de sécurité si l'IA oublie les hashtags
+        if not hashtags: hashtags = f"#StreetPhotography #{galerie_nom} #FineArt {base_tag}"
 
         final_caption = f"{body_text}\n\n{final_mentions_str}\n{display_link}\n{hashtags}"
         return f"{final_caption}|||{alt_part}"
         
     except Exception as e:
         return f"Photo of {galerie_nom}\nPhoto de {galerie_nom}\n\n{display_link}|||Art photography"
-
 
 # =================================================================
 # SECTION 6 : PUBLICATION RESEAUX SOCIAUX
