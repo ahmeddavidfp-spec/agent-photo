@@ -217,71 +217,78 @@ def get_token_status():
 # SECTION 5 : INTELLIGENCE ARTIFICIELLE (OPENAI)
 # =================================================================
 
-# --- IA (MODE BILINGUE + SEO 3-TIERS + HOOKS ACCROCHEURS) ---
+# =================================================================
+# SECTION 5 : INTELLIGENCE ARTIFICIELLE (OPENAI)
+# =================================================================
+
+# --- IA (VERSION ULTIME : SEO + HOOKS + EXIFS + CTA + MENTIONS) ---
 def generate_ai_caption(image_url, galerie_nom):
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     
-    # Construction du lien propre
+    # Construction du lien propre (sans https pour l'esthétique)
     base_url = config.get('site_url', 'davidahmed.me').replace('https://', '').replace('http://', '').rstrip('/')
     display_link = f"{base_url}/{galerie_nom}"
     manual_hashtag = config.get('custom_hashtag', '')
     base_tag = f"#{manual_hashtag}" if manual_hashtag else ""
 
-    SAFE_ACCOUNTS = [
-        "archdaily", "architecture_hunter", "buildinglovers", "tv_buildings",
-        "streetclassics", "urbanromantix", "raw_urbanshots", "street_avengers",
-        "bnw_planet", "bnw_greatshots", "lensculture", "bnw_demand",
-        "magnumphotos", "somewheremagazine", "artofvisuals", "beautifuldestinations",
-        "natgeotravel", "moodygrams", "streetphotographyinternational"
-    ]
+    # Liste des comptes influents
+    SAFE_ACCOUNTS_STR = (
+        "archdaily, architecture_hunter, streetclassics, urbanromantix, "
+        "raw_urbanshots, bnw_planet, lensculture, magnumphotos, "
+        "somewheremagazine, artofvisuals, moodygrams, streetphotographyinternational"
+    )
     
-    # INSTRUCTIONS : ON EXIGE DES TITRES "HOOK" (ACCROCHEURS)
+    # INSTRUCTIONS COMPLETES
     instructions = f"""You are David Ahmed, fine art photographer. Analyze this photo of {galerie_nom}.
-    TASK: Write a viral caption with a **STOP-SCROLLING HOOK** and high-performance SEO.
+    TASK: Create a high-engagement caption with Hook, Story, Tech Specs, and SEO.
     
     CRITICAL RULES:
     1. START with English. THEN French.
-    2. KEEP IT SHORT. Total output must be under 480 characters.
-    3. NO labels like 'Title:', 'Caption:'.
+    2. KEEP IT SHORT. Total output under 490 characters (Strict).
+    3. NO labels (Title:, Caption:, etc.).
     4. NO Markdown.
     5. SEPARATOR "|||" for Alt Text at the end.
     
-    TITLE STRATEGY (The "Hook"):
-    - DO NOT use generic descriptions (e.g. "View of a bridge", "Serenity on shore").
-    - DO use JOURNALISTIC, EMOTIONAL or INTRIGUING hooks to stop the scroll.
-    - Examples: "Why silence matters", "The chaos we ignore", "A moment frozen in time", "New York's hidden side".
-    
-    HASHTAG STRATEGY (The "3-Tier Method"):
-    - Tier 1 (Niche): #bnw_planet, #minimalism...
-    - Tier 2 (Location): #BrooklynHeights, #GothicQuarter (Be specific)...
-    - Tier 3 (Tech/Vibe): #StreetClassics, #FineArtPhotography...
-    *Generate 5 to 7 hashtags.*
+    CONTENT BLOCKS:
+    1. THE HOOK: A stop-scrolling title (Journalistic/Emotional). No generic descriptions.
+    2. THE STORY: 1 sentence context (EN then FR).
+    3. THE TECH SPECS: Estimate realistic EXIFs based on visuals. 
+       Format: 📷 [Focal]mm | f/[Aperture] | ISO [Value]
+    4. THE CTA: A short invitation to see the gallery (e.g. "Full series 👇").
+    5. MENTIONS: Pick the 2 most relevant accounts from: [{SAFE_ACCOUNTS_STR}].
+    6. HASHTAGS (3-Tier Strategy): 
+       - Tier 1 (Niche)
+       - Tier 2 (Specific Location)
+       - Tier 3 (Vibe/Style)
+       *Max 5 hashtags.*
 
     STRUCTURE:
-    [STOP-SCROLLING HOOK EN]
-    [1 context sentence EN]
+    [HOOK EN]
+    [Story EN]
     
-    [ACCROCHE PERCUTANTE FR]
-    [1 phrase de contexte FR]
+    [HOOK FR]
+    [Story FR]
     
-    (cc account1 account2)
-    {display_link}
-    [The 3-Tier Hashtags]
+    [TECH SPECS LINE]
+    
+    [Short CTA] {display_link}
+    (cc @account1 @account2)
+    [Hashtags]
     |||
-    [Visual description for accessibility]"""
+    [Visual description]"""
     
     try:
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": [{"type": "text", "text": instructions}, {"type": "image_url", "image_url": {"url": image_url, "detail": "high"}}]}],
-            max_tokens=650, temperature=0.7
+            max_tokens=700, temperature=0.7
         )
         
         raw = response.choices[0].message.content.replace("```markdown", "").replace("```", "").strip()
         
         # Nettoyage des labels IA
-        raw = re.sub(r'^(Titre|Title|Caption|English|French|Hook)\s*:\s*', '', raw, flags=re.IGNORECASE)
+        raw = re.sub(r'^(Titre|Title|Caption|English|French|Hook|Tech|Story)\s*:\s*', '', raw, flags=re.IGNORECASE)
 
         if "|||" in raw:
             parts = raw.split("|||")
@@ -291,35 +298,23 @@ def generate_ai_caption(image_url, galerie_nom):
             caption_part = raw
             alt_part = f"Fine art photography of {galerie_nom} by David Ahmed."
 
-        # Mentions
-        found_accounts = []
-        text_for_search = caption_part.lower().replace("_", "").replace(".", "")
-        for acc in SAFE_ACCOUNTS:
-            if acc in text_for_search: found_accounts.append(f"@{acc}")
-        if not found_accounts: found_accounts = ["@lensculture", "@urbanromantix", "@magnumphotos"]
-        
-        final_mentions_str = f"(cc {' '.join(found_accounts[:2])})" 
-
-        # Nettoyage final
+        # Nettoyage final ligne par ligne pour s'assurer que tout est propre
         lines = caption_part.split('\n')
         clean_lines = []
         for line in lines:
-            l = line.strip().lower()
-            if l.startswith("(") or l.startswith("cc") or l.startswith("@") or "alt text" in l: continue
-            if "davidahmed.me" in l: continue
-            clean_lines.append(line)
+            l = line.strip()
+            # On laisse passer le contenu généré par l'IA (y compris les mentions qu'elle a choisies)
+            # On retire juste les doublons éventuels de lien si l'IA s'est trompée
+            if "davidahmed.me" in l and l != display_link and display_link not in l: continue 
+            clean_lines.append(l)
         
-        body_text = "\n".join([l for l in clean_lines if not l.startswith("#") and l.strip() != ""]).strip()
-        hashtags = "\n".join([l for l in clean_lines if l.startswith("#")]).strip()
+        final_caption = "\n".join(clean_lines).strip()
         
-        if not hashtags: hashtags = f"#StreetPhotography #{galerie_nom} #FineArt {base_tag}"
-
-        final_caption = f"{body_text}\n\n{final_mentions_str}\n{display_link}\n{hashtags}"
         return f"{final_caption}|||{alt_part}"
         
     except Exception as e:
-        return f"Photo of {galerie_nom}\nPhoto de {galerie_nom}\n\n{display_link}|||Art photography"
-
+        # Fallback en cas de panne OpenAI
+        return f"Photo of {galerie_nom}\nPhoto de {galerie_nom}\n\n📷 Tech Specs loading...\n\n{display_link}|||Art photography"
 
 # =================================================================
 # SECTION 6 : PUBLICATION RESEAUX SOCIAUX
