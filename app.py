@@ -212,36 +212,28 @@ def get_token_status():
 # SECTION 5 : INTELLIGENCE ARTIFICIELLE (OPENAI)
 # =================================================================
 
-# --- IA (MODE BILINGUE + SEO 3-TIERS) ---
-# =================================================================
-# SECTION 5 : INTELLIGENCE ARTIFICIELLE (OPENAI)
-# =================================================================
-
-# =================================================================
-# SECTION 5 : INTELLIGENCE ARTIFICIELLE (OPENAI)
-# =================================================================
-
-# --- IA (VERSION ULTIME : SEO + HOOKS + EXIFS + CTA + MENTIONS) ---
+# --- IA (VERSION CORRIGEE : PLUS D'EXIFS INVENTES) ---
 def generate_ai_caption(image_url, galerie_nom):
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
     
-    # Construction du lien propre (sans https pour l'esthétique)
+    # Construction du lien propre
     base_url = config.get('site_url', 'davidahmed.me').replace('https://', '').replace('http://', '').rstrip('/')
     display_link = f"{base_url}/{galerie_nom}"
     manual_hashtag = config.get('custom_hashtag', '')
     base_tag = f"#{manual_hashtag}" if manual_hashtag else ""
 
-    # Liste des comptes influents
+    # Liste des comptes influents pour la Street/Architecture
     SAFE_ACCOUNTS_STR = (
         "archdaily, architecture_hunter, streetclassics, urbanromantix, "
         "raw_urbanshots, bnw_planet, lensculture, magnumphotos, "
-        "somewheremagazine, artofvisuals, moodygrams, streetphotographyinternational"
+        "somewheremagazine, artofvisuals, moodygrams, streetphotographyinternational, "
+        "leica_camera, leica_street"
     )
     
-    # INSTRUCTIONS COMPLETES
+    # INSTRUCTIONS : SEO + HOOKS + CTA (MAIS PAS D'EXIFS)
     instructions = f"""You are David Ahmed, fine art photographer. Analyze this photo of {galerie_nom}.
-    TASK: Create a high-engagement caption with Hook, Story, Tech Specs, and SEO.
+    TASK: Create a high-engagement caption with Hook, Story, and SEO.
     
     CRITICAL RULES:
     1. START with English. THEN French.
@@ -249,15 +241,14 @@ def generate_ai_caption(image_url, galerie_nom):
     3. NO labels (Title:, Caption:, etc.).
     4. NO Markdown.
     5. SEPARATOR "|||" for Alt Text at the end.
+    6. DO NOT invent technical specs (EXIFs).
     
     CONTENT BLOCKS:
     1. THE HOOK: A stop-scrolling title (Journalistic/Emotional). No generic descriptions.
     2. THE STORY: 1 sentence context (EN then FR).
-    3. THE TECH SPECS: Estimate realistic EXIFs based on visuals. 
-       Format: 📷 [Focal]mm | f/[Aperture] | ISO [Value]
-    4. THE CTA: A short invitation to see the gallery (e.g. "Full series 👇").
-    5. MENTIONS: Pick the 2 most relevant accounts from: [{SAFE_ACCOUNTS_STR}].
-    6. HASHTAGS (3-Tier Strategy): 
+    3. THE CTA: A short invitation to see the gallery (e.g. "Full series 👇").
+    4. MENTIONS: Pick the 2 most relevant accounts from: [{SAFE_ACCOUNTS_STR}].
+    5. HASHTAGS (3-Tier Strategy): 
        - Tier 1 (Niche)
        - Tier 2 (Specific Location)
        - Tier 3 (Vibe/Style)
@@ -269,8 +260,6 @@ def generate_ai_caption(image_url, galerie_nom):
     
     [HOOK FR]
     [Story FR]
-    
-    [TECH SPECS LINE]
     
     [Short CTA] {display_link}
     (cc @account1 @account2)
@@ -288,7 +277,7 @@ def generate_ai_caption(image_url, galerie_nom):
         raw = response.choices[0].message.content.replace("```markdown", "").replace("```", "").strip()
         
         # Nettoyage des labels IA
-        raw = re.sub(r'^(Titre|Title|Caption|English|French|Hook|Tech|Story)\s*:\s*', '', raw, flags=re.IGNORECASE)
+        raw = re.sub(r'^(Titre|Title|Caption|English|French|Hook|Story)\s*:\s*', '', raw, flags=re.IGNORECASE)
 
         if "|||" in raw:
             parts = raw.split("|||")
@@ -298,13 +287,11 @@ def generate_ai_caption(image_url, galerie_nom):
             caption_part = raw
             alt_part = f"Fine art photography of {galerie_nom} by David Ahmed."
 
-        # Nettoyage final ligne par ligne pour s'assurer que tout est propre
         lines = caption_part.split('\n')
         clean_lines = []
         for line in lines:
             l = line.strip()
-            # On laisse passer le contenu généré par l'IA (y compris les mentions qu'elle a choisies)
-            # On retire juste les doublons éventuels de lien si l'IA s'est trompée
+            # Nettoyage doublons
             if "davidahmed.me" in l and l != display_link and display_link not in l: continue 
             clean_lines.append(l)
         
@@ -313,8 +300,9 @@ def generate_ai_caption(image_url, galerie_nom):
         return f"{final_caption}|||{alt_part}"
         
     except Exception as e:
-        # Fallback en cas de panne OpenAI
-        return f"Photo of {galerie_nom}\nPhoto de {galerie_nom}\n\n📷 Tech Specs loading...\n\n{display_link}|||Art photography"
+        return f"Photo of {galerie_nom}\nPhoto de {galerie_nom}\n\n{display_link}|||Art photography"
+
+
 
 # =================================================================
 # SECTION 6 : PUBLICATION RESEAUX SOCIAUX
