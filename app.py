@@ -208,11 +208,8 @@ def get_token_status():
 # SECTION 5 : INTELLIGENCE ARTIFICIELLE (OPENAI)
 # =================================================================
 
-# =================================================================
-# SECTION 5 : INTELLIGENCE ARTIFICIELLE (OPENAI)
-# =================================================================
+# --- IA (VERSION ULTIME : HOOKS + QUESTION ENGAGEMENT + EMOJIS + SEO) ---
 
-# --- IA (VERSION CORRIGEE : PLUS D'EXIFS INVENTES) ---
 def generate_ai_caption(image_url, galerie_nom):
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     config = load_config()
@@ -231,9 +228,9 @@ def generate_ai_caption(image_url, galerie_nom):
         "leica_camera, leica_street"
     )
     
-    # INSTRUCTIONS : SEO + HOOKS + CTA (MAIS PAS D'EXIFS)
+    # INSTRUCTIONS : SEO + HOOKS + QUESTION + VISUALS
     instructions = f"""You are David Ahmed, fine art photographer. Analyze this photo of {galerie_nom}.
-    TASK: Create a high-engagement caption with Hook, Story, and SEO.
+    TASK: Create a high-engagement caption with Hook, Story, Question, and SEO.
     
     CRITICAL RULES:
     1. START with English. THEN French.
@@ -244,24 +241,32 @@ def generate_ai_caption(image_url, galerie_nom):
     6. DO NOT invent technical specs (EXIFs).
     
     CONTENT BLOCKS:
-    1. THE HOOK: A stop-scrolling title (Journalistic/Emotional). No generic descriptions.
+    1. THE HOOK: A stop-scrolling title (Journalistic/Emotional).
     2. THE STORY: 1 sentence context (EN then FR).
-    3. THE CTA: A short invitation to see the gallery (e.g. "Full series 👇").
-    4. MENTIONS: Pick the 2 most relevant accounts from: [{SAFE_ACCOUNTS_STR}].
-    5. HASHTAGS (3-Tier Strategy): 
+    3. THE QUESTION: A short, open-ended question to provoke comments (e.g. "Do you prefer X or Y?", "What does this evoke?"). EN & FR.
+    4. THE CTA: A short invitation pointing down (e.g. "Full series / Série complète 👇").
+    5. MENTIONS: Pick the 2 most relevant accounts from: [{SAFE_ACCOUNTS_STR}].
+    6. HASHTAGS (3-Tier Strategy): 
        - Tier 1 (Niche)
        - Tier 2 (Specific Location)
        - Tier 3 (Vibe/Style)
        *Max 5 hashtags.*
 
+    VISUAL STYLE:
+    - Use subtle emojis to structure (e.g. 📍 for location in the story, 👇 for CTA).
+    - Keep it airy (line breaks).
+
     STRUCTURE:
     [HOOK EN]
     [Story EN]
+    [Question EN]
     
     [HOOK FR]
     [Story FR]
+    [Question FR]
     
-    [Short CTA] {display_link}
+    [Short CTA]
+    {display_link}
     (cc @account1 @account2)
     [Hashtags]
     |||
@@ -277,7 +282,7 @@ def generate_ai_caption(image_url, galerie_nom):
         raw = response.choices[0].message.content.replace("```markdown", "").replace("```", "").strip()
         
         # Nettoyage des labels IA
-        raw = re.sub(r'^(Titre|Title|Caption|English|French|Hook|Story)\s*:\s*', '', raw, flags=re.IGNORECASE)
+        raw = re.sub(r'^(Titre|Title|Caption|English|French|Hook|Story|Question)\s*:\s*', '', raw, flags=re.IGNORECASE)
 
         if "|||" in raw:
             parts = raw.split("|||")
