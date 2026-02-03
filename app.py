@@ -508,12 +508,34 @@ def send_suggestion(chat_id, galerie_nom):
 # SECTION 8 : ROUTE PRINCIPALE (WEBHOOK TELEGRAM)
 # =================================================================
 
+# Cache simple pour éviter les doublons (Update ID : Timestamp)
+PROCESSED_CACHE = {}
+
 @app.route("/telegram-webhook", methods=['POST'])
 def telegram_webhook():
     data = request.json
     token = os.environ.get('TELEGRAM_TOKEN')
     if not data: return jsonify({"status": "ok"})
     
+    # 1. RECUPERATION DE L'UPDATE ID (L'ADN du message)
+    update_id = data.get('update_id')
+    current_time = time.time()
+    
+    # 2. NETTOYAGE DU CACHE (On oublie les vieux messages > 60s)
+    to_remove = [uid for uid, ts in PROCESSED_CACHE.items() if current_time - ts > 60]
+    for uid in to_remove:
+        del PROCESSED_CACHE[uid]
+        
+    # 3. FILTRE ANTI-DOUBLON
+    # Si on a déjà vu cet ID il y a quelques secondes, on stoppe tout de suite.
+    if update_id in PROCESSED_CACHE:
+        logger.info(f"🚫 Doublon bloqué (Update ID: {update_id})")
+        return jsonify({"status": "ok"})
+    
+    # On note qu'on traite ce message
+    PROCESSED_CACHE[update_id] = current_time
+    
+    # --- SUITE NORMALE DU CODE ---
     chat_id = data.get("message", {}).get("chat", {}).get("id") or data.get("callback_query", {}).get("message", {}).get("chat", {}).get("id")
     text = data.get("message", {}).get("text", "").strip()
     action = data.get("callback_query", {}).get("data", "")
@@ -558,6 +580,7 @@ def telegram_webhook():
             send_galerie_menu(chat_id)
             
         elif action.startswith("select_"): 
+            # C'est ici que l'IA prend du temps, le filtre empechera le doublon
             send_suggestion(chat_id, action.split("_")[1])
             
         else:
@@ -579,7 +602,7 @@ def telegram_webhook():
                  requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": "⚠️ **Session expirée.**\nClique sur 'Menu' et génère une nouvelle photo."})
         return jsonify({"status": "ok"})
 
-    # Gestion Texte Libre (Programmation ou Edition Manuelle)
+    # Gestion Texte Libre
     if text:
         session = get_session(chat_id)
         if session and session[1].startswith("WAITING_SCHEDULE|"):
@@ -594,7 +617,6 @@ def telegram_webhook():
                 target = now_be.replace(hour=th, minute=tm, second=0)
                 if target <= now_be: target += datetime.timedelta(days=1)
                 
-                # Conversion en UTC pour stockage
                 utc_run = target - datetime.timedelta(hours=offset)
                 real_content = session[1].replace("WAITING_SCHEDULE|", "")
                 
