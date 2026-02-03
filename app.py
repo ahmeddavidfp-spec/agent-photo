@@ -524,21 +524,25 @@ def telegram_webhook():
     token = os.environ.get('TELEGRAM_TOKEN')
     if not data: return jsonify({"status": "ok"})
     
-    # 1. FILTRE ANTI-DOUBLON
+    # 1. RECUPERATION DE L'UPDATE ID (L'ADN du message)
     update_id = data.get('update_id')
     current_time = time.time()
     
-    # Nettoyage du cache (> 60s)
+    # 2. NETTOYAGE DU CACHE (On oublie les vieux messages > 60s)
     to_remove = [uid for uid, ts in PROCESSED_CACHE.items() if current_time - ts > 60]
-    for uid in to_remove: del PROCESSED_CACHE[uid]
+    for uid in to_remove:
+        del PROCESSED_CACHE[uid]
         
+    # 3. FILTRE ANTI-DOUBLON
+    # Si on a déjà vu cet ID il y a quelques secondes, on stoppe tout de suite.
     if update_id in PROCESSED_CACHE:
         logger.info(f"🚫 Doublon bloqué (Update ID: {update_id})")
         return jsonify({"status": "ok"})
     
+    # On note qu'on traite ce message
     PROCESSED_CACHE[update_id] = current_time
     
-    # --- TRAITEMENT ---
+    # --- SUITE NORMALE DU CODE ---
     chat_id = data.get("message", {}).get("chat", {}).get("id") or data.get("callback_query", {}).get("message", {}).get("chat", {}).get("id")
     text = data.get("message", {}).get("text", "").strip()
     action = data.get("callback_query", {}).get("data", "")
@@ -552,11 +556,10 @@ def telegram_webhook():
             success, result = renew_threads_token()
             msg = f"✅ **TOKEN RENOUVELE ({result[1]}j)**\n`{result[0]}`" if success else f"❌ {result}"
             requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
+            return jsonify({"status": "ok"})
         elif text == "/debug_db":
             requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": get_db_stats(), "parse_mode": "Markdown"})
-        
-        # On répond TOUJOURS ok tout de suite
-        return jsonify({"status": "ok"})
+            return jsonify({"status": "ok"})
 
     # Commandes Boutons
     if action:
@@ -565,11 +568,13 @@ def telegram_webhook():
             if session:
                 save_session(chat_id, session[0], f"WAITING_SCHEDULE|{session[1]}")
                 requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": "📅 **Heure ?** (HH:MM)", "parse_mode": "Markdown"})
+            return jsonify({"status": "ok"})
             
         elif action == "renew_threads_btn":
             success, result = renew_threads_token()
             msg = f"✅ **TOKEN RENOUVELE ({result[1]}j)**\n`{result[0]}`" if success else f"❌ {result}"
             requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"})
+            return jsonify({"status": "ok"})
             
         elif action == "view_stats":
             requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": get_db_stats(), "parse_mode": "Markdown"})
@@ -582,11 +587,11 @@ def telegram_webhook():
             send_galerie_menu(chat_id)
             
         elif action.startswith("select_"): 
-            # --- MODIFICATION CRITIQUE ICI ---
-            # On lance l'IA (qui est lente) dans un thread séparé
-            # pour pouvoir répondre "OK" à Telegram immédiatement.
-            galerie = action.split("_")[1]
-            threading.Thread(target=send_suggestion, args=(chat_id, galerie)).start()
+            # === CORRECTION CRITIQUE ICI ===
+            # On lance l'IA en tâche de fond (Thread) pour que le serveur
+            # puisse répondre "OK" à Telegram immédiatement (ligne 118).
+            galerie_nom = action.split("_")[1]
+            threading.Thread(target=send_suggestion, args=(chat_id, galerie_nom)).start()
             
         else:
             session = get_session(chat_id)
@@ -605,38 +610,43 @@ def telegram_webhook():
                     threading.Thread(target=background_publish, args=(chat_id, token, mode, session[0], session[1])).start()
             else:
                  requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": "⚠️ **Session expirée.**\nClique sur 'Menu' et génère une nouvelle photo."})
-        
-        # Le return est ici, immédiat, quoi qu'il arrive
         return jsonify({"status": "ok"})
 
-    # Gestion Texte Libre (Programmation)
+    # Gestion Texte Libre
     if text:
-        # ... (Code inchangé pour la programmation, je ne le répète pas pour alléger, garde ce que tu avais ou copie le bloc précédent si besoin, mais l'important c'est le return jsonify à la fin)
-        # Pour être sûr, je te remets le bloc complet texte libre ci-dessous :
         session = get_session(chat_id)
         if session and session[1].startswith("WAITING_SCHEDULE|"):
             try:
                 time_str = text.strip().replace('h', ':')
                 if ':' not in time_str: time_str += ":00"
                 th, tm = map(int, time_str.split(':'))
+                
                 offset = get_belgium_offset()
                 now_be = datetime.datetime.utcnow() + datetime.timedelta(hours=offset)
+                
                 target = now_be.replace(hour=th, minute=tm, second=0)
                 if target <= now_be: target += datetime.timedelta(days=1)
+                
                 utc_run = target - datetime.timedelta(hours=offset)
                 real_content = session[1].replace("WAITING_SCHEDULE|", "")
+                
                 conn = get_db_connection()
-                conn.execute("INSERT INTO scheduled_posts (chat_id, image_url, caption, run_at) VALUES (?, ?, ?, ?)", (chat_id, session[0], real_content, utc_run.strftime("%Y-%m-%d %H:%M:%S")))
+                conn.execute("INSERT INTO scheduled_posts (chat_id, image_url, caption, run_at) VALUES (?, ?, ?, ?)", 
+                             (chat_id, session[0], real_content, utc_run.strftime("%Y-%m-%d %H:%M:%S")))
                 conn.commit()
                 conn.execute('DELETE FROM current_session WHERE chat_id = ?', (chat_id,))
                 conn.commit()
                 conn.close()
                 requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": f"✅ **Programmé pour {target.strftime('%H:%M')}** (heure belge).", "parse_mode": "Markdown"})
-            except: requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": "❌ Format invalide."})
+            except:
+                requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": "❌ Format invalide (ex: 18:00)."})
+            return jsonify({"status": "ok"})
+            
         elif session and session[1] == "WAITING_FOR_MANUAL":
             save_session(chat_id, session[0], text)
             requests.post(f"{TG_API}{token}/sendMessage", json={"chat_id": chat_id, "text": "✅ Prêt !", "reply_markup": {"inline_keyboard": [[{"text": "🚀 Les deux", "callback_data": "pub_both"}, {"text": "📅 Programmer", "callback_data": "schedule_btn"}], [{"text": "📸 Insta", "callback_data": "pub_ig"}, {"text": "🧵 Threads", "callback_data": "pub_th"}]]}})
-        else: send_galerie_menu(chat_id)
+        else:
+            send_galerie_menu(chat_id)
             
     return jsonify({"status": "ok"})
 
