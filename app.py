@@ -308,15 +308,21 @@ def generate_ai_caption(image_url, galerie_nom):
         return f"Photo of {galerie_nom}\nPhoto de {galerie_nom}\n\n{display_link}|||Art photography"
 
 
-
 # =================================================================
-# SECTION 6 : PUBLICATION RESEAUX SOCIAUX
+# SECTION 6 : PUBLICATION RESEAUX SOCIAUX (SMART LINKS)
 # =================================================================
 
 def publish_to_instagram(image_url, full_text):
     caption, _ = split_content(full_text)
     token = os.environ.get('IG_ACCESS_TOKEN')
     ig_id = "17841453263147553" 
+    
+    # --- SMART LINK INSTAGRAM ---
+    # Instagram ne permet pas les liens cliquables.
+    # Si on détecte le site, on le remplace par la phrase magique.
+    if "davidahmed.me" in caption:
+        # Remplace l'URL par "Link in Bio..."
+        caption = re.sub(r'davidahmed\.me[^\s\n]*', '🔗 Link in Bio for full series', caption)
     
     try:
         # Étape 1 : Upload
@@ -333,22 +339,23 @@ def publish_to_instagram(image_url, full_text):
         return True, "OK"
     except Exception as e: return False, str(e)
 
-# --- FONCTION THREADS (NATIVE IMAGE + TEXTE BILINGUE) ---
+# --- FONCTION THREADS (NATIVE IMAGE + TEXTE BILINGUE + LIEN CLIQUABLE) ---
 def publish_to_threads(image_url, full_text):
     caption, _ = split_content(full_text)
     token = os.environ.get('THREADS_ACCESS_TOKEN')
     th_id = os.environ.get('THREADS_USER_ID')
     
+    # URL Propre pour Squarespace
     clean_url = image_url.split('?')[0] + "?format=1000w"
     
-    logger.info(f"🧐 DEBUG THREADS | ID: {th_id} | Mode: NATIVE IMAGE + BILINGUE")
+    logger.info(f"🧐 DEBUG THREADS | ID: {th_id} | Mode: SMART LINK + NATIVE IMAGE")
     
     if not th_id or not token: return False, "Token manquant"
     
     try:
         # 1. PREPARATION DU TEXTE
-        # On garde le lien davidahmed.me cette fois !
-        # On enleve juste le "https://" pour faire joli
+        # Pour Threads, on GARDE le lien car il est cliquable.
+        # On enlève juste le "https://" pour l'esthétique.
         clean_caption = caption.replace("https://", "").strip()
         
         # Securite Longueur (Threads = 500 chars max)
