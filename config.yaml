@@ -1,5 +1,29 @@
-site_url: "https://www.davidahmed.me"
+site_url: "https://www.davidmertens.me"
 custom_hashtag: ""
+
+# --- Noms d'affichage par galerie -------------------------------------------
+# Utilisés dans les captions à la place du slug (qui reste utilisé pour l'URL).
+# Si un slug n'est pas listé, il sera "titlé" automatiquement (bruxelles -> Bruxelles).
+gallery_names:
+  barcelone: "Barcelona"
+  berlin: "Berlin"
+  bruxelles: "Bruxelles"
+  casablanca: "Casablanca"
+  dubrovnik: "Dubrovnik"
+  dusseldorf: "Düsseldorf"
+  ljubljana: "Ljubljana"
+  milan: "Milano"
+  munich: "München"
+  namur: "Namur"
+  new-york: "New York"
+  san-francisco: "San Francisco"
+  split: "Split"
+  tokyo: "Tokyo"
+  trogir: "Trogir"
+  vienne: "Vienne"
+  zadar: "Zadar"
+  zagreb: "Zagreb"
+
 galeries:
   - "barcelone"
   - "berlin"

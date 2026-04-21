@@ -65,11 +65,12 @@ def split_content(text: str) -> Tuple[str, str]:
 
 
 def _clean_link_duplicates(caption: str, display_link: str) -> str:
-    """Supprime les liens davidahmed.me autres que celui voulu."""
+    """Supprime les liens du site qui ne pointent pas vers `display_link`."""
     out = []
     for line in caption.split("\n"):
         line_stripped = line.strip()
-        if "davidahmed.me" in line_stripped and display_link not in line_stripped:
+        if ("davidmertens.me" in line_stripped or "davidahmed.me" in line_stripped) \
+                and display_link not in line_stripped:
             continue
         out.append(line)
     return "\n".join(out).strip()
@@ -119,18 +120,30 @@ def _voice_examples(config: dict) -> str:
     return raw.strip() or "(aucun exemple fourni — reste factuel, court, cinématographique)"
 
 
+def _display_name(galerie: str, config: dict) -> str:
+    """Nom propre pour l'affichage (ex. 'new-york' -> 'New York').
+
+    Utilise `gallery_names` du config si présent, sinon fallback
+    heuristique : remplace les tirets par des espaces + title-case.
+    """
+    names = config.get("gallery_names") or {}
+    if galerie in names and names[galerie]:
+        return str(names[galerie])
+    return galerie.replace("-", " ").replace("_", " ").title()
+
+
 # =============================================================================
 # PASS 1 — DESCRIPTION FACTUELLE (OpenAI Vision)
 # =============================================================================
 
-def _describe_image(image_url: str, galerie: str) -> Optional[str]:
+def _describe_image(image_url: str, display_name: str) -> Optional[str]:
     """Retourne une description factuelle ~80 mots. None si échec complet."""
     if not OPENAI_API_KEY:
         logger.warning("OPENAI_API_KEY absente, pas de description.")
         return None
 
     try:
-        prompt = _load_prompt("describe.txt").format(galerie=galerie)
+        prompt = _load_prompt("describe.txt").format(galerie=display_name)
     except FileNotFoundError as e:
         logger.error("Prompt describe introuvable : %s", e)
         return None
@@ -178,13 +191,18 @@ def _describe_image(image_url: str, galerie: str) -> Optional[str]:
 # =============================================================================
 
 def _build_caption_prompt(
-    description: str, galerie: str, display_link: str, config: dict,
+    description: str, galerie: str, display_name: str,
+    display_link: str, config: dict,
 ) -> str:
-    """Assemble le prompt pass 2 à partir du template et du config."""
+    """Assemble le prompt pass 2 à partir du template et du config.
+
+    `galerie` est le slug (pour la résolution config.per_gallery).
+    `display_name` est le nom affichable (pour le texte de la caption).
+    """
     template = _load_prompt("caption.txt")
     tags, mentions = _resolve_gallery_assets(galerie, config)
     return template.format(
-        galerie=galerie,
+        galerie=display_name,
         sep=SEPARATOR,
         display_link=display_link,
         description=description,
@@ -276,21 +294,24 @@ def generate_caption(image_url: str, galerie: str) -> str:
     """Retourne `caption|||alt`. Fallback propre si tout casse."""
     config = load_yaml_config()
     base_url = (
-        config.get("site_url", "davidahmed.me")
+        config.get("site_url", "davidmertens.me")
         .replace("https://", "")
         .replace("http://", "")
         .rstrip("/")
     )
     display_link = f"{base_url}/{galerie}"
+    display_name = _display_name(galerie, config)
 
     # --- Pass 1 : description factuelle
-    description = _describe_image(image_url, galerie)
+    description = _describe_image(image_url, display_name)
     if not description:
         logger.warning("Pas de description, fallback caption.")
-        return _fallback_caption(galerie, display_link)
+        return _fallback_caption(display_name, display_link)
 
     # --- Pass 2 : écriture de la caption
-    prompt = _build_caption_prompt(description, galerie, display_link, config)
+    prompt = _build_caption_prompt(
+        description, galerie, display_name, display_link, config,
+    )
 
     raw = _write_caption_with_claude(prompt)
     if not raw:
@@ -299,7 +320,7 @@ def generate_caption(image_url: str, galerie: str) -> str:
 
     if not raw:
         logger.error("Pass 2 a totalement échoué, fallback caption.")
-        return _fallback_caption(galerie, display_link)
+        return _fallback_caption(display_name, display_link)
 
     # Nettoyage post-génération
     raw = _strip_labels(raw)
@@ -309,13 +330,13 @@ def generate_caption(image_url: str, galerie: str) -> str:
     return f"{caption}{SEPARATOR}{alt}"
 
 
-def _fallback_caption(galerie: str, display_link: str) -> str:
+def _fallback_caption(display_name: str, display_link: str) -> str:
     """Caption minimale mais publiable en cas d'échec total de l'IA."""
     return (
-        f"Photo of {galerie}\n"
-        f"Photo de {galerie}\n\n"
+        f"Photo of {display_name}\n"
+        f"Photo de {display_name}\n\n"
         f"Full series / Série complète 👇\n"
         f"{display_link}"
         f"{SEPARATOR}"
-        f"Fine art photography by David Ahmed from the {galerie} gallery."
+        f"Fine art photography by David Ahmed from the {display_name} gallery."
     )

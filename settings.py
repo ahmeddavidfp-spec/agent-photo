@@ -53,7 +53,7 @@ LOCAL_TZ = "Europe/Brussels"
 def load_yaml_config(path: str = "config.yaml") -> dict:
     """Charge config.yaml avec valeurs par défaut sûres."""
     default = {
-        "site_url": "https://www.davidahmed.me",
+        "site_url": "https://www.davidmertens.me",
         "galeries": [],
         "custom_hashtag": "",
     }

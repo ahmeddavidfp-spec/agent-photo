@@ -170,13 +170,18 @@ def _poll_container_status(
 # =========================================================================
 
 def publish_to_instagram(image_url: str, full_text: str) -> Tuple[bool, str]:
-    """Publie sur Instagram. Le lien davidahmed.me est remplacé par 'Link in Bio'."""
+    """Publie sur Instagram. Le lien du site est remplacé par 'Link in Bio'."""
     if not (IG_ACCESS_TOKEN and IG_USER_ID):
         return False, "IG_ACCESS_TOKEN ou IG_USER_ID manquant"
 
     caption, _alt = split_content(full_text)
-    # IG ne rend pas les liens cliquables dans la caption
-    caption = re.sub(r"davidahmed\.me[^\s\n]*", "🔗 Link in Bio for full series", caption)
+    # IG ne rend pas les liens cliquables dans la caption.
+    # On couvre les deux domaines (nouveau + ancien) pour être safe.
+    caption = re.sub(
+        r"(davidmertens|davidahmed)\.me[^\s\n]*",
+        "🔗 Link in Bio for full series",
+        caption,
+    )
 
     try:
         r = safe_post(
