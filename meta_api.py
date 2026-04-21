@@ -19,11 +19,13 @@ from settings import (
 
 logger = logging.getLogger(__name__)
 
-# Polling : on attend jusqu'à 2 min que Meta marque FINISHED.
-# Si timeout, on tente la publish quand même (Meta est parfois lent à
-# mettre à jour le statut alors que le conteneur est prêt — comportement v1).
+# Polling :
+# - IG renvoie status_code=FINISHED fiable → on peut poller jusqu'à 2 min.
+# - Threads renvoie souvent status=None (bug Meta), mais le conteneur EST
+#   prêt en ~20s. On poll court (20s) puis on tente la publish quand même.
 POLL_INTERVAL = 3
-POLL_MAX_ATTEMPTS = 40  # 40*3 = 120s
+POLL_MAX_ATTEMPTS_IG = 40  # 120s
+POLL_MAX_ATTEMPTS_TH = 8   # 24s avant tentative optimiste
 
 
 # =========================================================================
@@ -110,7 +112,10 @@ def token_status() -> str:
 # POLLING DU STATUT DES CONTENEURS MEDIA
 # =========================================================================
 
-def _poll_container_status(container_id: str, access_token: str, base_url: str) -> str:
+def _poll_container_status(
+    container_id: str, access_token: str, base_url: str,
+    max_attempts: int = POLL_MAX_ATTEMPTS_IG,
+) -> str:
     """Sonde le statut du conteneur.
 
     Retourne :
@@ -120,15 +125,23 @@ def _poll_container_status(container_id: str, access_token: str, base_url: str) 
                      → tenter la publish quand même (Meta est parfois lent
                      à mettre à jour, comportement historique v1).
     """
-    url = f"https://graph.facebook.com/v21.0/{container_id}" if "facebook" in base_url else f"https://graph.threads.net/v1.0/{container_id}"
+    is_instagram = "facebook" in base_url
+    url = (
+        f"https://graph.facebook.com/v21.0/{container_id}" if is_instagram
+        else f"https://graph.threads.net/v1.0/{container_id}"
+    )
+    # Instagram renvoie `status_code`, Threads renvoie `status`.
+    fields = "status_code,status" if is_instagram else "status,error_message"
     last_status = None
-    for attempt in range(POLL_MAX_ATTEMPTS):
+    last_data: dict = {}
+    for attempt in range(max_attempts):
         try:
             r = safe_get(
                 url,
-                params={"fields": "status_code,status", "access_token": access_token},
+                params={"fields": fields, "access_token": access_token},
             )
-            data = r.json()
+            data = r.json() or {}
+            last_data = data
             status = data.get("status_code") or data.get("status")
             last_status = status
             if status in ("FINISHED", "PUBLISHED"):
@@ -136,16 +149,18 @@ def _poll_container_status(container_id: str, access_token: str, base_url: str) 
             if status in ("ERROR", "EXPIRED"):
                 logger.error("Container %s status=%s data=%s", container_id, status, data)
                 return "error"
-            # Log discret toutes les 10 tentatives pour voir la progression
-            if (attempt + 1) % 10 == 0:
-                logger.info("Container %s still %s after %ds",
-                            container_id, status, (attempt + 1) * POLL_INTERVAL)
+            # Log discret toutes les 5 tentatives + dump brut la 1re fois
+            if attempt == 0:
+                logger.info("Container %s first poll response: %s", container_id, data)
+            elif (attempt + 1) % 10 == 0:
+                logger.info("Container %s still %s after %ds (payload=%s)",
+                            container_id, status, (attempt + 1) * POLL_INTERVAL, data)
         except Exception as e:
             logger.warning("Poll attempt %d failed: %s", attempt + 1, e)
         time.sleep(POLL_INTERVAL)
     logger.warning(
-        "Container %s polling timeout (last_status=%s) — tentative publish quand même",
-        container_id, last_status,
+        "Container %s polling timeout (last_status=%s last_data=%s) — tentative publish quand même",
+        container_id, last_status, last_data,
     )
     return "timeout"
 
@@ -232,7 +247,10 @@ def publish_to_threads(image_url: str, full_text: str) -> Tuple[bool, str]:
         if not container_id:
             return False, str(data)
 
-        poll = _poll_container_status(container_id, THREADS_ACCESS_TOKEN, TH_API)
+        poll = _poll_container_status(
+            container_id, THREADS_ACCESS_TOKEN, TH_API,
+            max_attempts=POLL_MAX_ATTEMPTS_TH,
+        )
         if poll == "error":
             return False, "Container TH ERROR côté Meta"
 
