@@ -20,19 +20,114 @@ galeries:
   - "zadar"
   - "zagreb"
 
-# --- Style et Ton de l'IA ---
+# --- Style et Ton de l'IA (legacy, conservé pour rétro-compat) ---
 ai_tone: >
-  Agis en photographe pro et curateur. Ton cinématographique, mélancolique, épuré. 
-  Analyse : lignes de fuite, dualité, anachronisme, contraste architecture/sujet. 
+  Agis en photographe pro et curateur. Ton cinématographique, mélancolique, épuré.
+  Analyse : lignes de fuite, dualité, anachronisme, contraste architecture/sujet.
   Style : phrases courtes, rythme sec, vocabulaire riche.
-  CONTRAINTE STRICTE : Texte de 400 caractères MAXIMUM (espaces compris). 
-  Pas d'émojis. Pas de hashtags dans le texte.
 
 # --- Identité de l'auteur ---
 photographer_bio: |
-  David Ahmed, photographe de rue (Belgique). 
+  David Ahmed, photographe de rue (Belgique).
   Travail en noir et blanc sur l'instant suspendu, la tension et le silence.
   Esthétique 'film noir'.
 
-# --- Hashtags ---
+# --- Hashtags globaux (fallback si pas de hashtags par galerie) ---
 hashtags: "#streetphotography #spicollective #street_perfection #burnmyeye #hcsc_street #streetdreamsmag #life_is_street #zonestreet #bnw_demand #streetphotographer #storyofthestreet #raw_street #leicaphotography #documentaryphotography #davidahmed #leica #bnw"
+
+# --- Exemples de voix (pass 2) -----------------------------------------------
+# Remplace ces 3 exemples par TES meilleures captions existantes (copier-coller).
+# L'IA s'en sert pour calibrer le rythme et le vocabulaire — elle ne les copie pas.
+voice_examples: |
+  ---
+  Empty benches, full sky.
+  Bruxelles, 7:14 AM. The rain had just stopped and the cafés were still asleep.
+  What's the last moment of silence you stole from a city?
+
+  Bancs vides, ciel plein.
+  Bruxelles, 7h14. La pluie venait de s'arrêter, les cafés dormaient encore.
+  Tu te souviens de ton dernier instant de silence volé à une ville ?
+  ---
+  He didn't see me.
+  Tokyo, under the Yamanote line. Hat, cigarette, and a shadow longer than the man.
+  Do you still believe in portraits made without permission?
+
+  Il ne m'a pas vu.
+  Tokyo, sous la Yamanote. Chapeau, cigarette, une ombre plus longue que lui.
+  Crois-tu encore aux portraits volés ?
+  ---
+  Concrete prayer.
+  Casablanca. A woman walks past the mosque — her scarf catches the only warm light left on the wall.
+  Where does your city hold its quiet ?
+
+  Prière de béton.
+  Casablanca. Une femme passe devant la mosquée — son foulard capte la dernière lumière chaude du mur.
+  Où ta ville range-t-elle son silence ?
+
+# --- Comptes "safe" globaux (utilisés si aucune liste par galerie) -----------
+safe_mentions:
+  - archdaily
+  - architecture_hunter
+  - streetclassics
+  - urbanromantix
+  - raw_urbanshots
+  - bnw_planet
+  - lensculture
+  - magnumphotos
+  - somewheremagazine
+  - artofvisuals
+  - moodygrams
+  - streetphotographyinternational
+  - leica_camera
+  - leica_street
+
+# --- Overrides par galerie (optionnel) ---------------------------------------
+# Pour chaque clé de galerie, tu peux définir :
+#   hashtags : liste de hashtags spécifiques (si absent → global `hashtags`)
+#   mentions : liste de comptes spécifiques (si absent → global `safe_mentions`)
+# Exemple prêt à remplir — laisse vide ou retire pour utiliser le global.
+per_gallery:
+  barcelone:
+    hashtags:
+      - "#streetphotography"
+      - "#barcelonastreet"
+      - "#bcn"
+      - "#bnw_barcelona"
+      - "#visitbarcelona"
+      - "#spicollective"
+    mentions:
+      - visitbarcelona
+      - streetclassics
+  new-york:
+    hashtags:
+      - "#streetphotography"
+      - "#nycstreet"
+      - "#newyork_instagram"
+      - "#bnw_nyc"
+      - "#nyc"
+      - "#magnumphotos"
+    mentions:
+      - magnumphotos
+      - streetphotographyinternational
+  tokyo:
+    hashtags:
+      - "#tokyostreet"
+      - "#tokyocameraclub"
+      - "#streetphotography"
+      - "#bnw_tokyo"
+      - "#japan_of_insta"
+      - "#leica_street"
+    mentions:
+      - tokyocameraclub
+      - leica_street
+  casablanca:
+    hashtags:
+      - "#casablanca"
+      - "#streetphotographymorocco"
+      - "#bnw_morocco"
+      - "#morocco_travel"
+      - "#streetphotography"
+      - "#ig_morocco"
+    mentions:
+      - ig_morocco
+      - streetphotographyinternational

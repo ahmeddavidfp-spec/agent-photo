@@ -1,81 +1,59 @@
-"""Génération des captions via OpenAI."""
+"""Génération des captions en pipeline 2 passes.
+
+Pass 1 — OpenAI Vision (gpt-4o) : description factuelle de la photo.
+Pass 2 — Claude Sonnet si ANTHROPIC_API_KEY, sinon OpenAI : caption bilingue + alt.
+
+Si un pass plante, on retombe proprement sur un fallback pour ne jamais bloquer la publication.
+"""
 import logging
 import re
 import time
 from pathlib import Path
-from typing import Tuple
+from typing import List, Optional, Tuple
 
 from openai import APIConnectionError, APITimeoutError, OpenAI, RateLimitError
 
-from settings import OPENAI_API_KEY, OPENAI_MODEL, load_yaml_config
+from settings import (
+    ANTHROPIC_API_KEY,
+    ANTHROPIC_MODEL,
+    OPENAI_API_KEY,
+    OPENAI_MODEL,
+    load_yaml_config,
+)
 
 logger = logging.getLogger(__name__)
 
-# Paramètres retry (uniquement erreurs transitoires)
+# Paramètres retry (uniquement erreurs transitoires réseau / rate limit)
 MAX_ATTEMPTS = 3
 BACKOFF_BASE = 2.0  # 2s, 4s, 8s
 
-# Comptes influents (Street/Architecture) — pas trop, pour rester pertinent
-SAFE_ACCOUNTS = [
+SEPARATOR = "|||"
+PROMPTS_DIR = Path(__file__).parent / "prompts"
+
+# Fallback global si aucun safe_mentions dans config.yaml
+DEFAULT_SAFE_ACCOUNTS = [
     "archdaily", "architecture_hunter", "streetclassics", "urbanromantix",
     "raw_urbanshots", "bnw_planet", "lensculture", "magnumphotos",
     "somewheremagazine", "artofvisuals", "moodygrams",
     "streetphotographyinternational", "leica_camera", "leica_street",
 ]
 
-SEPARATOR = "|||"
+DEFAULT_HASHTAGS = (
+    "#streetphotography #spicollective #street_perfection #burnmyeye "
+    "#bnw_demand #leicaphotography #davidahmed #leica #bnw"
+)
 
 
-def _load_prompt_template() -> str:
-    """Le prompt est externalisé dans prompts/caption.txt pour pouvoir itérer sans redéployer."""
-    path = Path(__file__).parent / "prompts" / "caption.txt"
-    if path.exists():
-        return path.read_text(encoding="utf-8")
-    return DEFAULT_TEMPLATE
+# =============================================================================
+# UTILITAIRES
+# =============================================================================
 
-
-DEFAULT_TEMPLATE = """You are David Ahmed, fine art photographer. Analyze this photo of {galerie}.
-TASK: Create a high-engagement caption with Hook, Story, Question, and SEO.
-
-CRITICAL RULES:
-1. START with English. THEN French.
-2. KEEP IT SHORT. Total output under 490 characters (Strict).
-3. NO labels (Title:, Caption:, etc.).
-4. NO Markdown.
-5. SEPARATOR "{sep}" for Alt Text at the end.
-6. DO NOT invent technical specs (EXIFs).
-
-CONTENT BLOCKS:
-1. THE HOOK: A stop-scrolling title (Journalistic/Emotional).
-2. THE STORY: 1 sentence context (EN then FR).
-3. THE QUESTION: A short, open-ended question to provoke comments. EN & FR.
-4. THE CTA: A short invitation pointing down (e.g. "Full series / Série complète 👇").
-5. MENTIONS: Pick the 2 most relevant accounts from: [{accounts}].
-6. HASHTAGS (3-Tier Strategy):
-   - Tier 1 (Niche)
-   - Tier 2 (Specific Location)
-   - Tier 3 (Vibe/Style)
-   *Max 5 hashtags.*
-
-VISUAL STYLE:
-- Use subtle emojis to structure (e.g. 📍 for location in the story, 👇 for CTA).
-- Keep it airy (line breaks).
-
-STRUCTURE:
-[HOOK EN]
-[Story EN]
-[Question EN]
-
-[HOOK FR]
-[Story FR]
-[Question FR]
-
-[Short CTA]
-{display_link}
-(cc @account1 @account2)
-[Hashtags]
-{sep}
-[Visual description]"""
+def _load_prompt(name: str) -> str:
+    """Charge un prompt depuis prompts/<name>."""
+    path = PROMPTS_DIR / name
+    if not path.exists():
+        raise FileNotFoundError(f"Prompt manquant : {path}")
+    return path.read_text(encoding="utf-8")
 
 
 def split_content(text: str) -> Tuple[str, str]:
@@ -83,7 +61,7 @@ def split_content(text: str) -> Tuple[str, str]:
     if SEPARATOR in text:
         caption, alt = text.split(SEPARATOR, 1)
         return caption.strip(), alt.strip()
-    return text.strip(), "Art photography by David Ahmed"
+    return text.strip(), "Fine art photography by David Ahmed."
 
 
 def _clean_link_duplicates(caption: str, display_link: str) -> str:
@@ -97,31 +75,67 @@ def _clean_link_duplicates(caption: str, display_link: str) -> str:
     return "\n".join(out).strip()
 
 
-def generate_caption(image_url: str, galerie: str) -> str:
-    """Retourne `caption|||alt`. En cas d'échec, renvoie un fallback propre."""
-    if not OPENAI_API_KEY:
-        logger.warning("OPENAI_API_KEY absente, caption par défaut.")
-        return _fallback_caption(galerie)
+def _strip_labels(text: str) -> str:
+    """Supprime les labels résiduels de type 'Hook:' 'EN:' etc."""
+    cleaned = text.replace("```markdown", "").replace("```", "").strip()
+    cleaned = re.sub(
+        r"^\s*(Titre|Title|Caption|English|French|Français|Hook|Story|Question|EN|FR|Alt\s*Text|Alt)\s*:\s*",
+        "",
+        cleaned,
+        flags=re.IGNORECASE | re.MULTILINE,
+    )
+    return cleaned
 
-    config = load_yaml_config()
-    base_url = (
-        config.get("site_url", "davidahmed.me")
-        .replace("https://", "")
-        .replace("http://", "")
-        .rstrip("/")
-    )
-    display_link = f"{base_url}/{galerie}"
-    template = _load_prompt_template()
-    prompt = template.format(
-        galerie=galerie,
-        sep=SEPARATOR,
-        accounts=", ".join(SAFE_ACCOUNTS),
-        display_link=display_link,
-    )
+
+def _resolve_gallery_assets(galerie: str, config: dict) -> Tuple[List[str], List[str]]:
+    """Retourne (hashtags, mentions) pour une galerie donnée.
+
+    Priorité : config.per_gallery[galerie] > config global > défauts du code.
+    """
+    per_gallery = (config.get("per_gallery") or {}).get(galerie, {}) or {}
+
+    # Hashtags
+    tags = per_gallery.get("hashtags")
+    if not tags:
+        global_tags = config.get("hashtags", DEFAULT_HASHTAGS)
+        if isinstance(global_tags, str):
+            tags = [t for t in global_tags.split() if t.startswith("#")]
+        elif isinstance(global_tags, list):
+            tags = list(global_tags)
+        else:
+            tags = DEFAULT_HASHTAGS.split()
+
+    # Mentions
+    mentions = per_gallery.get("mentions")
+    if not mentions:
+        mentions = config.get("safe_mentions") or DEFAULT_SAFE_ACCOUNTS
+
+    return list(tags), list(mentions)
+
+
+def _voice_examples(config: dict) -> str:
+    """Extrait les exemples de voix du config, ou chaîne vide."""
+    raw = config.get("voice_examples") or ""
+    return raw.strip() or "(aucun exemple fourni — reste factuel, court, cinématographique)"
+
+
+# =============================================================================
+# PASS 1 — DESCRIPTION FACTUELLE (OpenAI Vision)
+# =============================================================================
+
+def _describe_image(image_url: str, galerie: str) -> Optional[str]:
+    """Retourne une description factuelle ~80 mots. None si échec complet."""
+    if not OPENAI_API_KEY:
+        logger.warning("OPENAI_API_KEY absente, pas de description.")
+        return None
+
+    try:
+        prompt = _load_prompt("describe.txt").format(galerie=galerie)
+    except FileNotFoundError as e:
+        logger.error("Prompt describe introuvable : %s", e)
+        return None
 
     client = OpenAI(api_key=OPENAI_API_KEY, timeout=60.0)
-    response = None
-    last_err: Exception | None = None
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
@@ -135,45 +149,173 @@ def generate_caption(image_url: str, galerie: str) -> str:
                          "image_url": {"url": image_url, "detail": "high"}},
                     ],
                 }],
-                max_tokens=700,
-                temperature=0.7,
+                max_tokens=300,
+                temperature=0.3,  # plus factuel
             )
-            break
+            desc = (response.choices[0].message.content or "").strip()
+            # Nettoyage léger
+            desc = desc.replace("```", "").strip()
+            if desc:
+                logger.info("Pass 1 (describe) OK : %d chars", len(desc))
+                return desc
+            logger.warning("Pass 1 retourne vide (tentative %d)", attempt)
         except (APIConnectionError, APITimeoutError, RateLimitError) as e:
-            last_err = e
             wait = BACKOFF_BASE ** attempt
-            logger.warning("OpenAI retry %d/%d dans %.1fs : %s",
+            logger.warning("Pass 1 retry %d/%d dans %.1fs : %s",
                            attempt, MAX_ATTEMPTS, wait, e)
             if attempt < MAX_ATTEMPTS:
                 time.sleep(wait)
         except Exception as e:
-            logger.error("OpenAI erreur non-retryable : %s", e)
-            return _fallback_caption(galerie)
+            logger.error("Pass 1 erreur non-retryable : %s", e)
+            return None
 
-    if response is None:
-        logger.error("OpenAI a échoué après %d tentatives : %s", MAX_ATTEMPTS, last_err)
-        return _fallback_caption(galerie)
+    logger.error("Pass 1 a échoué après %d tentatives.", MAX_ATTEMPTS)
+    return None
 
-    raw = response.choices[0].message.content or ""
-    raw = raw.replace("```markdown", "").replace("```", "").strip()
-    # Retire les labels résiduels ("Title:", "Hook:", etc.)
-    raw = re.sub(
-        r"^(Titre|Title|Caption|English|French|Hook|Story|Question)\s*:\s*",
-        "",
-        raw,
-        flags=re.IGNORECASE | re.MULTILINE,
+
+# =============================================================================
+# PASS 2 — CAPTION BILINGUE (Claude en priorité, fallback OpenAI)
+# =============================================================================
+
+def _build_caption_prompt(
+    description: str, galerie: str, display_link: str, config: dict,
+) -> str:
+    """Assemble le prompt pass 2 à partir du template et du config."""
+    template = _load_prompt("caption.txt")
+    tags, mentions = _resolve_gallery_assets(galerie, config)
+    return template.format(
+        galerie=galerie,
+        sep=SEPARATOR,
+        display_link=display_link,
+        description=description,
+        voice_examples=_voice_examples(config),
+        accounts=", ".join(mentions),
+        hashtags=" ".join(tags),
     )
 
+
+def _write_caption_with_claude(prompt: str) -> Optional[str]:
+    """Pass 2 via Claude. Retourne le texte brut ou None en cas d'échec."""
+    if not ANTHROPIC_API_KEY:
+        return None
+    try:
+        from anthropic import Anthropic, APIConnectionError as AntConn, APITimeoutError as AntTime, RateLimitError as AntRate  # noqa
+    except ImportError:
+        logger.warning("anthropic non installé, fallback OpenAI pour pass 2.")
+        return None
+
+    client = Anthropic(api_key=ANTHROPIC_API_KEY, timeout=60.0)
+
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            msg = client.messages.create(
+                model=ANTHROPIC_MODEL,
+                max_tokens=1500,
+                temperature=0.8,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            # msg.content est une liste de blocs (text blocks)
+            parts = [
+                getattr(b, "text", "") for b in (msg.content or [])
+                if getattr(b, "type", "") == "text"
+            ]
+            out = "\n".join(p for p in parts if p).strip()
+            if out:
+                logger.info("Pass 2 (Claude) OK : %d chars", len(out))
+                return out
+            logger.warning("Pass 2 Claude retourne vide (tentative %d)", attempt)
+        except (AntConn, AntTime, AntRate) as e:  # type: ignore[misc]
+            wait = BACKOFF_BASE ** attempt
+            logger.warning("Pass 2 Claude retry %d/%d dans %.1fs : %s",
+                           attempt, MAX_ATTEMPTS, wait, e)
+            if attempt < MAX_ATTEMPTS:
+                time.sleep(wait)
+        except Exception as e:
+            logger.error("Pass 2 Claude erreur non-retryable : %s", e)
+            return None
+
+    return None
+
+
+def _write_caption_with_openai(prompt: str) -> Optional[str]:
+    """Pass 2 via OpenAI (texte seul, pas d'image). Fallback si Claude absent."""
+    if not OPENAI_API_KEY:
+        return None
+    client = OpenAI(api_key=OPENAI_API_KEY, timeout=60.0)
+
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            response = client.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1500,
+                temperature=0.8,
+            )
+            out = (response.choices[0].message.content or "").strip()
+            if out:
+                logger.info("Pass 2 (OpenAI) OK : %d chars", len(out))
+                return out
+        except (APIConnectionError, APITimeoutError, RateLimitError) as e:
+            wait = BACKOFF_BASE ** attempt
+            logger.warning("Pass 2 OpenAI retry %d/%d dans %.1fs : %s",
+                           attempt, MAX_ATTEMPTS, wait, e)
+            if attempt < MAX_ATTEMPTS:
+                time.sleep(wait)
+        except Exception as e:
+            logger.error("Pass 2 OpenAI erreur non-retryable : %s", e)
+            return None
+
+    return None
+
+
+# =============================================================================
+# ORCHESTRATION
+# =============================================================================
+
+def generate_caption(image_url: str, galerie: str) -> str:
+    """Retourne `caption|||alt`. Fallback propre si tout casse."""
+    config = load_yaml_config()
+    base_url = (
+        config.get("site_url", "davidahmed.me")
+        .replace("https://", "")
+        .replace("http://", "")
+        .rstrip("/")
+    )
+    display_link = f"{base_url}/{galerie}"
+
+    # --- Pass 1 : description factuelle
+    description = _describe_image(image_url, galerie)
+    if not description:
+        logger.warning("Pas de description, fallback caption.")
+        return _fallback_caption(galerie, display_link)
+
+    # --- Pass 2 : écriture de la caption
+    prompt = _build_caption_prompt(description, galerie, display_link, config)
+
+    raw = _write_caption_with_claude(prompt)
+    if not raw:
+        logger.info("Pass 2 : fallback sur OpenAI.")
+        raw = _write_caption_with_openai(prompt)
+
+    if not raw:
+        logger.error("Pass 2 a totalement échoué, fallback caption.")
+        return _fallback_caption(galerie, display_link)
+
+    # Nettoyage post-génération
+    raw = _strip_labels(raw)
     caption, alt = split_content(raw)
     caption = _clean_link_duplicates(caption, display_link)
     alt = alt or f"Fine art photography of {galerie} by David Ahmed."
     return f"{caption}{SEPARATOR}{alt}"
 
 
-def _fallback_caption(galerie: str) -> str:
-    config = load_yaml_config()
-    base = config.get("site_url", "davidahmed.me").replace("https://", "").replace("http://", "").rstrip("/")
+def _fallback_caption(galerie: str, display_link: str) -> str:
+    """Caption minimale mais publiable en cas d'échec total de l'IA."""
     return (
-        f"Photo of {galerie}\nPhoto de {galerie}\n\n{base}/{galerie}"
-        f"{SEPARATOR}Art photography by David Ahmed"
+        f"Photo of {galerie}\n"
+        f"Photo de {galerie}\n\n"
+        f"Full series / Série complète 👇\n"
+        f"{display_link}"
+        f"{SEPARATOR}"
+        f"Fine art photography by David Ahmed from the {galerie} gallery."
     )

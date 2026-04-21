@@ -27,6 +27,13 @@ THREADS_CLIENT_SECRET = os.environ.get("THREADS_CLIENT_SECRET", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
 
+# --- Anthropic (pass 2 writing, optionnel) ---
+# Si ANTHROPIC_API_KEY est présente, on utilise Claude pour écrire la caption
+# à partir de la description générée par OpenAI (pass 1 vision).
+# Sinon on retombe sur OpenAI pour les deux passes.
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+
 # Jeton optionnel pour sécuriser l'endpoint /cron/*
 CRON_SECRET = os.environ.get("CRON_SECRET", "")
 
