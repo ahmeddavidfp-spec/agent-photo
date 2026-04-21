@@ -4,6 +4,7 @@ Schema :
 - sent_photos(url PK, galerie, date_envoi)
 - current_session(chat_id PK, last_url, last_caption)
 - scheduled_posts(id PK, chat_id, image_url, caption, run_at, status)
+- token_store(key PK, value, updated_at)   ← tokens Meta renouvelés
 
 Tous les accès passent par un context manager `connection()` qui garantit
 la fermeture et le commit.
@@ -57,6 +58,10 @@ def init_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_sent_galerie "
             "ON sent_photos(galerie)"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS token_store ("
+            "key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
         )
 
         # Migrations douces : ajout de colonnes si manquantes
@@ -176,3 +181,38 @@ def set_scheduled_status(post_id: int, status: str) -> None:
             "UPDATE scheduled_posts SET status = ? WHERE id = ?",
             (status, post_id),
         )
+
+
+# --- Token store (persistance des tokens Meta renouvelés) ---
+# Permet au cron de sauvegarder automatiquement les nouveaux tokens
+# sans devoir toucher aux variables d'env Render. Au boot, les fonctions
+# de meta_api lisent en priorité le DB, puis retombent sur les env vars
+# si rien n'est stocké (bootstrap initial).
+
+def get_stored_token(key: str) -> Optional[str]:
+    """Retourne le token stocké en DB, ou None si absent."""
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT value FROM token_store WHERE key = ?", (key,)
+        ).fetchone()
+    return row[0] if row and row[0] else None
+
+
+def save_token(key: str, value: str) -> None:
+    """Sauvegarde un token renouvelé, avec horodatage."""
+    with connection() as conn:
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute(
+            "INSERT OR REPLACE INTO token_store (key, value, updated_at) "
+            "VALUES (?, ?, ?)",
+            (key, value, now),
+        )
+
+
+def token_last_update(key: str) -> Optional[str]:
+    """Retourne la date du dernier refresh (string SQL), ou None."""
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT updated_at FROM token_store WHERE key = ?", (key,)
+        ).fetchone()
+    return row[0] if row and row[0] else None
