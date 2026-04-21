@@ -19,6 +19,9 @@ IG_ACCESS_TOKEN = os.environ.get("IG_ACCESS_TOKEN", "")
 # Accepte IG_USER_ID (v2) ou INSTAGRAM_BUSINESS_ID (nom historique Render).
 IG_USER_ID = os.environ.get("IG_USER_ID") or os.environ.get("INSTAGRAM_BUSINESS_ID", "")
 IG_CLIENT_SECRET = os.environ.get("IG_CLIENT_SECRET", "")
+# App ID Meta — NON secret (visible dans toutes les URLs du dashboard FB Developers).
+# Accepte IG_APP_ID ou FB_APP_ID (même valeur côté Meta).
+IG_APP_ID = os.environ.get("IG_APP_ID") or os.environ.get("FB_APP_ID", "")
 
 THREADS_ACCESS_TOKEN = os.environ.get("THREADS_ACCESS_TOKEN", "")
 THREADS_USER_ID = os.environ.get("THREADS_USER_ID", "")

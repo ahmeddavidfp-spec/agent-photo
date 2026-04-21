@@ -9,6 +9,7 @@ from http_client import safe_get, safe_post
 from settings import (
     FB_API,
     IG_ACCESS_TOKEN,
+    IG_APP_ID,
     IG_CLIENT_SECRET,
     IG_USER_ID,
     TH_API,
@@ -33,15 +34,21 @@ POLL_MAX_ATTEMPTS_TH = 8   # 24s avant tentative optimiste
 # =========================================================================
 
 def renew_threads_token() -> Tuple[bool, object]:
-    """Échange le token Threads actuel contre un nouveau valide 60j."""
-    if not (THREADS_ACCESS_TOKEN and THREADS_CLIENT_SECRET):
-        return False, "THREADS_CLIENT_SECRET ou THREADS_ACCESS_TOKEN manquant"
+    """Rafraîchit le token Threads long-lived contre un nouveau valide 60j.
+
+    Deux endpoints distincts côté Meta Threads :
+    - /access_token?grant_type=th_exchange_token : short-lived → long-lived (initial).
+    - /refresh_access_token?grant_type=th_refresh_token : long-lived → long-lived (refresh).
+    Le token sur Render est déjà long-lived (issu du flux initial), donc on utilise
+    l'endpoint refresh. Celui-ci n'exige PAS de client_secret.
+    """
+    if not THREADS_ACCESS_TOKEN:
+        return False, "THREADS_ACCESS_TOKEN manquant"
     try:
         r = safe_get(
-            "https://graph.threads.net/access_token",
+            "https://graph.threads.net/refresh_access_token",
             params={
-                "grant_type": "th_exchange_token",
-                "client_secret": THREADS_CLIENT_SECRET,
+                "grant_type": "th_refresh_token",
                 "access_token": THREADS_ACCESS_TOKEN,
             },
         )
@@ -56,14 +63,25 @@ def renew_threads_token() -> Tuple[bool, object]:
 
 
 def renew_instagram_token() -> Tuple[bool, object]:
-    """Échange le token IG actuel contre un nouveau valide 60j."""
-    if not (IG_ACCESS_TOKEN and IG_CLIENT_SECRET):
-        return False, "IG_CLIENT_SECRET ou IG_ACCESS_TOKEN manquant"
+    """Échange le token IG actuel contre un nouveau valide 60j.
+
+    Meta Graph API exige client_id (App ID) ET client_secret pour l'endpoint
+    fb_exchange_token. L'App ID est public (visible dans les URLs du dashboard
+    Meta for Developers), pas un secret.
+    """
+    missing = [name for name, val in [
+        ("IG_ACCESS_TOKEN", IG_ACCESS_TOKEN),
+        ("IG_CLIENT_SECRET", IG_CLIENT_SECRET),
+        ("IG_APP_ID", IG_APP_ID),
+    ] if not val]
+    if missing:
+        return False, f"Variables manquantes : {', '.join(missing)}"
     try:
         r = safe_get(
             "https://graph.facebook.com/v21.0/oauth/access_token",
             params={
                 "grant_type": "fb_exchange_token",
+                "client_id": IG_APP_ID,
                 "client_secret": IG_CLIENT_SECRET,
                 "fb_exchange_token": IG_ACCESS_TOKEN,
             },
