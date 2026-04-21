@@ -19,9 +19,11 @@ from settings import (
 
 logger = logging.getLogger(__name__)
 
-# Polling max : 90s pour IG (vidéos lentes), 60s pour images suffit largement
+# Polling : on attend jusqu'à 2 min que Meta marque FINISHED.
+# Si timeout, on tente la publish quand même (Meta est parfois lent à
+# mettre à jour le statut alors que le conteneur est prêt — comportement v1).
 POLL_INTERVAL = 3
-POLL_MAX_ATTEMPTS = 30
+POLL_MAX_ATTEMPTS = 40  # 40*3 = 120s
 
 
 # =========================================================================
@@ -108,9 +110,18 @@ def token_status() -> str:
 # POLLING DU STATUT DES CONTENEURS MEDIA
 # =========================================================================
 
-def _poll_container_status(container_id: str, access_token: str, base_url: str) -> bool:
-    """Sonde status_code jusqu'à FINISHED, ERROR ou timeout."""
+def _poll_container_status(container_id: str, access_token: str, base_url: str) -> str:
+    """Sonde le statut du conteneur.
+
+    Retourne :
+      - "finished" : Meta a confirmé FINISHED / PUBLISHED → publish safe
+      - "error"    : Meta a explicitement renvoyé ERROR / EXPIRED → ne pas publier
+      - "timeout"  : pas de réponse claire après POLL_MAX_ATTEMPTS
+                     → tenter la publish quand même (Meta est parfois lent
+                     à mettre à jour, comportement historique v1).
+    """
     url = f"https://graph.facebook.com/v21.0/{container_id}" if "facebook" in base_url else f"https://graph.threads.net/v1.0/{container_id}"
+    last_status = None
     for attempt in range(POLL_MAX_ATTEMPTS):
         try:
             r = safe_get(
@@ -119,16 +130,24 @@ def _poll_container_status(container_id: str, access_token: str, base_url: str) 
             )
             data = r.json()
             status = data.get("status_code") or data.get("status")
+            last_status = status
             if status in ("FINISHED", "PUBLISHED"):
-                return True
+                return "finished"
             if status in ("ERROR", "EXPIRED"):
                 logger.error("Container %s status=%s data=%s", container_id, status, data)
-                return False
+                return "error"
+            # Log discret toutes les 10 tentatives pour voir la progression
+            if (attempt + 1) % 10 == 0:
+                logger.info("Container %s still %s after %ds",
+                            container_id, status, (attempt + 1) * POLL_INTERVAL)
         except Exception as e:
             logger.warning("Poll attempt %d failed: %s", attempt + 1, e)
         time.sleep(POLL_INTERVAL)
-    logger.error("Container %s polling timeout", container_id)
-    return False
+    logger.warning(
+        "Container %s polling timeout (last_status=%s) — tentative publish quand même",
+        container_id, last_status,
+    )
+    return "timeout"
 
 
 # =========================================================================
@@ -158,16 +177,22 @@ def publish_to_instagram(image_url: str, full_text: str) -> Tuple[bool, str]:
         if not container_id:
             return False, str(data)
 
-        # Polling au lieu de sleep fixe
-        if not _poll_container_status(container_id, IG_ACCESS_TOKEN, FB_API):
-            return False, "Container IG pas FINISHED"
+        # Polling. Si timeout, on tente la publish quand même.
+        poll = _poll_container_status(container_id, IG_ACCESS_TOKEN, FB_API)
+        if poll == "error":
+            return False, "Container IG ERROR côté Meta"
 
         pub = safe_post(
             f"{FB_API}{IG_USER_ID}/media_publish",
             data={"creation_id": container_id, "access_token": IG_ACCESS_TOKEN},
         )
         if pub.status_code != 200:
-            return False, str(pub.json())
+            err = str(pub.json())
+            # Si on était en timeout et que la publish renvoie vraiment un échec,
+            # c'est que le conteneur n'était pas prêt.
+            if poll == "timeout":
+                return False, f"Container IG pas prêt (timeout polling) : {err}"
+            return False, err
         return True, "OK"
     except Exception as e:
         logger.exception("publish_to_instagram error")
@@ -207,15 +232,19 @@ def publish_to_threads(image_url: str, full_text: str) -> Tuple[bool, str]:
         if not container_id:
             return False, str(data)
 
-        if not _poll_container_status(container_id, THREADS_ACCESS_TOKEN, TH_API):
-            return False, "Container TH pas FINISHED"
+        poll = _poll_container_status(container_id, THREADS_ACCESS_TOKEN, TH_API)
+        if poll == "error":
+            return False, "Container TH ERROR côté Meta"
 
         pub = safe_post(
             f"{TH_API}{THREADS_USER_ID}/threads_publish",
             data={"creation_id": container_id, "access_token": THREADS_ACCESS_TOKEN},
         )
         if pub.status_code != 200:
-            return False, str(pub.json())
+            err = str(pub.json())
+            if poll == "timeout":
+                return False, f"Container TH pas prêt (timeout polling) : {err}"
+            return False, err
         return True, "OK"
     except Exception as e:
         logger.exception("publish_to_threads error")
