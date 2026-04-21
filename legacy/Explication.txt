@@ -1,0 +1,79 @@
+Voici une documentation technique structurée, conçue pour un développeur qui découvrirait le projet "Agent Photo" dans 10 ans. Elle détaille l'architecture, le fonctionnement et la maintenance du système.
+
+---
+
+# 📖 Documentation Technique : Agent Photo (David Ahmed)
+
+## 1. Vue d'Ensemble
+
+L'**Agent Photo** est un écosystème d'automatisation conçu pour un photographe d'art. Son rôle est de transformer un site web vitrine en une source de contenu pour les réseaux sociaux.
+
+L'agent extrait des images depuis `davidahmed.me`, utilise l'Intelligence Artificielle pour analyser la composition artistique, puis publie ces images sur **Instagram** et **Threads** via un bot **Telegram** servant d'interface de contrôle.
+
+## 2. Architecture Technique
+
+Le projet repose sur une architecture légère en Python :
+
+* **Interface utilisateur** : Bot Telegram (via Webhooks).
+* 
+**Serveur Backend** : Flask (Python) hébergé sur Render.com.
+
+
+* **Base de données** : SQLite (`photos.db`) pour le suivi des publications et des sessions.
+* **Moteur d'IA** : OpenAI (Modèle GPT-4o avec Vision).
+* **APIs Tierces** : Meta Graph API (Instagram & Threads).
+
+## 3. Composants Clés du Code
+
+### `app.py` (Le Cœur)
+
+C'est le fichier principal qui gère :
+
+* **Scraping** : Utilise `BeautifulSoup` pour extraire les URLs des photos depuis les galeries du site web.
+* **Analyse Expert** : La fonction `generate_ai_caption` envoie l'URL de l'image à OpenAI avec des instructions strictes : ton cinématographique, analyse technique (règle des tiers, lumière) et nettoyage automatique des caractères spéciaux (comme les `**`).
+* **Publication** : Les fonctions `publish_to_instagram` et `publish_to_threads` gèrent l'envoi asynchrone (upload puis publication) vers les serveurs de Meta.
+
+### `config.yaml` (Le Cerveau)
+
+Ce fichier contient toute la configuration métier :
+
+* **Galeries** : Liste des répertoires du site à surveiller (ex: `barcelone`, `ljubljana`).
+* **Ton de l'IA** : Définit la personnalité de l'agent (mélancolique, épuré, film noir).
+* **Hashtags** : Liste fixe des tags de visibilité utilisés par défaut.
+
+## 4. Gestion des Accès (Point Critique)
+
+Le système utilise des **Jetons d'accès longue durée (Long-Lived Tokens)** de Meta.
+
+* **Vérification** : Le menu Telegram affiche un tableau de bord (`get_token_status`) indiquant si les jetons sont valides ou leur date d'expiration.
+* 
+**Renouvellement** : Les jetons Instagram doivent être renouvelés tous les 60 jours via l'URL d'échange stockée dans le fichier `Dernier Token Insta`.
+
+
+
+## 5. Flux de Travail (Workflow)
+
+1. Le développeur/utilisateur sélectionne une galerie sur Telegram.
+2. L'agent choisit aléatoirement une photo non encore publiée (vérification via `sent_photos` dans SQLite).
+3. L'IA génère une légende "Expert".
+4. L'utilisateur a trois choix :
+* **🚀 Publier** : Envoi immédiat.
+* **📍 Lieu** : Ajout manuel d'une localisation géographique.
+* **✍️ Manuel** : Réécriture totale de la légende.
+* **📅 Programmer** : Définit une heure de publication.
+
+
+
+## 6. Maintenance et Debugging
+
+* **Base de données** : Si le fichier `photos.db` est supprimé, l'agent risque de republier d'anciennes photos. Il est stocké sur un volume persistant (`/data/`) sur Render.
+* **Logs** : En cas d'échec de publication, la réponse brute de l'API Meta est renvoyée dans le chat Telegram pour diagnostic.
+* **Déploiement** : Le projet est déployé via Git. Toute modification sur la branche `main` déclenche un nouveau build sur Render via le `Procfile`.
+
+
+
+---
+
+*Note pour 2036 : Assurez-vous que les endpoints de l'API Meta (v21.0 à l'époque) sont toujours compatibles ou mettez à jour les versions dans les URLs de requête.*
+
+**David, cette documentation est prête à être enregistrée dans ton dépôt Git. Souhaites-tu que je t'explique comment créer un fichier `README.md` pour l'inclure proprement à la racine du projet ?**

@@ -1,0 +1,9 @@
+.env
+.env.*
+!.env.example
+*.pyc
+__pycache__/
+.DS_Store
+photos.db
+/tmp/
+"Dernier Token Insta"

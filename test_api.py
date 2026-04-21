@@ -1,44 +1,85 @@
-import os, requests
+"""Smoke test : publie une image optimisée sur Threads pour vérifier le flow.
 
-# --- CONFIGURATION (Remplace par tes vraies valeurs pour le test local) ---
-TOKEN = "EAAMVZA8ZA7xwIBQs7XDMULNZAYgo7jKZATPWWpgH1VGNMUZC6YVUjnFc5QxnI14hVuaFoVjN6xTmVJ4AsRZA1gLRecYqBdzL7kB72OH3hH8RMkjmI1LHsHGLczW9TZC0VaZA6ZCS0FuUBwFBTJNud1oLnBSxzxfutrZAN1ZBhETmUgHS7zyKjGRIJRZCtpUZCvc1oz1kOMmdOGhFYLLBYzAoc6XZADejJ1sgKxb5g0ZAUXSIOR7IUZAGHqtdB7QCtr0dOuFoB0rv9cJ2sy0vi4BUuNtGSu1vbHGb" # Ton jeton complet
-FB_PAGE_ID = "1922962171929204"
-IG_BUSINESS_ID = "17841453263147553"
-THREADS_USER_ID = "25679272328409797" # À vérifier
+Lance-le avec :
+    THREADS_ACCESS_TOKEN=xxx THREADS_USER_ID=yyy python test_api.py [URL]
 
-def test_connections():
-    print("🚀 DÉMARRAGE DU TEST DES CONNEXIONS META\n")
+URL par défaut : image de démonstration Squarespace. On ajoute ?format=1000w
+automatiquement (c'est la clé pour que Meta ingère rapidement).
+"""
+import os
+import sys
 
-    # 1. TEST FACEBOOK
-    print("📘 Test Facebook Page...")
-    fb_url = f"https://graph.facebook.com/v19.0/{FB_PAGE_ID}?fields=name&access_token={TOKEN}"
-    res_fb = requests.get(fb_url).json()
-    if 'name' in res_fb:
-        print(f"   ✅ Connecté à la page : {res_fb['name']}")
-    else:
-        print(f"   ❌ Erreur FB : {res_fb}")
+from http_client import safe_get, safe_post
+from meta_api import _poll_container_status  # type: ignore
+from settings import TH_API, THREADS_ACCESS_TOKEN, THREADS_USER_ID
 
-    # 2. TEST INSTAGRAM
-    print("\n📸 Test Instagram Pro...")
-    ig_url = f"https://graph.facebook.com/v19.0/{IG_BUSINESS_ID}?fields=username&access_token={TOKEN}"
-    res_ig = requests.get(ig_url).json()
-    if 'username' in res_ig:
-        print(f"   ✅ Connecté à Instagram : @{res_ig['username']}")
-    else:
-        print(f"   ❌ Erreur IG : {res_ig}")
 
-    # 3. TEST THREADS
-    print("\n🧵 Test Threads...")
-    # On vérifie si le token a la permission Threads
-    th_url = f"https://graph.threads.net/v1.0/me?fields=id,username&access_token={TOKEN}"
-    try:
-        res_th = requests.get(th_url).json()
-        if 'id' in res_th:
-            print(f"   ✅ Connecté à Threads : @{res_th['username']} (ID: {res_th['id']})")
-        else:
-            print(f"   ❌ Erreur Threads : {res_th}")
-    except:
-        print("   ❌ Erreur Threads : Impossible de joindre l'API Threads.")
+DEFAULT_IMAGE = (
+    "https://images.squarespace-cdn.com/content/v1/6274e5dd88ff573e9bd7999d/"
+    "b718eaa4-540f-46bb-9b39-42b44b1ea580/L1012292.jpg"
+)
+
+
+def test_publish(image_url: str) -> int:
+    token = THREADS_ACCESS_TOKEN
+    user_id = THREADS_USER_ID
+
+    if not (token and user_id):
+        print("❌ THREADS_ACCESS_TOKEN / THREADS_USER_ID manquants.")
+        return 1
+
+    optimized = image_url.split("?")[0] + "?format=1000w"
+    print(f"📉 URL d'origine : {image_url}")
+    print(f"✅ URL optimisée : {optimized}")
+
+    # 1. Vérification identité
+    r = safe_get(
+        f"{TH_API}me",
+        params={"fields": "id,username", "access_token": token},
+    )
+    me = r.json()
+    if "id" not in me:
+        print(f"❌ Token invalide : {me}")
+        return 2
+    print(f"👤 Compte : @{me.get('username')} (id={me['id']})")
+
+    # 2. Création conteneur
+    print("\n📸 Création du conteneur...")
+    r = safe_post(
+        f"{TH_API}{user_id}/threads",
+        data={
+            "media_type": "IMAGE",
+            "image_url": optimized,
+            "text": "Test Image Optimisée (1000px) 🧪",
+            "access_token": token,
+        },
+    )
+    res = r.json()
+    if "id" not in res:
+        print(f"❌ Création échouée : {res}")
+        return 3
+    container_id = res["id"]
+    print(f"✅ Conteneur : {container_id}")
+
+    # 3. Polling au lieu de sleep fixe
+    print("⏳ Polling FINISHED...")
+    if not _poll_container_status(container_id, token, TH_API):
+        print("❌ Conteneur pas FINISHED")
+        return 4
+
+    # 4. Publication
+    pub = safe_post(
+        f"{TH_API}{user_id}/threads_publish",
+        data={"creation_id": container_id, "access_token": token},
+    )
+    pub_res = pub.json()
+    if "id" in pub_res:
+        print("🎉 VICTOIRE !")
+        return 0
+    print(f"❌ Publication ratée : {pub_res}")
+    return 5
+
 
 if __name__ == "__main__":
-    test_connections()
+    url = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_IMAGE
+    sys.exit(test_publish(url))

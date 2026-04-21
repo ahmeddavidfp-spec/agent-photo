@@ -1,5 +1,10 @@
-https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret={TON_CLIENT_SECRET}&access_token={TON_SHORT_LIVED_TOKEN}
-
-
-
-IGAAg1KZBB3spRBZAFp5ZAm9ORVNHbS1wVEw3ZAVdiNm9XTXhMUzlYQ1lLcVlFd0tCNU1acUVRR1pkN3FOT0FiVnNnZAWRjWXg1MmVEZAno1bHY1bG1Ca2FFWmEyM29yLWEzSTc1Vk9kWWE5NmpjaGtCc0VwNTRRbE1yWmg1bXpDV3NUMAZDZD
+# Ce fichier ne doit plus contenir de token en clair.
+# Le token IG longue durée vit maintenant dans la variable d'env IG_ACCESS_TOKEN.
+# Procédure de renouvellement (équivalent à renew_threads.py) :
+#
+# curl -G "https://graph.instagram.com/access_token" \
+#   --data-urlencode "grant_type=ig_exchange_token" \
+#   --data-urlencode "client_secret=$IG_CLIENT_SECRET" \
+#   --data-urlencode "access_token=$IG_SHORT_LIVED_TOKEN"
+#
+# Ou directement dans l'app : POST /cron/refresh-tokens (protégé par X-Cron-Secret).
