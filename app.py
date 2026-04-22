@@ -143,14 +143,39 @@ def telegram_webhook():
     text = (data.get("message", {}).get("text") or "").strip()
     action = data.get("callback_query", {}).get("data", "")
 
+    # IMPORTANT : on ack Telegram en <1ms et on traite en background.
+    # Render kill le worker à 60s ; _send_menu peut scraper 18 galeries +
+    # appeler Meta (retries http_client → worst case ~67s).
     if text:
         logger.info("📩 texte: %s", text)
-        _handle_text(chat_id, text)
+        threading.Thread(
+            target=_safe_handle, args=(_handle_text, chat_id, text),
+            daemon=True, name=f"tg-text-{update_id}",
+        ).start()
     elif action:
         logger.info("🔘 action: %s", action)
-        _handle_action(chat_id, action)
+        threading.Thread(
+            target=_safe_handle, args=(_handle_action, chat_id, action),
+            daemon=True, name=f"tg-action-{update_id}",
+        ).start()
 
     return jsonify({"status": "ok"})
+
+
+def _safe_handle(fn, chat_id: int, payload: str) -> None:
+    """Exécute handler en thread ; log timing + erreurs sans crasher."""
+    t0 = time.time()
+    try:
+        fn(chat_id, payload)
+    except Exception as e:
+        logger.exception("Handler %s failed: %s", fn.__name__, e)
+        try:
+            send_message(chat_id, f"❌ Erreur interne : {str(e)[:200]}")
+        except Exception:
+            pass
+    finally:
+        dt_ms = int((time.time() - t0) * 1000)
+        logger.info("✅ %s done in %dms (payload=%r)", fn.__name__, dt_ms, payload[:40])
 
 
 # =============================================================================
