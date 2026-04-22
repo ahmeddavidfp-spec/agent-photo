@@ -8,7 +8,8 @@ from flask import Flask, abort, jsonify, request
 
 from db import (
     already_sent_urls, clear_session, export_to_csv, get_session,
-    get_stats, init_db, mark_photo_as_sent, save_session, schedule_post,
+    get_stats, init_db, mark_photo_as_sent, record_published_post,
+    save_session, schedule_post,
 )
 from ai import SEPARATOR, generate_caption, split_content
 from gallery import (
@@ -278,11 +279,41 @@ def _handle_action(chat_id: int, action: str) -> None:
 # RENDU DU MENU + SUGGESTION
 # =============================================================================
 
+def _progress_dot(done: int, total: int) -> str:
+    """Icône colorée par taux de complétion : ⚪ (0) 🔵 (en cours) ✅ (fini)."""
+    if total <= 0:
+        return "⚪"
+    if done >= total:
+        return "✅"
+    if done == 0:
+        return "⚪"
+    return "🔵"
+
+
+def _display_name_for(slug: str, config: dict) -> str:
+    """Joli nom pour affichage (lecture de gallery_names, fallback slug titlé)."""
+    names = (config.get("gallery_names") or {})
+    if slug in names and names[slug]:
+        return str(names[slug])
+    return slug.replace("-", " ").replace("_", " ").title()
+
+
+def _compact_token_line() -> str:
+    """Header 1-ligne : '📸 Agent Photo · IG 35j · TH 59j'."""
+    from meta_api import token_days_left
+    ig = token_days_left("IG")
+    th = token_days_left("TH")
+    ig_s = f"IG {ig}j" if ig is not None else "IG ?"
+    th_s = f"TH {th}j" if th is not None else "TH ?"
+    return f"📸 *Agent Photo* · {ig_s} · {th_s}"
+
+
 def _send_menu(chat_id: int) -> None:
     from concurrent.futures import ThreadPoolExecutor
+    from gallery import suggest_next_gallery
 
     config = load_yaml_config()
-    status = token_status()
+    header = _compact_token_line()
     sent = already_sent_urls()
 
     keyboard = [[
@@ -299,16 +330,37 @@ def _send_menu(chat_id: int) -> None:
             galeries,
         ))
 
+    # Suggestion anti-répétition (galerie utilisée il y a le plus longtemps)
+    suggested = suggest_next_gallery(galeries)
+
+    # Bouton ⭐ en haut pour la galerie suggérée
+    suggestion_line = ""
+    if suggested:
+        suggested_display = _display_name_for(suggested, config)
+        done_s, total_s = dict((g, (d, t)) for g, (d, t) in results).get(
+            suggested, (0, 0)
+        )
+        keyboard.append([{
+            "text": f"⭐ {suggested_display}  ({done_s}/{total_s})",
+            "callback_data": f"select_{suggested}",
+        }])
+        suggestion_line = f"\n⭐ Suggestion : *{suggested_display}*"
+
+    # Les autres galeries, 2 par ligne, avec dot coloré + display name propre
     buttons = []
     for g, (done, total) in results:
-        label = f"{g.capitalize()} {done}/{total}" if total else g.capitalize()
+        if g == suggested:
+            continue  # déjà au-dessus
+        name = _display_name_for(g, config)
+        dot = _progress_dot(done, total)
+        label = f"{dot} {name} {done}/{total}" if total else f"{dot} {name}"
         buttons.append({"text": label, "callback_data": f"select_{g}"})
     for i in range(0, len(buttons), 2):
         keyboard.append(buttons[i:i + 2])
 
     send_message(
         chat_id,
-        f"{status}\n---\nQuelle galerie ?",
+        f"{header}{suggestion_line}\n\nChoisis une galerie :",
         reply_markup={"inline_keyboard": keyboard},
     )
 
@@ -340,6 +392,20 @@ def _send_suggestion(chat_id: int, galerie: str) -> None:
 # PUBLICATION EN ARRIÈRE-PLAN
 # =============================================================================
 
+def _gallery_from_url(image_url: str) -> str:
+    """Déduit le slug de galerie depuis l'URL Squarespace.
+
+    Ex. https://.../new-york/photo.jpg → 'new-york'. Fallback : 'inconnue'.
+    """
+    try:
+        from urllib.parse import urlparse
+        parts = [p for p in urlparse(image_url).path.split("/") if p]
+        # Squarespace colle les slugs au début du path, on prend le 1er non-vide
+        return parts[0] if parts else "inconnue"
+    except Exception:
+        return "inconnue"
+
+
 def _background_publish(chat_id: int, mode: str, image_url: str, caption: str) -> None:
     logger.info("🚀 START JOB | Mode=%s", mode)
     ok_ig = ok_th = False
@@ -355,10 +421,25 @@ def _background_publish(chat_id: int, mode: str, image_url: str, caption: str) -
         send_message(chat_id, f"🔥 Erreur : {e}")
         return
 
+    # Enregistre chaque publish réussi pour la boucle d'apprentissage
+    # (caption sans alt → c'est ce que l'audience voit)
+    visible_caption, _alt = split_content(caption)
+    galerie = _gallery_from_url(image_url)
+    if ok_ig and isinstance(res_ig, str) and res_ig:
+        try:
+            record_published_post("IG", res_ig, image_url, visible_caption, galerie)
+        except Exception as e:
+            logger.warning("record_published_post IG failed: %s", e)
+    if ok_th and isinstance(res_th, str) and res_th:
+        try:
+            record_published_post("TH", res_th, image_url, visible_caption, galerie)
+        except Exception as e:
+            logger.warning("record_published_post TH failed: %s", e)
+
     if mode == "both":
         if ok_ig and ok_th:
             final = "🚀 **Succès Total !**\nInsta & Threads : ✅"
-            mark_photo_as_sent(image_url, "Auto")
+            mark_photo_as_sent(image_url, galerie)
             clear_session(chat_id)
         else:
             final = (
@@ -369,13 +450,13 @@ def _background_publish(chat_id: int, mode: str, image_url: str, caption: str) -
     elif mode == "ig":
         if ok_ig:
             final = "📸 **Instagram :** ✅"
-            mark_photo_as_sent(image_url, "Auto")
+            mark_photo_as_sent(image_url, galerie)
         else:
             final = f"❌ **Erreur Insta :** {res_ig}"
     else:  # th
         if ok_th:
             final = "🧵 **Threads :** ✅"
-            mark_photo_as_sent(image_url, "Auto")
+            mark_photo_as_sent(image_url, galerie)
         else:
             final = f"❌ **Erreur Threads :** {res_th}"
 

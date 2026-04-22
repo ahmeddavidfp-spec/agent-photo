@@ -10,6 +10,9 @@ DAVID'S VOICE
 VOICE EXAMPLES (mimic the rhythm, not the words)
 {voice_examples}
 
+RECENT TOP-PERFORMING CAPTIONS (your own, based on audience engagement — use them as proof of what resonates, not as templates to copy)
+{top_performers}
+
 INPUT YOU RECEIVE
 - Gallery: {galerie}
 - Factual description of the photo (written in a previous step): """{description}"""

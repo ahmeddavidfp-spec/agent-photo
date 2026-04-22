@@ -190,6 +190,34 @@ def _describe_image(image_url: str, display_name: str) -> Optional[str]:
 # PASS 2 — CAPTION BILINGUE (Claude en priorité, fallback OpenAI)
 # =============================================================================
 
+def _format_top_performers(limit: int = 3) -> str:
+    """Pull les meilleures captions historiques et formate pour le prompt.
+
+    Renvoie un message "pas encore de data" si la DB est vide (graceful
+    degradation pour les premiers posts, avant que la boucle ne soit amorcée).
+    """
+    try:
+        from db import top_performers
+    except ImportError:
+        return "(no data yet — this is the first learning cycle)"
+    try:
+        tops = top_performers(limit=limit)
+    except Exception as e:
+        logger.warning("top_performers failed: %s", e)
+        return "(no data yet — this is the first learning cycle)"
+    if not tops:
+        return "(no data yet — this is the first learning cycle)"
+    lines = []
+    for i, p in enumerate(tops, 1):
+        cap = (p.get("caption") or "").strip().replace("\n", " ")
+        if len(cap) > 400:
+            cap = cap[:400] + "..."
+        score = p.get("score", 0)
+        galerie = p.get("galerie", "?")
+        lines.append(f'{i}. [{galerie} · score {score:.1f}] "{cap}"')
+    return "\n".join(lines)
+
+
 def _build_caption_prompt(
     description: str, galerie: str, display_name: str,
     display_link: str, config: dict,
@@ -207,6 +235,7 @@ def _build_caption_prompt(
         display_link=display_link,
         description=description,
         voice_examples=_voice_examples(config),
+        top_performers=_format_top_performers(limit=3),
         accounts=", ".join(mentions),
         hashtags=" ".join(tags),
     )

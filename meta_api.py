@@ -297,7 +297,9 @@ def publish_to_instagram(image_url: str, full_text: str) -> Tuple[bool, str]:
             if poll == "timeout":
                 return False, f"Container IG pas prêt (timeout polling) : {err}"
             return False, err
-        return True, "OK"
+        # On retourne le media_id → utilisé pour collecter les insights 24h+ après
+        media_id = (pub.json() or {}).get("id", "")
+        return True, media_id
     except Exception as e:
         logger.exception("publish_to_instagram error")
         return False, str(e)
@@ -353,7 +355,74 @@ def publish_to_threads(image_url: str, full_text: str) -> Tuple[bool, str]:
             if poll == "timeout":
                 return False, f"Container TH pas prêt (timeout polling) : {err}"
             return False, err
-        return True, "OK"
+        media_id = (pub.json() or {}).get("id", "")
+        return True, media_id
     except Exception as e:
         logger.exception("publish_to_threads error")
         return False, str(e)
+
+
+# =========================================================================
+# INSIGHTS / METRICS — collecte 24h+ après publication
+# =========================================================================
+
+def fetch_ig_insights(media_id: str) -> dict:
+    """Récupère les metrics IG d'un post publié.
+
+    Meta Graph renvoie likes/comments via /{id}?fields, et reach/saved via
+    /{id}/insights. On combine les deux dans un seul dict plat.
+    """
+    if not media_id:
+        return {}
+    token = get_ig_token()
+    out: dict = {}
+    try:
+        # likes + comments (fields de base)
+        r1 = safe_get(
+            f"{FB_API}{media_id}",
+            params={"fields": "like_count,comments_count", "access_token": token},
+            timeout=10,
+        )
+        out.update(r1.json() or {})
+        # insights : reach, saved, impressions (selon permissions)
+        r2 = safe_get(
+            f"{FB_API}{media_id}/insights",
+            params={"metric": "reach,saved,impressions", "access_token": token},
+            timeout=10,
+        )
+        for item in (r2.json() or {}).get("data", []):
+            name = item.get("name")
+            values = item.get("values") or []
+            if name and values:
+                out[name] = values[0].get("value", 0)
+    except Exception as e:
+        logger.warning("fetch_ig_insights(%s) failed: %s", media_id, e)
+    return out
+
+
+def fetch_th_insights(media_id: str) -> dict:
+    """Récupère les metrics Threads d'un post publié.
+
+    Threads Insights : views, likes, replies, reposts, quotes.
+    """
+    if not media_id:
+        return {}
+    token = get_th_token()
+    out: dict = {}
+    try:
+        r = safe_get(
+            f"{TH_API}{media_id}/insights",
+            params={
+                "metric": "views,likes,replies,reposts,quotes",
+                "access_token": token,
+            },
+            timeout=10,
+        )
+        for item in (r.json() or {}).get("data", []):
+            name = item.get("name")
+            values = item.get("values") or []
+            if name and values:
+                out[name] = values[0].get("value", 0)
+    except Exception as e:
+        logger.warning("fetch_th_insights(%s) failed: %s", media_id, e)
+    return out

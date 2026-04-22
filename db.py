@@ -5,6 +5,9 @@ Schema :
 - current_session(chat_id PK, last_url, last_caption)
 - scheduled_posts(id PK, chat_id, image_url, caption, run_at, status)
 - token_store(key PK, value, updated_at)   ← tokens Meta renouvelés
+- post_metrics(id PK, platform, media_id, image_url, caption, galerie,
+               published_at, metrics_json, collected_at)
+               ↑ pour la boucle d'apprentissage (engagement → captions futures)
 
 Tous les accès passent par un context manager `connection()` qui garantit
 la fermeture et le commit.
@@ -13,10 +16,11 @@ from __future__ import annotations
 
 import csv
 import datetime as dt
+import json
 import logging
 import sqlite3
 from contextlib import contextmanager
-from typing import Iterator, Optional, Tuple
+from typing import Any, Iterator, List, Optional, Tuple
 
 from settings import DB_PATH
 
@@ -62,6 +66,17 @@ def init_db() -> None:
         conn.execute(
             "CREATE TABLE IF NOT EXISTS token_store ("
             "key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS post_metrics ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "platform TEXT, media_id TEXT, image_url TEXT, "
+            "caption TEXT, galerie TEXT, "
+            "published_at TEXT, metrics_json TEXT, collected_at TEXT)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_metrics_pending "
+            "ON post_metrics(collected_at, published_at)"
         )
 
         # Migrations douces : ajout de colonnes si manquantes
@@ -216,3 +231,108 @@ def token_last_update(key: str) -> Optional[str]:
             "SELECT updated_at FROM token_store WHERE key = ?", (key,)
         ).fetchone()
     return row[0] if row and row[0] else None
+
+
+# --- Metrics / boucle d'apprentissage ---------------------------------------
+# On enregistre chaque publication réussie. Un job scheduler récupère
+# les insights Meta 24h+ après publish, stocke le JSON dans metrics_json,
+# et top_performers() renvoie les meilleures captions historiques (score
+# combiné likes+comments+saved) pour nourrir les prompts Claude futurs.
+
+def record_published_post(
+    platform: str, media_id: str, image_url: str,
+    caption: str, galerie: str,
+) -> int:
+    """Enregistre une publication réussie. metrics_json reste NULL jusqu'à collecte."""
+    with connection() as conn:
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cur = conn.execute(
+            "INSERT INTO post_metrics "
+            "(platform, media_id, image_url, caption, galerie, published_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (platform, media_id, image_url, caption, galerie, now),
+        )
+        return cur.lastrowid
+
+
+def posts_pending_metrics(older_than_hours: int = 24) -> List[Tuple[int, str, str]]:
+    """Retourne les (id, platform, media_id) à collecter.
+
+    Critères :
+    - metrics_json IS NULL (pas encore collecté)
+    - published_at < now - older_than_hours (laisser le post mûrir)
+    """
+    cutoff = (dt.datetime.now() - dt.timedelta(hours=older_than_hours)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+    with connection() as conn:
+        return conn.execute(
+            "SELECT id, platform, media_id FROM post_metrics "
+            "WHERE metrics_json IS NULL AND published_at <= ? "
+            "ORDER BY published_at ASC LIMIT 50",
+            (cutoff,),
+        ).fetchall()
+
+
+def save_metrics(post_id: int, metrics: dict) -> None:
+    """Stocke les metrics collectées (dict → JSON)."""
+    with connection() as conn:
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute(
+            "UPDATE post_metrics SET metrics_json = ?, collected_at = ? WHERE id = ?",
+            (json.dumps(metrics, ensure_ascii=False), now, post_id),
+        )
+
+
+def _engagement_score(metrics: dict) -> float:
+    """Score simple et robuste across IG/TH.
+
+    IG renvoie: like_count, comments_count, saved, reach
+    TH renvoie: views, likes, replies, reposts, quotes
+
+    On pondère : save/repost (intention forte) > comment/reply > like.
+    On divise par reach/views pour normaliser (un post avec 10 likes sur
+    100 vues vaut plus qu'un post avec 10 likes sur 1000).
+    """
+    m = metrics or {}
+    # Numérateur (interactions pondérées)
+    likes = m.get("like_count", 0) or m.get("likes", 0) or 0
+    comments = m.get("comments_count", 0) or m.get("replies", 0) or 0
+    saves = m.get("saved", 0) or m.get("reposts", 0) or m.get("quotes", 0) or 0
+    engagement = likes * 1.0 + comments * 3.0 + saves * 5.0
+    # Dénominateur (reach/views)
+    reach = m.get("reach", 0) or m.get("views", 0) or 0
+    if reach <= 0:
+        return float(engagement)  # pas de reach → score brut
+    return engagement / reach * 100.0  # en %
+
+
+def top_performers(limit: int = 3) -> List[dict]:
+    """Retourne les meilleures captions historiques (score combiné).
+
+    Renvoie une liste de dicts : {caption, galerie, score, platform}.
+    """
+    with connection() as conn:
+        rows = conn.execute(
+            "SELECT caption, galerie, platform, metrics_json "
+            "FROM post_metrics WHERE metrics_json IS NOT NULL"
+        ).fetchall()
+    if not rows:
+        return []
+    scored = []
+    for caption, galerie, platform, metrics_json in rows:
+        try:
+            metrics = json.loads(metrics_json) if metrics_json else {}
+        except (json.JSONDecodeError, TypeError):
+            metrics = {}
+        score = _engagement_score(metrics)
+        if score <= 0:
+            continue
+        scored.append({
+            "caption": caption,
+            "galerie": galerie,
+            "platform": platform,
+            "score": score,
+        })
+    scored.sort(key=lambda d: d["score"], reverse=True)
+    return scored[:limit]
