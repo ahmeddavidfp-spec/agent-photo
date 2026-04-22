@@ -19,6 +19,7 @@ import datetime as dt
 import json
 import logging
 import sqlite3
+import threading
 from contextlib import contextmanager
 from typing import Any, Iterator, List, Optional, Tuple
 
@@ -26,32 +27,39 @@ from settings import DB_PATH
 
 logger = logging.getLogger(__name__)
 
+# Serialise TOUS les accès DB au sein d'un même process.
+# Avec le scheduler qui tourne toutes les 30s + les handlers webhook en thread,
+# on a facilement 2-3 threads qui veulent écrire en même temps. SQLite gère en
+# théorie la concurrence via busy_timeout, mais sur le disque persistant Render
+# (NFS-like), les locks fichier sont fragiles → on préfère sérialiser côté
+# Python. C'est un RLock : si une fonction DB réentre, pas de deadlock.
+_DB_LOCK = threading.RLock()
+
 
 @contextmanager
 def connection() -> Iterator[sqlite3.Connection]:
-    # timeout=30s = attendre jusqu'à 30s qu'un autre writer libère le lock
-    # avant de lever OperationalError("database is locked").
-    #
-    # IMPORTANT : pas de WAL ! Le disque persistant Render est NFS-like et
-    # ne supporte pas le shared-memory des fichiers -shm/-wal → "disk I/O
-    # error" sur SELECT. On reste en journal_mode=DELETE (défaut SQLite) et
-    # on compte sur busy_timeout pour gérer les accès concurrents.
-    conn = sqlite3.connect(DB_PATH, timeout=30.0)
-    try:
-        # Le journal_mode est persistant sur le fichier DB : si la DB est déjà
-        # en WAL (notre tentative précédente), on la repasse explicitement en
-        # DELETE. Sur un fichier déjà DELETE, cette ligne est un no-op.
-        conn.execute("PRAGMA journal_mode=DELETE")
-        conn.execute("PRAGMA busy_timeout=30000")
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
+    # timeout=30s = filet de sécurité cross-process (entre workers gunicorn).
+    # Intra-process, le RLock ci-dessus garantit 1 seul writer.
+    # Pas de WAL : disque Render ne supporte pas -shm/-wal correctement.
+    with _DB_LOCK:
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        try:
+            conn.execute("PRAGMA busy_timeout=30000")
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
 
 
 def init_db() -> None:
-    """Création idempotente des tables + index."""
+    """Création idempotente des tables + index. Force journal_mode=DELETE."""
     with connection() as conn:
+        # One-shot au démarrage : si la DB traîne en WAL depuis une tentative
+        # précédente, on la repasse en DELETE. Idempotent si déjà DELETE.
+        try:
+            conn.execute("PRAGMA journal_mode=DELETE")
+        except Exception as e:
+            logger.warning("PRAGMA journal_mode=DELETE failed: %s", e)
         conn.execute(
             "CREATE TABLE IF NOT EXISTS sent_photos ("
             "url TEXT PRIMARY KEY, galerie TEXT, date_envoi TEXT)"
