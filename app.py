@@ -24,7 +24,7 @@ from settings import (
     ALLOWED_CHAT_ID, CRON_SECRET, TELEGRAM_TOKEN, TELEGRAM_WEBHOOK_SECRET,
     load_yaml_config,
 )
-from telegram_bot import send_document, send_message, send_photo
+from telegram_bot import answer_callback_query, send_document, send_message, send_photo
 from timezones import now_local, to_utc
 
 logging.basicConfig(
@@ -167,7 +167,9 @@ def telegram_webhook():
         return jsonify({"status": "ok"})
 
     text = (data.get("message", {}).get("text") or "").strip()
-    action = data.get("callback_query", {}).get("data", "")
+    callback_query = data.get("callback_query", {}) or {}
+    action = callback_query.get("data", "")
+    callback_query_id = callback_query.get("id", "")
 
     # IMPORTANT : on ack Telegram en <1ms et on traite en background.
     # Render kill le worker à 60s ; _send_menu peut scraper 18 galeries +
@@ -180,6 +182,14 @@ def telegram_webhook():
         ).start()
     elif action:
         logger.info("🔘 action: %s", action)
+        # On ack le callback_query IMMÉDIATEMENT dans un mini thread pour
+        # stopper le spinner Telegram. Sinon Telegram retry le webhook ~12s
+        # plus tard (cause du "2 photos" vu précédemment).
+        if callback_query_id:
+            threading.Thread(
+                target=answer_callback_query, args=(callback_query_id,),
+                daemon=True, name=f"tg-ack-{update_id}",
+            ).start()
         threading.Thread(
             target=_safe_handle, args=(_handle_action, chat_id, action),
             daemon=True, name=f"tg-action-{update_id}",
@@ -303,14 +313,20 @@ def _handle_action(chat_id: int, action: str) -> None:
         key = f"select:{chat_id}:{galerie}"
         if not _acquire_inflight(key):
             logger.info("🚫 Dédupe: %s déjà en cours pour chat=%s", galerie, chat_id)
-            send_message(chat_id, "⏳ Traitement déjà en cours pour cette galerie.")
+            # Pas de message — on ne veut pas spammer si Telegram retry.
             return
 
         def _run_suggestion():
             try:
                 _send_suggestion(chat_id, galerie)
             finally:
-                _release_inflight(key)
+                # Grâce de 30s : on empêche un re-déclenchement juste après
+                # la fin du pipeline (Telegram peut retry 10-15s après la 1re
+                # callback si le spinner a été mal acké).
+                def _delayed_release():
+                    time.sleep(30)
+                    _release_inflight(key)
+                threading.Thread(target=_delayed_release, daemon=True).start()
 
         threading.Thread(target=_run_suggestion, daemon=True).start()
         return

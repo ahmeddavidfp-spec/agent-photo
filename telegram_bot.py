@@ -39,6 +39,23 @@ def send_photo(chat_id: int, photo_url: str, caption: str,
         logger.error("send_photo failed: %s", e)
 
 
+def answer_callback_query(callback_query_id: str, text: str = "") -> None:
+    """Ack un callback Telegram (inline button) pour arrêter le spinner.
+
+    Sans cet appel, Telegram pense que le bot n'a pas reçu le clic et
+    retransmet la même callback après ~10-15s → double exécution.
+    """
+    if not TELEGRAM_TOKEN or not callback_query_id:
+        return
+    payload = {"callback_query_id": callback_query_id}
+    if text:
+        payload["text"] = text
+    try:
+        safe_post(_url("answerCallbackQuery"), json=payload, timeout=5)
+    except Exception as e:
+        logger.warning("answer_callback_query failed: %s", e)
+
+
 def send_document(chat_id: int, path: str) -> None:
     if not TELEGRAM_TOKEN:
         return
