@@ -43,8 +43,25 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-init_db()
-start_scheduler()
+# Banner de boot pour identifier à 100% quelle version tourne en prod.
+# Render injecte RENDER_GIT_COMMIT dans l'environnement de chaque deploy.
+import os as _os
+_git_commit = _os.environ.get("RENDER_GIT_COMMIT", "unknown")[:12]
+logger.info("=" * 60)
+logger.info("🚀 AGENT PHOTO BOOT | commit=%s", _git_commit)
+logger.info("=" * 60)
+
+try:
+    init_db()
+    logger.info("✅ init_db() OK")
+except Exception as e:
+    logger.exception("❌ init_db() failed: %s", e)
+
+try:
+    start_scheduler()
+    logger.info("✅ start_scheduler() OK")
+except Exception as e:
+    logger.exception("❌ start_scheduler() failed: %s", e)
 
 
 # =============================================================================
@@ -183,12 +200,14 @@ def telegram_webhook():
     # appeler Meta (retries http_client → worst case ~67s).
     if text:
         logger.info("📩 texte: %s", text)
+        print(f"[boot={_git_commit}] spawning text thread for {text!r}", flush=True)
         threading.Thread(
             target=_safe_handle, args=(_handle_text, chat_id, text),
             daemon=True, name=f"tg-text-{update_id}",
         ).start()
     elif action:
         logger.info("🔘 action: %s", action)
+        print(f"[boot={_git_commit}] spawning action thread for {action!r}", flush=True)
         # On ack le callback_query IMMÉDIATEMENT dans un mini thread pour
         # stopper le spinner Telegram. Sinon Telegram retry le webhook ~12s
         # plus tard (cause du "2 photos" vu précédemment).
@@ -207,10 +226,12 @@ def telegram_webhook():
 
 def _safe_handle(fn, chat_id: int, payload: str) -> None:
     """Exécute handler en thread ; log timing + erreurs sans crasher."""
+    print(f"[thread] _safe_handle START fn={fn.__name__} payload={payload!r}", flush=True)
     t0 = time.time()
     try:
         fn(chat_id, payload)
     except Exception as e:
+        print(f"[thread] _safe_handle EXCEPTION fn={fn.__name__}: {e!r}", flush=True)
         logger.exception("Handler %s failed: %s", fn.__name__, e)
         try:
             send_message(chat_id, f"❌ Erreur interne : {str(e)[:200]}")
@@ -218,6 +239,7 @@ def _safe_handle(fn, chat_id: int, payload: str) -> None:
             pass
     finally:
         dt_ms = int((time.time() - t0) * 1000)
+        print(f"[thread] _safe_handle END fn={fn.__name__} in {dt_ms}ms", flush=True)
         logger.info("✅ %s done in %dms (payload=%r)", fn.__name__, dt_ms, payload[:40])
 
 
