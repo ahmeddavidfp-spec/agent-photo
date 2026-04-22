@@ -127,6 +127,37 @@ def renew_instagram_token() -> Tuple[bool, object]:
         return False, str(e)
 
 
+def token_days_left(platform: str):
+    """Retourne le nombre de jours restants pour IG ou TH, ou None si indéterminé.
+
+    Utilisé par les alertes Telegram (scheduler quotidien).
+    """
+    import datetime as dt
+    if platform == "IG":
+        token = get_ig_token()
+        debug_url = "https://graph.facebook.com/debug_token"
+    elif platform == "TH":
+        token = get_th_token()
+        debug_url = "https://graph.threads.net/debug_token"
+    else:
+        return None
+    if not token:
+        return None
+    try:
+        r = safe_get(
+            debug_url,
+            params={"input_token": token, "access_token": token},
+            timeout=5,
+        )
+        exp = r.json().get("data", {}).get("expires_at")
+        if not exp:
+            return None
+        return (dt.datetime.fromtimestamp(exp) - dt.datetime.now()).days
+    except Exception as e:
+        logger.warning("token_days_left %s: %s", platform, e)
+        return None
+
+
 def token_status() -> str:
     """Affiche le nombre de jours restants + date du dernier refresh DB."""
     import datetime as dt
