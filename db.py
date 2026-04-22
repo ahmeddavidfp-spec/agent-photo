@@ -19,7 +19,6 @@ import datetime as dt
 import json
 import logging
 import sqlite3
-import threading
 from contextlib import contextmanager
 from typing import Any, Iterator, List, Optional, Tuple
 
@@ -27,40 +26,31 @@ from settings import DB_PATH
 
 logger = logging.getLogger(__name__)
 
-# Serialise TOUS les accès DB au sein d'un même process.
-# Avec le scheduler qui tourne toutes les 30s + les handlers webhook en thread,
-# on a facilement 2-3 threads qui veulent écrire en même temps. SQLite gère en
-# théorie la concurrence via busy_timeout, mais sur le disque persistant Render
-# (NFS-like), les locks fichier sont fragiles → on préfère sérialiser côté
-# Python. C'est un RLock : si une fonction DB réentre, pas de deadlock.
-_DB_LOCK = threading.RLock()
+# Concurrence DB : on s'en remet à SQLite + busy_timeout.
+#
+# Historique : on avait ajouté un threading.RLock() pour sérialiser les
+# accès depuis Python, mais ça créait des deadlocks silencieux (un thread
+# qui tenait le lock pendant un appel réseau faisait timeout tous les
+# autres). SQLite gère très bien la concurrence avec busy_timeout + un
+# seul worker gunicorn : on laisse faire.
+#
+# Règle d'or appliquée partout : JAMAIS d'appel réseau / d'opération
+# lente à l'intérieur d'un `with connection()`. On ouvre, on lit/écrit,
+# on ferme — rien d'autre.
 
 
 @contextmanager
 def connection() -> Iterator[sqlite3.Connection]:
-    # timeout=30s = filet de sécurité cross-process (entre workers gunicorn).
-    # Intra-process, le RLock ci-dessus garantit 1 seul writer.
-    # Pas de WAL : disque Render ne supporte pas -shm/-wal correctement.
-    #
-    # IMPORTANT: acquire AVEC timeout pour éviter les deadlocks silencieux si
-    # un thread tient le lock trop longtemps (scheduler qui fait un appel
-    # réseau à l'intérieur d'un with connection(), par ex).
-    acquired = _DB_LOCK.acquire(timeout=10)
-    if not acquired:
-        raise RuntimeError(
-            "DB lock busy >10s (deadlock suspect : un autre thread "
-            "tient _DB_LOCK). Vérifier les logs du scheduler."
-        )
+    # timeout=30s = attente max d'un writer en cas de concurrence.
+    # busy_timeout côté SQLite = même chose côté C (double filet).
+    # Pas de WAL : disque Render ne supporte pas -shm/-wal.
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=30.0)
-        try:
-            conn.execute("PRAGMA busy_timeout=30000")
-            yield conn
-            conn.commit()
-        finally:
-            conn.close()
+        conn.execute("PRAGMA busy_timeout=30000")
+        yield conn
+        conn.commit()
     finally:
-        _DB_LOCK.release()
+        conn.close()
 
 
 def init_db() -> None:
