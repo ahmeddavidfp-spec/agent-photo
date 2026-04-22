@@ -41,7 +41,17 @@ def connection() -> Iterator[sqlite3.Connection]:
     # timeout=30s = filet de sécurité cross-process (entre workers gunicorn).
     # Intra-process, le RLock ci-dessus garantit 1 seul writer.
     # Pas de WAL : disque Render ne supporte pas -shm/-wal correctement.
-    with _DB_LOCK:
+    #
+    # IMPORTANT: acquire AVEC timeout pour éviter les deadlocks silencieux si
+    # un thread tient le lock trop longtemps (scheduler qui fait un appel
+    # réseau à l'intérieur d'un with connection(), par ex).
+    acquired = _DB_LOCK.acquire(timeout=10)
+    if not acquired:
+        raise RuntimeError(
+            "DB lock busy >10s (deadlock suspect : un autre thread "
+            "tient _DB_LOCK). Vérifier les logs du scheduler."
+        )
+    try:
         conn = sqlite3.connect(DB_PATH, timeout=30.0)
         try:
             conn.execute("PRAGMA busy_timeout=30000")
@@ -49,6 +59,8 @@ def connection() -> Iterator[sqlite3.Connection]:
             conn.commit()
         finally:
             conn.close()
+    finally:
+        _DB_LOCK.release()
 
 
 def init_db() -> None:

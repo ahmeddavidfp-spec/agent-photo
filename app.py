@@ -248,6 +248,7 @@ def _safe_handle(fn, chat_id: int, payload: str) -> None:
 # =============================================================================
 
 def _handle_text(chat_id: int, text: str) -> None:
+    print(f"[handle_text] START chat={chat_id} text={text!r}", flush=True)
     if text == "/renew_threads":
         ok, res = renew_threads_token()
         msg = f"✅ **TOKEN TH renouvelé ({res[1]}j)**\n`{res[0]}`" if ok else f"❌ {res}"
@@ -268,7 +269,9 @@ def _handle_text(chat_id: int, text: str) -> None:
         send_message(chat_id, token_status())
         return
 
+    print(f"[handle_text] about to get_session chat={chat_id}", flush=True)
     session = get_session(chat_id)
+    print(f"[handle_text] got session={session!r}", flush=True)
     if session and session[1].startswith("WAITING_SCHEDULE|"):
         _handle_schedule_input(chat_id, session, text)
         return
@@ -283,7 +286,9 @@ def _handle_text(chat_id: int, text: str) -> None:
         send_message(chat_id, "✅ Prêt !", reply_markup={"inline_keyboard": kb})
         return
 
+    print(f"[handle_text] calling _send_menu chat={chat_id}", flush=True)
     _send_menu(chat_id)
+    print(f"[handle_text] _send_menu returned chat={chat_id}", flush=True)
 
 
 def _handle_schedule_input(chat_id: int, session: tuple, text: str) -> None:
