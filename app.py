@@ -32,6 +32,13 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
     stream=sys.stdout,
 )
+# Force stdout unbuffered pour que les logs des threads apparaissent
+# immédiatement dans les logs Render (évite les pertes quand un thread
+# crashe avant le flush naturel).
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -313,21 +320,26 @@ def _handle_action(chat_id: int, action: str) -> None:
         key = f"select:{chat_id}:{galerie}"
         if not _acquire_inflight(key):
             logger.info("🚫 Dédupe: %s déjà en cours pour chat=%s", galerie, chat_id)
-            # Pas de message — on ne veut pas spammer si Telegram retry.
             return
 
         def _run_suggestion():
+            logger.info("[select] thread start galerie=%s chat=%s", galerie, chat_id)
             try:
                 _send_suggestion(chat_id, galerie)
+                logger.info("[select] ✅ finished galerie=%s", galerie)
+            except Exception as e:
+                logger.exception("[select] ❌ crashed galerie=%s: %s", galerie, e)
+                try:
+                    send_message(chat_id, f"❌ Erreur : {str(e)[:180]}")
+                except Exception:
+                    pass
             finally:
-                # Grâce de 30s : on empêche un re-déclenchement juste après
-                # la fin du pipeline (Telegram peut retry 10-15s après la 1re
-                # callback si le spinner a été mal acké).
                 def _delayed_release():
                     time.sleep(30)
                     _release_inflight(key)
                 threading.Thread(target=_delayed_release, daemon=True).start()
 
+        logger.info("[select] spawning thread for galerie=%s", galerie)
         threading.Thread(target=_run_suggestion, daemon=True).start()
         return
 
@@ -471,14 +483,26 @@ def _send_menu(chat_id: int) -> None:
 
 
 def _send_suggestion(chat_id: int, galerie: str) -> None:
+    t0 = time.time()
+    logger.info("[suggest] start galerie=%s", galerie)
+
     config = load_yaml_config()
+    logger.info("[suggest] config loaded (+%dms)", int((time.time() - t0) * 1000))
+
     img_url = pick_unseen_photo(config["site_url"], galerie)
+    logger.info("[suggest] pick_unseen_photo → %s (+%dms)",
+                img_url[:60] if img_url else "None", int((time.time() - t0) * 1000))
     if not img_url:
         send_message(chat_id, "Galerie vide ou toutes les photos déjà envoyées.")
         return
 
     full_content = generate_caption(img_url, galerie)
+    logger.info("[suggest] caption generated %d chars (+%dms)",
+                len(full_content or ""), int((time.time() - t0) * 1000))
+
     save_session(chat_id, img_url, full_content)
+    logger.info("[suggest] session saved (+%dms)", int((time.time() - t0) * 1000))
+
     visible_caption, _alt = split_content(full_content)
 
     kb = [
@@ -491,6 +515,7 @@ def _send_suggestion(chat_id: int, galerie: str) -> None:
          {"text": "⬅️ Menu", "callback_data": "menu"}],
     ]
     send_photo(chat_id, img_url, visible_caption, reply_markup={"inline_keyboard": kb})
+    logger.info("[suggest] ✅ send_photo done TOTAL %dms", int((time.time() - t0) * 1000))
 
 
 # =============================================================================
