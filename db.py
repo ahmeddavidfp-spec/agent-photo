@@ -29,8 +29,15 @@ logger = logging.getLogger(__name__)
 
 @contextmanager
 def connection() -> Iterator[sqlite3.Connection]:
+    # timeout=30s = attendre jusqu'à 30s qu'un autre writer libère le lock
+    # avant de lever OperationalError("database is locked").
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
     try:
+        # WAL + busy_timeout = writer concurrent + readers non bloquants.
+        # Ces PRAGMAs sont par-connexion ; on les pose systématiquement.
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA busy_timeout=30000")
         yield conn
         conn.commit()
     finally:

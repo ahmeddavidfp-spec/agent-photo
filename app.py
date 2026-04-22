@@ -89,6 +89,32 @@ def cron_refresh_tokens():
 PROCESSED_CACHE: dict[int, float] = {}
 _CACHE_LOCK = threading.Lock()
 
+# Anti-doublon pour actions coûteuses (ex: select_X qui lance OpenAI + Claude).
+# Clé = (chat_id, action_key). Si une action pour le même user est déjà en
+# cours, on ignore les clics suivants pendant INFLIGHT_TTL secondes.
+_INFLIGHT: dict = {}
+_INFLIGHT_LOCK = threading.Lock()
+INFLIGHT_TTL = 120  # 2 min — le temps max d'un cycle describe+caption
+
+
+def _acquire_inflight(key: str) -> bool:
+    """Retourne True si on peut démarrer, False si déjà en cours."""
+    now = time.time()
+    with _INFLIGHT_LOCK:
+        # Cleanup des entrées périmées
+        expired = [k for k, ts in _INFLIGHT.items() if now - ts > INFLIGHT_TTL]
+        for k in expired:
+            del _INFLIGHT[k]
+        if key in _INFLIGHT:
+            return False
+        _INFLIGHT[key] = now
+        return True
+
+
+def _release_inflight(key: str) -> None:
+    with _INFLIGHT_LOCK:
+        _INFLIGHT.pop(key, None)
+
 
 def _is_duplicate(update_id: int) -> bool:
     now = time.time()
@@ -274,9 +300,19 @@ def _handle_action(chat_id: int, action: str) -> None:
 
     if action.startswith("select_"):
         galerie = action.split("_", 1)[1]
-        threading.Thread(
-            target=_send_suggestion, args=(chat_id, galerie), daemon=True
-        ).start()
+        key = f"select:{chat_id}:{galerie}"
+        if not _acquire_inflight(key):
+            logger.info("🚫 Dédupe: %s déjà en cours pour chat=%s", galerie, chat_id)
+            send_message(chat_id, "⏳ Traitement déjà en cours pour cette galerie.")
+            return
+
+        def _run_suggestion():
+            try:
+                _send_suggestion(chat_id, galerie)
+            finally:
+                _release_inflight(key)
+
+        threading.Thread(target=_run_suggestion, daemon=True).start()
         return
 
     if action == "manual_edit":
