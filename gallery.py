@@ -24,8 +24,18 @@ _CACHE_LOCK = threading.Lock()
 _CACHE_TTL = 600  # 10 minutes
 
 
+def _canonical(url: str) -> str:
+    """URL canonique : sans query string ni fragment.
+
+    Squarespace sert la même photo sous plusieurs URLs (thumbnail,
+    lightbox, variantes `?format=500w`/`?format=1000w`). Pour le compte
+    et la déduplication, seule la partie path compte.
+    """
+    return url.split("?", 1)[0].split("#", 1)[0]
+
+
 def _fetch_live(site_url: str, galerie: str) -> list[str]:
-    """Appel réseau réel, sans cache."""
+    """Appel réseau réel, sans cache. Dédup par URL canonique."""
     url = f"{site_url.rstrip('/')}/{galerie}"
     try:
         r = safe_get(url)
@@ -35,7 +45,8 @@ def _fetch_live(site_url: str, galerie: str) -> list[str]:
         return []
 
     soup = BeautifulSoup(r.text, "html.parser")
-    imgs: list[str] = []
+    # dict {canonical_url -> full_url} préserve l'ordre et dédup.
+    seen: dict[str, str] = {}
     for img in soup.find_all("img"):
         src = img.get("src")
         if not src:
@@ -45,8 +56,11 @@ def _fetch_live(site_url: str, galerie: str) -> list[str]:
             src = img.get("data-src") or src
         if not src or src.startswith("data:"):
             continue
-        imgs.append(src if src.startswith("http") else urljoin(site_url, src))
-    return imgs
+        full = src if src.startswith("http") else urljoin(site_url, src)
+        canon = _canonical(full)
+        if canon not in seen:
+            seen[canon] = full
+    return list(seen.values())
 
 
 def fetch_gallery_photos(site_url: str, galerie: str, force_refresh: bool = False) -> list[str]:
@@ -84,21 +98,30 @@ def invalidate_cache(site_url: Optional[str] = None, galerie: Optional[str] = No
 
 
 def pick_unseen_photo(site_url: str, galerie: str) -> Optional[str]:
-    """Choisit une photo jamais publiée dans la galerie."""
+    """Choisit une photo jamais publiée dans la galerie.
+
+    La comparaison se fait sur URL canonique pour ne pas resuggérer
+    une photo dont une variante (query string) est déjà en DB.
+    """
     all_urls = fetch_gallery_photos(site_url, galerie)
-    sent = already_sent_urls()
-    fresh = [u for u in all_urls if u not in sent]
+    sent_canon = {_canonical(s) for s in already_sent_urls()}
+    fresh = [u for u in all_urls if _canonical(u) not in sent_canon]
     if not fresh:
         return None
     return random.choice(fresh)
 
 
 def counts_for_gallery(site_url: str, galerie: str, sent: set[str]) -> tuple[int, int]:
-    """(n_envoyées, n_total) pour affichage dans le menu."""
+    """(n_envoyées, n_total) pour affichage dans le menu.
+
+    Compare via URL canonique pour que les compteurs soient corrects
+    même si DB contient des variantes de la même photo.
+    """
     all_urls = fetch_gallery_photos(site_url, galerie)
     if not all_urls:
         return 0, 0
-    done = sum(1 for u in all_urls if u in sent)
+    sent_canon = {_canonical(s) for s in sent}
+    done = sum(1 for u in all_urls if _canonical(u) in sent_canon)
     return done, len(all_urls)
 
 
