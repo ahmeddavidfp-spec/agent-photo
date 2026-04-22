@@ -31,12 +31,17 @@ logger = logging.getLogger(__name__)
 def connection() -> Iterator[sqlite3.Connection]:
     # timeout=30s = attendre jusqu'à 30s qu'un autre writer libère le lock
     # avant de lever OperationalError("database is locked").
+    #
+    # IMPORTANT : pas de WAL ! Le disque persistant Render est NFS-like et
+    # ne supporte pas le shared-memory des fichiers -shm/-wal → "disk I/O
+    # error" sur SELECT. On reste en journal_mode=DELETE (défaut SQLite) et
+    # on compte sur busy_timeout pour gérer les accès concurrents.
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
     try:
-        # WAL + busy_timeout = writer concurrent + readers non bloquants.
-        # Ces PRAGMAs sont par-connexion ; on les pose systématiquement.
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
+        # Le journal_mode est persistant sur le fichier DB : si la DB est déjà
+        # en WAL (notre tentative précédente), on la repasse explicitement en
+        # DELETE. Sur un fichier déjà DELETE, cette ligne est un no-op.
+        conn.execute("PRAGMA journal_mode=DELETE")
         conn.execute("PRAGMA busy_timeout=30000")
         yield conn
         conn.commit()
