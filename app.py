@@ -334,60 +334,88 @@ def _compact_token_line() -> str:
 
 
 def _send_menu(chat_id: int) -> None:
+    """Rend le menu Telegram. Très verbose en logs pour diagnostiquer les hangs."""
     from concurrent.futures import ThreadPoolExecutor
     from gallery import suggest_next_gallery
 
-    config = load_yaml_config()
-    header = _compact_token_line()
-    sent = already_sent_urls()
+    t0 = time.time()
+    logger.info("[menu] start chat=%s", chat_id)
 
-    keyboard = [[
-        {"text": "📈 Stats", "callback_data": "view_stats"},
-        {"text": "📥 Export", "callback_data": "export_db_btn"},
-        {"text": "🔄 Renew", "callback_data": "renew_threads_btn"},
-    ]]
+    try:
+        config = load_yaml_config()
+        logger.info("[menu] config loaded in %dms", int((time.time() - t0) * 1000))
 
-    galeries = config.get("galeries", [])
-    # Parallélisation du scraping (cache hit = instantané, miss = ~1s pour 18 galeries)
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        results = list(pool.map(
-            lambda g: (g, counts_for_gallery(config["site_url"], g, sent)),
-            galeries,
-        ))
+        t1 = time.time()
+        header = _compact_token_line()  # cached 10 min, max 3s par appel non-caché
+        logger.info("[menu] header (%s) built in %dms", header, int((time.time() - t1) * 1000))
 
-    # Suggestion anti-répétition (galerie utilisée il y a le plus longtemps)
-    suggested = suggest_next_gallery(galeries)
+        t1 = time.time()
+        sent = already_sent_urls()
+        logger.info("[menu] already_sent_urls: %d rows in %dms", len(sent), int((time.time() - t1) * 1000))
 
-    # Bouton ⭐ en haut pour la galerie suggérée
-    suggestion_line = ""
-    if suggested:
-        suggested_display = _display_name_for(suggested, config)
-        done_s, total_s = dict((g, (d, t)) for g, (d, t) in results).get(
-            suggested, (0, 0)
+        keyboard = [[
+            {"text": "📈 Stats", "callback_data": "view_stats"},
+            {"text": "📥 Export", "callback_data": "export_db_btn"},
+            {"text": "🔄 Renew", "callback_data": "renew_threads_btn"},
+        ]]
+
+        galeries = config.get("galeries", [])
+        # Scraping parallèle ; counts_for_gallery a son propre cache 5min.
+        t1 = time.time()
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(
+                lambda g: (g, counts_for_gallery(config["site_url"], g, sent)),
+                galeries,
+            ))
+        logger.info("[menu] scraped %d galeries in %dms", len(galeries), int((time.time() - t1) * 1000))
+
+        t1 = time.time()
+        suggested = suggest_next_gallery(galeries)
+        logger.info("[menu] suggestion=%s in %dms", suggested, int((time.time() - t1) * 1000))
+
+        # Bouton ⭐ en haut pour la galerie suggérée
+        suggestion_line = ""
+        if suggested:
+            suggested_display = _display_name_for(suggested, config)
+            done_s, total_s = dict((g, (d, t)) for g, (d, t) in results).get(
+                suggested, (0, 0)
+            )
+            keyboard.append([{
+                "text": f"⭐ {suggested_display}  ({done_s}/{total_s})",
+                "callback_data": f"select_{suggested}",
+            }])
+            suggestion_line = f"\n⭐ Suggestion : *{suggested_display}*"
+
+        # Les autres galeries, 2 par ligne, avec dot coloré + display name propre
+        buttons = []
+        for g, (done, total) in results:
+            if g == suggested:
+                continue
+            name = _display_name_for(g, config)
+            dot = _progress_dot(done, total)
+            label = f"{dot} {name} {done}/{total}" if total else f"{dot} {name}"
+            buttons.append({"text": label, "callback_data": f"select_{g}"})
+        for i in range(0, len(buttons), 2):
+            keyboard.append(buttons[i:i + 2])
+
+        t1 = time.time()
+        send_message(
+            chat_id,
+            f"{header}{suggestion_line}\n\nChoisis une galerie :",
+            reply_markup={"inline_keyboard": keyboard},
         )
-        keyboard.append([{
-            "text": f"⭐ {suggested_display}  ({done_s}/{total_s})",
-            "callback_data": f"select_{suggested}",
-        }])
-        suggestion_line = f"\n⭐ Suggestion : *{suggested_display}*"
-
-    # Les autres galeries, 2 par ligne, avec dot coloré + display name propre
-    buttons = []
-    for g, (done, total) in results:
-        if g == suggested:
-            continue  # déjà au-dessus
-        name = _display_name_for(g, config)
-        dot = _progress_dot(done, total)
-        label = f"{dot} {name} {done}/{total}" if total else f"{dot} {name}"
-        buttons.append({"text": label, "callback_data": f"select_{g}"})
-    for i in range(0, len(buttons), 2):
-        keyboard.append(buttons[i:i + 2])
-
-    send_message(
-        chat_id,
-        f"{header}{suggestion_line}\n\nChoisis une galerie :",
-        reply_markup={"inline_keyboard": keyboard},
-    )
+        logger.info("[menu] send_message in %dms", int((time.time() - t1) * 1000))
+        logger.info("[menu] ✅ TOTAL %dms", int((time.time() - t0) * 1000))
+    except Exception as e:
+        logger.exception("[menu] crashed after %dms: %s", int((time.time() - t0) * 1000), e)
+        # Fallback minimal : au moins l'utilisateur a un menu cliquable
+        try:
+            send_message(
+                chat_id,
+                "⚠️ Menu dégradé (erreur interne).\nTape /start pour réessayer.",
+            )
+        except Exception:
+            pass
 
 
 def _send_suggestion(chat_id: int, galerie: str) -> None:

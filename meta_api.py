@@ -127,12 +127,29 @@ def renew_instagram_token() -> Tuple[bool, object]:
         return False, str(e)
 
 
-def token_days_left(platform: str):
+# Cache in-memory pour éviter de marteler Meta /debug_token à chaque rendu
+# de menu Telegram. TTL court : 10 minutes. La valeur peut être périmée de
+# quelques minutes sans conséquence (juste l'affichage visuel des "jours
+# restants" du menu). Les alertes quotidiennes passent le force_refresh=True.
+_TOKEN_DAYS_CACHE: dict = {}
+_TOKEN_DAYS_TTL = 600  # 10 min
+
+
+def token_days_left(platform: str, force_refresh: bool = False):
     """Retourne le nombre de jours restants pour IG ou TH, ou None si indéterminé.
 
-    Utilisé par les alertes Telegram (scheduler quotidien).
+    - Cache mémoire 10 min par défaut (évite le blocage menu Telegram).
+    - `force_refresh=True` ignore le cache (utilisé par l'alerte quotidienne).
+    - Timeout dur de 3s par appel + 1 seule retentative max.
     """
     import datetime as dt
+    now_ts = time.time()
+
+    if not force_refresh:
+        cached = _TOKEN_DAYS_CACHE.get(platform)
+        if cached and now_ts - cached[0] < _TOKEN_DAYS_TTL:
+            return cached[1]
+
     if platform == "IG":
         token = get_ig_token()
         debug_url = "https://graph.facebook.com/debug_token"
@@ -143,19 +160,28 @@ def token_days_left(platform: str):
         return None
     if not token:
         return None
+
+    # Appel direct avec timeout court : on préfère renvoyer None rapidement
+    # (le menu affichera "IG ?") plutôt que bloquer 27s sur un retry.
+    import requests as _requests
     try:
-        r = safe_get(
+        r = _requests.get(
             debug_url,
             params={"input_token": token, "access_token": token},
-            timeout=5,
+            timeout=3,
         )
-        exp = r.json().get("data", {}).get("expires_at")
+        exp = (r.json() or {}).get("data", {}).get("expires_at")
         if not exp:
+            _TOKEN_DAYS_CACHE[platform] = (now_ts, None)
             return None
-        return (dt.datetime.fromtimestamp(exp) - dt.datetime.now()).days
+        days = (dt.datetime.fromtimestamp(exp) - dt.datetime.now()).days
+        _TOKEN_DAYS_CACHE[platform] = (now_ts, days)
+        return days
     except Exception as e:
         logger.warning("token_days_left %s: %s", platform, e)
-        return None
+        # Renvoie la dernière valeur connue si on en a une, plutôt que None.
+        cached = _TOKEN_DAYS_CACHE.get(platform)
+        return cached[1] if cached else None
 
 
 def token_status() -> str:
