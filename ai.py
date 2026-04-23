@@ -120,6 +120,20 @@ def _voice_examples(config: dict) -> str:
     return raw.strip() or "(aucun exemple fourni — reste factuel, court, cinématographique)"
 
 
+def _gallery_context(galerie: str, config: dict) -> str:
+    """Contexte curatorial spécifique à la galerie (NY/Tokyo/Milan...).
+
+    Injecté dans le prompt Pass 2 pour donner à Claude la vision artistique
+    de David sur cette ville précise. Si pas de contexte pour la galerie,
+    retourne un message neutre qui ne perturbe pas le prompt.
+    """
+    contexts = config.get("gallery_context") or {}
+    text = contexts.get(galerie)
+    if not text:
+        return "(aucun contexte spécifique pour cette galerie — appuie-toi sur la description factuelle)"
+    return text.strip()
+
+
 def _display_name(galerie: str, config: dict) -> str:
     """Nom propre pour l'affichage (ex. 'new-york' -> 'New York').
 
@@ -235,6 +249,7 @@ def _build_caption_prompt(
         display_link=display_link,
         description=description,
         voice_examples=_voice_examples(config),
+        gallery_context=_gallery_context(galerie, config),
         top_performers=_format_top_performers(limit=3),
         accounts=", ".join(mentions),
         hashtags=" ".join(tags),

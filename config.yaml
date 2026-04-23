@@ -52,41 +52,111 @@ ai_tone: >
 
 # --- Identité de l'auteur ---
 photographer_bio: |
-  David Ahmed, photographe de rue (Belgique).
-  Travail en noir et blanc sur l'instant suspendu, la tension et le silence.
-  Esthétique 'film noir'.
+  David Mertens, photographe de rue (Belgique à Namur).
+  Travail en noir et blanc ou en couleursur l'instant suspendu, la tension et le silence.
+  Esthétique.
 
 # --- Hashtags globaux (fallback si pas de hashtags par galerie) ---
-hashtags: "#streetphotography #spicollective #street_perfection #burnmyeye #hcsc_street #streetdreamsmag #life_is_street #zonestreet #bnw_demand #streetphotographer #storyofthestreet #raw_street #leicaphotography #documentaryphotography #davidahmed #leica #bnw"
+hashtags: "#streetphotography #spicollective #street_perfection #burnmyeye #hcsc_street #streetdreamsmag #life_is_street #zonestreet #bnw_demand #streetphotographer #storyofthestreet #raw_street #leicaphotography #documentaryphotography #davidmertens #leica #bnw"
 
 # --- Exemples de voix (pass 2) -----------------------------------------------
-# Remplace ces 3 exemples par TES meilleures captions existantes (copier-coller).
-# L'IA s'en sert pour calibrer le rythme et le vocabulaire — elle ne les copie pas.
+# Vraies captions IG de @davidmertens.me. L'IA s'en sert pour calibrer le
+# RYTHME et la STRUCTURE (hook court / story / question / hashtags), pas le
+# contenu. Séparateur entre exemples : ligne avec "---".
 voice_examples: |
   ---
-  Empty benches, full sky.
-  Bruxelles, 7:14 AM. The rain had just stopped and the cafés were still asleep.
-  What's the last moment of silence you stole from a city?
+  Caught in the Colors of Coney Island
+  Amidst the vibrant hues of Coney Island, a moment of solitude unfolds.
+  What stories do these colors tell?
 
-  Bancs vides, ciel plein.
-  Bruxelles, 7h14. La pluie venait de s'arrêter, les cafés dormaient encore.
-  Tu te souviens de ton dernier instant de silence volé à une ville ?
+  Pris dans les Couleurs de Coney Island
+  Au milieu des teintes vives de Coney Island, un moment de solitude se dévoile.
+  Quelles histoires ces couleurs racontent-elles ?
+
+  Full series 👇
+  Link in Bio for full series
+  (cc @streetclassics @urbanromantix)
+  #ConeyIsland #NewYorkVibes #StreetPhotography
   ---
-  He didn't see me.
-  Tokyo, under the Yamanote line. Hat, cigarette, and a shadow longer than the man.
-  Do you still believe in portraits made without permission?
+  New York Noir: City of Shadows
+  📍 A timeless scene where steam rises from the streets of New York, capturing the city's pulse at night.
+  What stories do these streets hold?
 
-  Il ne m'a pas vu.
-  Tokyo, sous la Yamanote. Chapeau, cigarette, une ombre plus longue que lui.
-  Crois-tu encore aux portraits volés ?
+  New York Noir : Ville des Ombres
+  📍 Une scène intemporelle où la vapeur s'élève des rues de New York, capturant le pouls nocturne de la ville.
+  Quelles histoires ces rues racontent-elles ?
+
+  Full series 👇
+  Link in Bio for full series
+  (cc @streetclassics @raw_urbanshots)
+  #UrbanPhotography #NewYorkNights #CityVibes
   ---
-  Concrete prayer.
-  Casablanca. A woman walks past the mosque — her scarf catches the only warm light left on the wall.
-  Where does your city hold its quiet ?
+  Moments Suspendus
+  Dans le cadre d'un métro en mouvement, les passagers échangent des regards et des histoires non dites, capturant l'essence de la diversité new-yorkaise. La lumière douce et l'ambiance feutrée du wagon révèlent une scène intime de la vie urbaine.
+  Quel est votre souvenir le plus marquant dans le métro ?
 
-  Prière de béton.
-  Casablanca. Une femme passe devant la mosquée — son foulard capte la dernière lumière chaude du mur.
-  Où ta ville range-t-elle son silence ?
+  (cc @lensculture @urbanromantix @magnumphotos)
+  www.davidmertens.me/new-york
+  #NewYork #SubwayStories #UrbanLife
+  ---
+  Elegance, Croatian-style
+  No rush, no noise — just a moment suspended between shade and sunshine.
+  Effortlessly poised in linen, navy and neutrals, with a wide-brimmed hat to frame the quiet confidence.
+  Split isn't just a city. It's a state of mind.
+
+  #SplitStyle #CroatianElegance #ChicAbroad #QuietLuxury #TravelMood #SlowLiving #EffortlessStyle
+
+# --- Contexte curatorial par galerie (pass 2) --------------------------------
+# Texte long décrivant TA vision artistique de la ville. Injecté dans Pass 2
+# UNIQUEMENT si la galerie courante est présente — l'IA l'utilise pour capter
+# le mood/thème, sans le copier. Laisse vide ou omets une galerie pour utiliser
+# uniquement voice_examples.
+gallery_context:
+  new-york: |
+    New York est un assaut permanent sur les sens. C'est la ville de la photographie
+    de rue par excellence, celle où chaque angle est une icône potentielle. Pour
+    cette série, j'ai dû filtrer ce trop-plein pour trouver mon propre chemin à
+    travers la verticalité écrasante et le bruit incessant. C'est un travail sur
+    l'énergie pure.
+    À Manhattan, la lumière descend comme une lame entre les gratte-ciels, créant
+    des contrastes d'une violence magnifique. J'ai utilisé ces puits de clarté
+    pour isoler des individus au milieu de la foule anonyme. Photographier New York,
+    c'est traquer ces instants de solitude absolue au cœur du chaos le plus total.
+    Rien n'est jamais figé ici. Les taxis jaunes, les vapeurs de métro et les flux
+    de piétons créent une chorégraphie nerveuse. Mes images tentent de restituer
+    cette vitesse, tout en cherchant des points de fixation : un regard, une main
+    posée sur un journal, un visage éclairé par un reflet. C'est une quête de
+    l'humain dans la démesure.
+
+  tokyo: |
+    Je n'ai pas photographié Tokyo, c'est elle qui m'a traversé. Je suis arrivé
+    avec mes repères et ils ont disparu. Rien ici ne se donne comme ailleurs :
+    tout est fluide, précis et discret. Pourtant, Tokyo déborde de formes et de
+    tensions douces. C'est une ville qui demande un respect immense du cadre et
+    du silence.
+    Dans cette ville, il n'y a pas de cri, mais une intensité rare. Chaque
+    mouvement semble pensé, chaque espace est habité avec une retenue fascinante.
+    J'ai photographié avec curiosité et gratitude, cherchant à traduire mon
+    propre vertige face à une organisation urbaine que je ne comprenais pas,
+    mais que je sentais profondément vivante.
+    Tokyo est faite de contrastes invisibles. Rien ne déborde, et pourtant tout
+    est en mouvement perpétuel. Dans mes photos, on trouve cette tension : des
+    corps isolés dans la foule, des reflets fragmentés et des gestes calmes au
+    cœur du tumulte.
+
+  milan: |
+    Milan est une ville de mouvement et d'allure. Tout y semble habité par une
+    forme d'élégance naturelle, des façades majestueuses aux passants pressés.
+    J'ai voulu saisir cette énergie particulière, ce mélange de tradition
+    bourgeoise et de modernité nerveuse qui définit l'identité milanaise. Ici,
+    la rue est une scène permanente.
+    Dans les galeries couvertes comme dans les quartiers plus populaires, le
+    regard est sans cesse sollicité par des contrastes visuels forts. J'ai
+    photographié la lumière qui tombe à pic sur les pavés, les silhouettes qui
+    se découpent avec précision et l'esthétique soignée de chaque coin de rue.
+    Milan réussit à faire cohabiter le faste et l'austérité. Mes images
+    explorent cette dualité : la verticalité des gratte-ciels de Porta Nuova
+    face à la pierre grise des vieux palais.
 
 # --- Comptes "safe" globaux (utilisés si aucune liste par galerie) -----------
 safe_mentions:

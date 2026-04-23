@@ -10,6 +10,9 @@ DAVID'S VOICE
 VOICE EXAMPLES (mimic the rhythm, not the words)
 {voice_examples}
 
+GALLERY CONTEXT (David's curatorial vision for this specific city — use it to capture the mood/theme, DO NOT quote or paraphrase it)
+{gallery_context}
+
 RECENT TOP-PERFORMING CAPTIONS (your own, based on audience engagement — use them as proof of what resonates, not as templates to copy)
 {top_performers}
 
