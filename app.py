@@ -7,9 +7,9 @@ import time
 from flask import Flask, abort, jsonify, request
 
 from db import (
-    already_sent_urls, best_posting_hour, clear_session, export_to_csv,
-    get_session, get_stats, init_db, mark_photo_as_sent, record_published_post,
-    save_session, schedule_post,
+    already_sent_urls, best_posting_hour, cancel_scheduled_post, clear_session,
+    export_to_csv, get_session, get_stats, init_db, list_scheduled_posts,
+    mark_photo_as_sent, record_published_post, save_session, schedule_post,
 )
 from ai import SEPARATOR, generate_caption, split_content
 from gallery import (
@@ -24,8 +24,8 @@ from settings import (
     ALLOWED_CHAT_ID, CRON_SECRET, TELEGRAM_TOKEN, TELEGRAM_WEBHOOK_SECRET,
     load_yaml_config,
 )
-from telegram_bot import answer_callback_query, send_document, send_message, send_photo
-from timezones import now_local, now_utc, to_utc
+from telegram_bot import answer_callback_query, send_document, send_message, send_photo, send_typing_action
+from timezones import from_utc_str, now_local, now_utc, to_utc
 
 logging.basicConfig(
     level=logging.INFO,
@@ -337,8 +337,49 @@ def _handle_action(chat_id: int, action: str) -> None:
             send_message(chat_id, "📅 **Heure ?** (HH:MM)")
         return
 
+    if action == "scheduled_list":
+        _send_scheduled_list(chat_id)
+        return
+
+    if action.startswith("cancel_sched_"):
+        try:
+            post_id = int(action.split("_")[-1])
+        except ValueError:
+            return
+        ok = cancel_scheduled_post(post_id, chat_id)
+        send_message(chat_id, "✅ Post annulé." if ok else "⚠️ Post introuvable ou déjà publié.")
+        return
+
     if action == "autopub_menu":
         _send_autopub_menu(chat_id)
+        return
+
+    if action == "autopub_cancel":
+        clear_session(chat_id)
+        send_message(chat_id, "❌ Auto-pub annulé.")
+        return
+
+    if action.startswith("gallery_done_"):
+        g = action[len("gallery_done_"):]
+        name = g.replace("_", " ").capitalize()
+        send_message(chat_id, f"✅ Galerie *{name}* terminée — toutes les photos ont été publiées.")
+        return
+
+    if action.startswith("autopub_ok_"):
+        try:
+            hour = int(action.split("_")[-1])
+        except ValueError:
+            return
+        session = get_session(chat_id)
+        if not session:
+            send_message(chat_id, "⚠️ Session expirée. Recommence depuis le menu.")
+            return
+        target_local = _next_slot_for_hour(hour)
+        run_at_utc = to_utc(target_local).replace(tzinfo=None)
+        schedule_post(chat_id, session[0], session[1], run_at_utc)
+        clear_session(chat_id)
+        day_label = "aujourd'hui" if target_local.date() == now_local().date() else "demain"
+        send_message(chat_id, f"✅ *Programmé {day_label} à {target_local.strftime('%H:%M')}* !")
         return
 
     if action.startswith("autopub_"):
@@ -413,8 +454,28 @@ def _handle_action(chat_id: int, action: str) -> None:
 # RENDU DU MENU + SUGGESTION
 # =============================================================================
 
+import contextlib
+
 # Créneaux par défaut si pas assez de données historiques (heure locale Brussels)
 _DEFAULT_SLOTS = [9, 12, 18, 20]
+
+
+@contextlib.contextmanager
+def _typing_while(chat_id: int):
+    """Envoie sendChatAction(typing) toutes les 4s pendant le bloc `with`."""
+    stop = threading.Event()
+
+    def _loop():
+        send_typing_action(chat_id)
+        while not stop.wait(4):
+            send_typing_action(chat_id)
+
+    t = threading.Thread(target=_loop, daemon=True)
+    t.start()
+    try:
+        yield
+    finally:
+        stop.set()
 
 
 def _next_slot_for_hour(hour_local: int):
@@ -476,12 +537,17 @@ def _send_menu(chat_id: int) -> None:
         sent = already_sent_urls()
         logger.info("[menu] already_sent_urls: %d rows in %dms", len(sent), int((time.time() - t1) * 1000))
 
-        keyboard = [[
-            {"text": "📈 Stats", "callback_data": "view_stats"},
-            {"text": "📥 Export", "callback_data": "export_db_btn"},
-            {"text": "🤖 Auto-pub", "callback_data": "autopub_menu"},
-            {"text": "🔄 Renew", "callback_data": "renew_threads_btn"},
-        ]]
+        keyboard = [
+            [
+                {"text": "📈 Stats", "callback_data": "view_stats"},
+                {"text": "📅 Programmés", "callback_data": "scheduled_list"},
+                {"text": "🔄 Renew", "callback_data": "renew_threads_btn"},
+            ],
+            [
+                {"text": "🤖 Auto-pub", "callback_data": "autopub_menu"},
+                {"text": "📥 Export", "callback_data": "export_db_btn"},
+            ],
+        ]
 
         galeries = config.get("galeries", [])
         # Scraping parallèle ; counts_for_gallery a son propre cache 5min.
@@ -504,10 +570,16 @@ def _send_menu(chat_id: int) -> None:
             done_s, total_s = dict((g, (d, t)) for g, (d, t) in results).get(
                 suggested, (0, 0)
             )
-            keyboard.append([{
-                "text": f"⭐ {suggested_display}  ({done_s}/{total_s})",
-                "callback_data": f"select_{suggested}",
-            }])
+            if total_s > 0 and done_s >= total_s:
+                keyboard.append([{
+                    "text": f"⭐ {suggested_display} ✅ terminée",
+                    "callback_data": f"gallery_done_{suggested}",
+                }])
+            else:
+                keyboard.append([{
+                    "text": f"⭐ {suggested_display}  ({done_s}/{total_s})",
+                    "callback_data": f"select_{suggested}",
+                }])
             suggestion_line = f"\n⭐ Suggestion : *{suggested_display}*"
 
         # Les autres galeries, 2 par ligne, avec dot coloré + display name propre
@@ -516,9 +588,12 @@ def _send_menu(chat_id: int) -> None:
             if g == suggested:
                 continue
             name = _display_name_for(g, config)
-            dot = _progress_dot(done, total)
-            label = f"{dot} {name} {done}/{total}" if total else f"{dot} {name}"
-            buttons.append({"text": label, "callback_data": f"select_{g}"})
+            if total > 0 and done >= total:
+                buttons.append({"text": f"✅ {name}", "callback_data": f"gallery_done_{g}"})
+            else:
+                dot = _progress_dot(done, total)
+                label = f"{dot} {name} {done}/{total}" if total else f"{dot} {name}"
+                buttons.append({"text": label, "callback_data": f"select_{g}"})
         for i in range(0, len(buttons), 2):
             keyboard.append(buttons[i:i + 2])
 
@@ -549,14 +624,15 @@ def _send_suggestion(chat_id: int, galerie: str) -> None:
     config = load_yaml_config()
     logger.info("[suggest] config loaded (+%dms)", int((time.time() - t0) * 1000))
 
-    img_url = pick_unseen_photo(config["site_url"], galerie)
-    logger.info("[suggest] pick_unseen_photo → %s (+%dms)",
-                img_url[:60] if img_url else "None", int((time.time() - t0) * 1000))
-    if not img_url:
-        send_message(chat_id, "Galerie vide ou toutes les photos déjà envoyées.")
-        return
+    with _typing_while(chat_id):
+        img_url = pick_unseen_photo(config["site_url"], galerie)
+        logger.info("[suggest] pick_unseen_photo → %s (+%dms)",
+                    img_url[:60] if img_url else "None", int((time.time() - t0) * 1000))
+        if not img_url:
+            send_message(chat_id, "Galerie vide ou toutes les photos déjà envoyées.")
+            return
 
-    full_content = generate_caption(img_url, galerie)
+        full_content = generate_caption(img_url, galerie)
     logger.info("[suggest] caption generated %d chars (+%dms)",
                 len(full_content or ""), int((time.time() - t0) * 1000))
 
@@ -582,6 +658,35 @@ def _send_suggestion(chat_id: int, galerie: str) -> None:
 # AUTO-PUB : sélection galerie + schedule automatique à l'heure optimale
 # =============================================================================
 
+def _send_scheduled_list(chat_id: int) -> None:
+    """Affiche les posts programmés en attente avec bouton d'annulation."""
+    import datetime as dt
+    posts = list_scheduled_posts(chat_id)
+    if not posts:
+        send_message(chat_id, "📅 Aucun post programmé en attente.")
+        return
+
+    tz_local = now_local().tzinfo
+    lines = [f"📅 *{len(posts)} post(s) en attente :*\n"]
+    kb = []
+    for p in posts:
+        galerie = _gallery_from_url(p["image_url"])
+        config = load_yaml_config()
+        name = _display_name_for(galerie, config)
+        first_line = (p["caption"] or "").split("\n")[0][:50]
+        try:
+            dt_local = from_utc_str(p["run_at"]).astimezone(tz_local)
+            run_str = dt_local.strftime("%d/%m à %H:%M")
+        except Exception:
+            run_str = p["run_at"]
+        lines.append(f"• *{name}* — {run_str}\n  _{first_line}…_")
+        kb.append([{"text": f"❌ Annuler {name} ({run_str})",
+                    "callback_data": f"cancel_sched_{p['id']}"}])
+
+    kb.append([{"text": "⬅️ Menu", "callback_data": "menu"}])
+    send_message(chat_id, "\n".join(lines), reply_markup={"inline_keyboard": kb})
+
+
 def _send_autopub_menu(chat_id: int) -> None:
     """Sous-menu : liste des galeries pour l'auto-pub."""
     config = load_yaml_config()
@@ -601,8 +706,7 @@ def _send_autopub_menu(chat_id: int) -> None:
 
 
 def _auto_publish_flow(chat_id: int, galerie: str) -> None:
-    """Sélectionne une photo, génère la caption et programme à la meilleure heure."""
-    import datetime as dt
+    """Sélectionne une photo, génère la caption et propose un créneau à confirmer."""
     t0 = time.time()
     config = load_yaml_config()
     display = _display_name_for(galerie, config)
@@ -610,39 +714,44 @@ def _auto_publish_flow(chat_id: int, galerie: str) -> None:
 
     send_message(chat_id, f"🤖 *Auto-pub {display}* — sélection en cours…")
 
-    # 1. Photo non publiée
-    img_url = pick_unseen_photo(config["site_url"], galerie)
-    if not img_url:
-        send_message(chat_id, f"⚠️ *{display}* est épuisée — toutes les photos ont déjà été envoyées.")
-        return
+    with _typing_while(chat_id):
+        img_url = pick_unseen_photo(config["site_url"], galerie)
+        if not img_url:
+            send_message(chat_id, f"⚠️ *{display}* est épuisée — toutes les photos ont déjà été envoyées.")
+            return
+        full_content = generate_caption(img_url, galerie)
 
-    # 2. Génération de la caption
-    full_content = generate_caption(img_url, galerie)
     visible_caption, _alt = split_content(full_content)
     logger.info("[autopub] caption %d chars (+%dms)", len(full_content), int((time.time()-t0)*1000))
 
-    # 3. Meilleure heure : galerie d'abord, puis toutes galeries, puis créneaux par défaut
+    # Meilleure heure : galerie d'abord, puis toutes galeries, puis créneaux par défaut
     hour = best_posting_hour(galerie) or best_posting_hour()
     if hour is None:
         now_h = now_local().hour
         hour = next((h for h in _DEFAULT_SLOTS if h > now_h), _DEFAULT_SLOTS[0])
         source = "créneau par défaut"
     else:
-        source = "heure optimale calculée"
-    logger.info("[autopub] heure=%dh (%s)", hour, source)
+        source = "heure optimale"
+    logger.info("[autopub] heure proposée=%dh (%s)", hour, source)
 
-    # 4. Prochain slot dans le futur → schedule en UTC
     target_local = _next_slot_for_hour(hour)
-    run_at_utc = to_utc(target_local).replace(tzinfo=None)
-    schedule_post(chat_id, img_url, full_content, run_at_utc)
-    logger.info("[autopub] scheduled at %s UTC (+%dms)", run_at_utc, int((time.time()-t0)*1000))
-
-    # 5. Confirmation avec aperçu photo
     day_label = "aujourd'hui" if target_local.date() == now_local().date() else "demain"
     time_label = target_local.strftime("%H:%M")
-    header = f"✅ *Programmé {day_label} à {time_label}* ({source})\n\n"
-    preview = visible_caption[:500] + ("…" if len(visible_caption) > 500 else "")
-    send_photo(chat_id, img_url, header + preview)
+
+    # Sauvegarde session (même mécanique que _send_suggestion)
+    save_session(chat_id, img_url, full_content)
+
+    # Preview + boutons de confirmation
+    kb = [
+        [{"text": f"✅ Programmer {day_label} à {time_label}", "callback_data": f"autopub_ok_{hour}"}],
+        [{"text": "📅 Autre heure", "callback_data": "schedule_btn"},
+         {"text": "🚀 Publier maintenant", "callback_data": "pub_both"}],
+        [{"text": "✍️ Éditer légende", "callback_data": "manual_edit"}],
+        [{"text": "❌ Annuler", "callback_data": "autopub_cancel"}],
+    ]
+    header = f"🤖 *{display}* — {source}\n📅 Proposé : *{day_label} à {time_label}*\n\n"
+    preview = visible_caption[:450] + ("…" if len(visible_caption) > 450 else "")
+    send_photo(chat_id, img_url, header + preview, reply_markup={"inline_keyboard": kb})
 
 
 # =============================================================================

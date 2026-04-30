@@ -56,6 +56,17 @@ def answer_callback_query(callback_query_id: str, text: str = "") -> None:
         logger.warning("answer_callback_query failed: %s", e)
 
 
+def send_typing_action(chat_id: int) -> None:
+    """Affiche l'indicateur 'en train d'écrire' dans Telegram (dure ~5s)."""
+    if not TELEGRAM_TOKEN:
+        return
+    try:
+        safe_post(_url("sendChatAction"),
+                  json={"chat_id": chat_id, "action": "typing"}, timeout=5)
+    except Exception:
+        pass
+
+
 def send_document(chat_id: int, path: str) -> None:
     if not TELEGRAM_TOKEN:
         return

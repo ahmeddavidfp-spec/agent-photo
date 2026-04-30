@@ -212,6 +212,28 @@ def due_scheduled_posts(now_utc: dt.datetime) -> list[tuple]:
         ).fetchall()
 
 
+def list_scheduled_posts(chat_id: int) -> List[dict]:
+    """Retourne les posts pending pour ce chat, triés par date."""
+    with connection() as conn:
+        rows = conn.execute(
+            "SELECT id, image_url, caption, run_at FROM scheduled_posts "
+            "WHERE chat_id = ? AND status = 'pending' ORDER BY run_at ASC",
+            (chat_id,),
+        ).fetchall()
+    return [{"id": r[0], "image_url": r[1], "caption": r[2], "run_at": r[3]} for r in rows]
+
+
+def cancel_scheduled_post(post_id: int, chat_id: int) -> bool:
+    """Annule un post programmé. Retourne True si annulé, False si introuvable."""
+    with connection() as conn:
+        cur = conn.execute(
+            "UPDATE scheduled_posts SET status = 'cancelled' "
+            "WHERE id = ? AND chat_id = ? AND status = 'pending'",
+            (post_id, chat_id),
+        )
+        return cur.rowcount > 0
+
+
 def set_scheduled_status(post_id: int, status: str) -> None:
     with connection() as conn:
         conn.execute(
