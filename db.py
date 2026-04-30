@@ -358,3 +358,54 @@ def top_performers(limit: int = 3) -> List[dict]:
         })
     scored.sort(key=lambda d: d["score"], reverse=True)
     return scored[:limit]
+
+
+def best_posting_hour(galerie: Optional[str] = None) -> Optional[int]:
+    """Retourne l'heure locale Europe/Brussels (0-23) avec le meilleur engagement historique.
+
+    Analyse published_at + metrics_json. Retourne None si moins de 5 posts exploitables
+    (pas assez de données — l'appelant choisit ses propres créneaux par défaut).
+
+    published_at est stocké via datetime.now() (UTC sur Render) ; on convertit en
+    heure locale avant d'agréger.
+    """
+    from collections import defaultdict
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo  # type: ignore
+
+    TZ_LOCAL = ZoneInfo("Europe/Brussels")
+    TZ_UTC = ZoneInfo("UTC")
+
+    with connection() as conn:
+        if galerie:
+            rows = conn.execute(
+                "SELECT published_at, metrics_json FROM post_metrics "
+                "WHERE metrics_json IS NOT NULL AND galerie = ?",
+                (galerie,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT published_at, metrics_json FROM post_metrics "
+                "WHERE metrics_json IS NOT NULL",
+            ).fetchall()
+
+    if len(rows) < 5:
+        return None
+
+    hour_scores: dict[int, list[float]] = defaultdict(list)
+    for published_at, metrics_json in rows:
+        try:
+            score = _engagement_score(json.loads(metrics_json) if metrics_json else {})
+            if score <= 0:
+                continue
+            dt_utc = dt.datetime.strptime(published_at, "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ_UTC)
+            hour_scores[dt_utc.astimezone(TZ_LOCAL).hour].append(score)
+        except Exception:
+            continue
+
+    if not hour_scores:
+        return None
+
+    return max(hour_scores, key=lambda h: sum(hour_scores[h]) / len(hour_scores[h]))

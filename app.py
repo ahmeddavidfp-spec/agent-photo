@@ -7,8 +7,8 @@ import time
 from flask import Flask, abort, jsonify, request
 
 from db import (
-    already_sent_urls, clear_session, export_to_csv, get_session,
-    get_stats, init_db, mark_photo_as_sent, record_published_post,
+    already_sent_urls, best_posting_hour, clear_session, export_to_csv,
+    get_session, get_stats, init_db, mark_photo_as_sent, record_published_post,
     save_session, schedule_post,
 )
 from ai import SEPARATOR, generate_caption, split_content
@@ -25,7 +25,7 @@ from settings import (
     load_yaml_config,
 )
 from telegram_bot import answer_callback_query, send_document, send_message, send_photo
-from timezones import now_local, to_utc
+from timezones import now_local, now_utc, to_utc
 
 logging.basicConfig(
     level=logging.INFO,
@@ -337,6 +337,32 @@ def _handle_action(chat_id: int, action: str) -> None:
             send_message(chat_id, "📅 **Heure ?** (HH:MM)")
         return
 
+    if action == "autopub_menu":
+        _send_autopub_menu(chat_id)
+        return
+
+    if action.startswith("autopub_"):
+        galerie = action[len("autopub_"):]
+        key = f"autopub:{chat_id}:{galerie}"
+        if not _acquire_inflight(key):
+            logger.info("🚫 Dédupe autopub: %s déjà en cours pour chat=%s", galerie, chat_id)
+            return
+
+        def _run_autopub():
+            try:
+                _auto_publish_flow(chat_id, galerie)
+            except Exception as e:
+                logger.exception("[autopub] crashed galerie=%s: %s", galerie, e)
+                try:
+                    send_message(chat_id, f"❌ Erreur auto-pub : {str(e)[:180]}")
+                except Exception:
+                    pass
+            finally:
+                _release_inflight(key)
+
+        threading.Thread(target=_run_autopub, daemon=True, name=f"autopub-{galerie}").start()
+        return
+
     if action.startswith("select_"):
         galerie = action.split("_", 1)[1]
         key = f"select:{chat_id}:{galerie}"
@@ -356,10 +382,7 @@ def _handle_action(chat_id: int, action: str) -> None:
                 except Exception:
                     pass
             finally:
-                def _delayed_release():
-                    time.sleep(30)
-                    _release_inflight(key)
-                threading.Thread(target=_delayed_release, daemon=True).start()
+                _release_inflight(key)
 
         logger.info("[select] spawning thread for galerie=%s", galerie)
         threading.Thread(target=_run_suggestion, daemon=True).start()
@@ -389,6 +412,20 @@ def _handle_action(chat_id: int, action: str) -> None:
 # =============================================================================
 # RENDU DU MENU + SUGGESTION
 # =============================================================================
+
+# Créneaux par défaut si pas assez de données historiques (heure locale Brussels)
+_DEFAULT_SLOTS = [9, 12, 18, 20]
+
+
+def _next_slot_for_hour(hour_local: int):
+    """Prochain datetime local à hour_local:00 (aujourd'hui si futur, sinon demain)."""
+    import datetime as dt
+    now = now_local()
+    target = now.replace(hour=hour_local, minute=0, second=0, microsecond=0)
+    if target <= now:
+        target += dt.timedelta(days=1)
+    return target  # datetime avec tzinfo Europe/Brussels
+
 
 def _progress_dot(done: int, total: int) -> str:
     """Icône colorée par taux de complétion : ⚪ (0) 🔵 (en cours) ✅ (fini)."""
@@ -442,6 +479,7 @@ def _send_menu(chat_id: int) -> None:
         keyboard = [[
             {"text": "📈 Stats", "callback_data": "view_stats"},
             {"text": "📥 Export", "callback_data": "export_db_btn"},
+            {"text": "🤖 Auto-pub", "callback_data": "autopub_menu"},
             {"text": "🔄 Renew", "callback_data": "renew_threads_btn"},
         ]]
 
@@ -538,6 +576,73 @@ def _send_suggestion(chat_id: int, galerie: str) -> None:
     ]
     send_photo(chat_id, img_url, visible_caption, reply_markup={"inline_keyboard": kb})
     logger.info("[suggest] ✅ send_photo done TOTAL %dms", int((time.time() - t0) * 1000))
+
+
+# =============================================================================
+# AUTO-PUB : sélection galerie + schedule automatique à l'heure optimale
+# =============================================================================
+
+def _send_autopub_menu(chat_id: int) -> None:
+    """Sous-menu : liste des galeries pour l'auto-pub."""
+    config = load_yaml_config()
+    galeries = config.get("galeries", [])
+    buttons = [
+        {"text": f"🤖 {_display_name_for(g, config)}", "callback_data": f"autopub_{g}"}
+        for g in galeries
+    ]
+    keyboard = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+    keyboard.append([{"text": "⬅️ Menu", "callback_data": "menu"}])
+    send_message(
+        chat_id,
+        "🤖 *Auto-pub* — Choisis une galerie :\n"
+        "_Je sélectionne une photo, génère la légende et programme à l'heure optimale._",
+        reply_markup={"inline_keyboard": keyboard},
+    )
+
+
+def _auto_publish_flow(chat_id: int, galerie: str) -> None:
+    """Sélectionne une photo, génère la caption et programme à la meilleure heure."""
+    import datetime as dt
+    t0 = time.time()
+    config = load_yaml_config()
+    display = _display_name_for(galerie, config)
+    logger.info("[autopub] start galerie=%s", galerie)
+
+    send_message(chat_id, f"🤖 *Auto-pub {display}* — sélection en cours…")
+
+    # 1. Photo non publiée
+    img_url = pick_unseen_photo(config["site_url"], galerie)
+    if not img_url:
+        send_message(chat_id, f"⚠️ *{display}* est épuisée — toutes les photos ont déjà été envoyées.")
+        return
+
+    # 2. Génération de la caption
+    full_content = generate_caption(img_url, galerie)
+    visible_caption, _alt = split_content(full_content)
+    logger.info("[autopub] caption %d chars (+%dms)", len(full_content), int((time.time()-t0)*1000))
+
+    # 3. Meilleure heure : galerie d'abord, puis toutes galeries, puis créneaux par défaut
+    hour = best_posting_hour(galerie) or best_posting_hour()
+    if hour is None:
+        now_h = now_local().hour
+        hour = next((h for h in _DEFAULT_SLOTS if h > now_h), _DEFAULT_SLOTS[0])
+        source = "créneau par défaut"
+    else:
+        source = "heure optimale calculée"
+    logger.info("[autopub] heure=%dh (%s)", hour, source)
+
+    # 4. Prochain slot dans le futur → schedule en UTC
+    target_local = _next_slot_for_hour(hour)
+    run_at_utc = to_utc(target_local).replace(tzinfo=None)
+    schedule_post(chat_id, img_url, full_content, run_at_utc)
+    logger.info("[autopub] scheduled at %s UTC (+%dms)", run_at_utc, int((time.time()-t0)*1000))
+
+    # 5. Confirmation avec aperçu photo
+    day_label = "aujourd'hui" if target_local.date() == now_local().date() else "demain"
+    time_label = target_local.strftime("%H:%M")
+    header = f"✅ *Programmé {day_label} à {time_label}* ({source})\n\n"
+    preview = visible_caption[:500] + ("…" if len(visible_caption) > 500 else "")
+    send_photo(chat_id, img_url, header + preview)
 
 
 # =============================================================================
