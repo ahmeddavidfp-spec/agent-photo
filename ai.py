@@ -40,7 +40,7 @@ DEFAULT_SAFE_ACCOUNTS = [
 
 DEFAULT_HASHTAGS = (
     "#streetphotography #spicollective #street_perfection #burnmyeye "
-    "#bnw_demand #leicaphotography #davidahmed #leica #bnw"
+    "#bnw_demand #leicaphotography #davidmertens #leica #bnw"
 )
 
 
@@ -61,7 +61,7 @@ def split_content(text: str) -> Tuple[str, str]:
     if SEPARATOR in text:
         caption, alt = text.split(SEPARATOR, 1)
         return caption.strip(), alt.strip()
-    return text.strip(), "Fine art photography by David Ahmed."
+    return text.strip(), "Fine art photography by David Mertens."
 
 
 def _clean_link_duplicates(caption: str, display_link: str) -> str:
@@ -370,7 +370,7 @@ def generate_caption(image_url: str, galerie: str) -> str:
     raw = _strip_labels(raw)
     caption, alt = split_content(raw)
     caption = _clean_link_duplicates(caption, display_link)
-    alt = alt or f"Fine art photography of {galerie} by David Ahmed."
+    alt = alt or f"Fine art photography of {galerie} by David Mertens."
     return f"{caption}{SEPARATOR}{alt}"
 
 
@@ -382,5 +382,5 @@ def _fallback_caption(display_name: str, display_link: str) -> str:
         f"Full series / Série complète 👇\n"
         f"{display_link}"
         f"{SEPARATOR}"
-        f"Fine art photography by David Ahmed from the {display_name} gallery."
+        f"Fine art photography by David Mertens from the {display_name} gallery."
     )
