@@ -273,7 +273,7 @@ def _write_caption_with_claude(prompt: str) -> Optional[str]:
             msg = client.messages.create(
                 model=ANTHROPIC_MODEL,
                 max_tokens=1500,
-                temperature=0.8,
+                temperature=0.7,
                 messages=[{"role": "user", "content": prompt}],
             )
             # msg.content est une liste de blocs (text blocks)
@@ -311,7 +311,7 @@ def _write_caption_with_openai(prompt: str) -> Optional[str]:
                 model=OPENAI_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=1500,
-                temperature=0.8,
+                temperature=0.7,
             )
             out = (response.choices[0].message.content or "").strip()
             if out:

@@ -278,27 +278,74 @@ def _poll_container_status(
 # PUBLICATION INSTAGRAM
 # =========================================================================
 
+def _extract_hashtag_block(caption: str) -> tuple[str, str]:
+    """Sépare la caption de son bloc de hashtags final.
+
+    Retourne (caption_sans_hashtags, hashtags_str).
+    Le bloc hashtags = lignes de fin où tous les tokens commencent par '#'.
+    """
+    lines = caption.rstrip().split("\n")
+    split_idx = len(lines)
+    for i in range(len(lines) - 1, -1, -1):
+        stripped = lines[i].strip()
+        if not stripped:
+            split_idx = i
+            continue
+        tokens = stripped.split()
+        if all(t.startswith("#") for t in tokens):
+            split_idx = i
+        else:
+            break
+    body = "\n".join(lines[:split_idx]).rstrip()
+    hashtags = " ".join(
+        t for line in lines[split_idx:] for t in line.split() if t.startswith("#")
+    )
+    return body, hashtags
+
+
+def _post_ig_comment(media_id: str, text: str, token: str) -> None:
+    """Poste le texte comme premier commentaire sur un post IG.
+
+    Silencieux en cas d'échec — les hashtags en commentaire sont un bonus,
+    pas un prérequis à la publication.
+    """
+    if not text:
+        return
+    try:
+        r = safe_post(
+            f"{FB_API}{media_id}/comments",
+            data={"message": text, "access_token": token},
+        )
+        if r.status_code == 200:
+            logger.info("IG first comment posted (%d chars)", len(text))
+        else:
+            logger.warning("IG first comment failed: %s", r.text[:200])
+    except Exception as e:
+        logger.warning("_post_ig_comment error: %s", e)
+
+
 def publish_to_instagram(image_url: str, full_text: str) -> Tuple[bool, str]:
-    """Publie sur Instagram. Le lien du site est remplacé par 'Link in Bio'."""
+    """Publie sur Instagram. Hashtags postés en premier commentaire."""
     ig_token = get_ig_token()
     if not (ig_token and IG_USER_ID):
         return False, "IG_ACCESS_TOKEN ou IG_USER_ID manquant"
 
     caption, _alt = split_content(full_text)
     # IG ne rend pas les liens cliquables dans la caption.
-    # On couvre les deux domaines (nouveau + ancien) pour être safe.
     caption = re.sub(
         r"(davidmertens|davidahmed)\.me[^\s\n]*",
         "🔗 Link in Bio for full series",
         caption,
     )
+    # Extraire les hashtags → premier commentaire (caption plus propre)
+    caption_clean, hashtag_block = _extract_hashtag_block(caption)
 
     try:
         r = safe_post(
             f"{FB_API}{IG_USER_ID}/media",
             data={
                 "image_url": image_url,
-                "caption": caption,
+                "caption": caption_clean,
                 "access_token": ig_token,
             },
         )
@@ -318,13 +365,14 @@ def publish_to_instagram(image_url: str, full_text: str) -> Tuple[bool, str]:
         )
         if pub.status_code != 200:
             err = str(pub.json())
-            # Si on était en timeout et que la publish renvoie vraiment un échec,
-            # c'est que le conteneur n'était pas prêt.
             if poll == "timeout":
                 return False, f"Container IG pas prêt (timeout polling) : {err}"
             return False, err
-        # On retourne le media_id → utilisé pour collecter les insights 24h+ après
+
         media_id = (pub.json() or {}).get("id", "")
+        # Hashtags en premier commentaire — non-bloquant
+        if media_id and hashtag_block:
+            _post_ig_comment(media_id, hashtag_block, ig_token)
         return True, media_id
     except Exception as e:
         logger.exception("publish_to_instagram error")

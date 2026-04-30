@@ -65,46 +65,45 @@ hashtags: "#streetphotography #spicollective #street_perfection #burnmyeye #hcsc
 # contenu. Séparateur entre exemples : ligne avec "---".
 voice_examples: |
   ---
-  Caught in the Colors of Coney Island
-  Amidst the vibrant hues of Coney Island, a moment of solitude unfolds.
-  What stories do these colors tell?
+  The door was open. Nobody went in.
+  Three seconds of nothing. That's the photo. 📍 Bruxelles
 
-  Pris dans les Couleurs de Coney Island
-  Au milieu des teintes vives de Coney Island, un moment de solitude se dévoile.
-  Quelles histoires ces couleurs racontent-elles ?
+  La porte était ouverte. Personne n'est entré.
+  Trois secondes de rien. C'est ça, la photo. 📍 Bruxelles
 
-  Full series 👇
-  Link in Bio for full series
-  (cc @streetclassics @urbanromantix)
-  #ConeyIsland #NewYorkVibes #StreetPhotography
+  Série complète 👇
+  davidmertens.me/bruxelles
+  #streetphotography #bnw #leicaphotography
   ---
-  New York Noir: City of Shadows
-  📍 A timeless scene where steam rises from the streets of New York, capturing the city's pulse at night.
-  What stories do these streets hold?
+  She crossed the frame in two seconds. I had one.
+  The light was ready. 📍 New York
 
-  New York Noir : Ville des Ombres
-  📍 Une scène intemporelle où la vapeur s'élève des rues de New York, capturant le pouls nocturne de la ville.
-  Quelles histoires ces rues racontent-elles ?
+  Elle a traversé le cadre en deux secondes. J'en avais une.
+  La lumière, elle, était prête. 📍 New York
 
-  Full series 👇
-  Link in Bio for full series
-  (cc @streetclassics @raw_urbanshots)
-  #UrbanPhotography #NewYorkNights #CityVibes
+  Série complète 👇
+  davidmertens.me/new-york
+  #nycstreet #streetphotography #bnw_nyc
   ---
-  Moments Suspendus
-  Dans le cadre d'un métro en mouvement, les passagers échangent des regards et des histoires non dites, capturant l'essence de la diversité new-yorkaise. La lumière douce et l'ambiance feutrée du wagon révèlent une scène intime de la vie urbaine.
-  Quel est votre souvenir le plus marquant dans le métro ?
+  Sunday in Milano. Nobody hurries. Somebody always does.
+  The contrast lives in the detail — linen, shadow, pace. 📍 Milano
 
-  (cc @lensculture @urbanromantix @magnumphotos)
-  www.davidmertens.me/new-york
-  #NewYork #SubwayStories #UrbanLife
+  Dimanche à Milano. Personne ne se presse. Quelqu'un le fait toujours.
+  Le contraste vit dans les détails — lin, ombre, allure. 📍 Milano
+
+  Série complète 👇
+  davidmertens.me/milan
+  #milan #streetphotography #bnw
   ---
-  Elegance, Croatian-style
-  No rush, no noise — just a moment suspended between shade and sunshine.
-  Effortlessly poised in linen, navy and neutrals, with a wide-brimmed hat to frame the quiet confidence.
-  Split isn't just a city. It's a state of mind.
+  Tokyo doesn't explain itself.
+  You either read it fast or you miss it. 📍 Tokyo
 
-  #SplitStyle #CroatianElegance #ChicAbroad #QuietLuxury #TravelMood #SlowLiving #EffortlessStyle
+  Tokyo ne s'explique pas.
+  Tu la lis vite ou tu la rates. 📍 Tokyo
+
+  Série complète 👇
+  davidmertens.me/tokyo
+  #tokyostreet #streetphotography #bnw_tokyo
 
 # --- Contexte curatorial par galerie (pass 2) --------------------------------
 # Texte long décrivant TA vision artistique de la ville. Injecté dans Pass 2
@@ -157,6 +156,54 @@ gallery_context:
     Milan réussit à faire cohabiter le faste et l'austérité. Mes images
     explorent cette dualité : la verticalité des gratte-ciels de Porta Nuova
     face à la pierre grise des vieux palais.
+
+  bruxelles: |
+    Bruxelles est une ville qui résiste à la carte postale. Trop plate pour être
+    dramatique, trop grise pour être solaire, elle n'offre rien aux photographes
+    pressés. C'est précisément là sa force : elle force la patience.
+    J'y suis né et j'y reviens toujours un peu étranger. La beauté y est oblique —
+    une façade art déco moisie, un marché qui sent la frite et le pavé mouillé,
+    un enfant qui court dans un couloir de lumière qui n'existe que deux fois par an.
+    Bruxelles ne se donne pas. Elle se mérite. Dans cette série, je cherche à
+    photographier la ville comme on regarde un vieil ami : sans illusion, mais avec
+    affection. C'est ma ville et ce n'est pas la mienne.
+
+  barcelone: |
+    Barcelone est lumineuse et ça complique tout. Dans une ville pareille, la lumière
+    est un personnage à part entière — elle sculpte la pierre, brûle les ombres,
+    révèle ce que les autres villes cachent. J'ai dû apprendre à ne pas me laisser
+    séduire par le spectacle.
+    Ce qui m'intéresse à Barcelone, c'est ce qui résiste à la mise en scène : les
+    gens qui vivent là, pas ceux qui visitent. Les gestes ordinaires sur fond de
+    Gaudí. L'ennui majestueux d'un dimanche après-midi. L'architecture qui déborde
+    de partout mais les corps qui continuent leur trajet sans lever la tête.
+    C'est une ville faite pour les photographes de rue parce qu'elle offre trop —
+    et qu'il faut avoir le courage de refuser ce trop.
+
+  berlin: |
+    Berlin est une ville de fantômes. Pas les fantômes kitsch des guides touristiques,
+    mais les vrais — ceux qui habitent les espaces vides, les lots non construits,
+    les immeubles qui ont survécu à trop de régimes pour avoir un seul style.
+    Ce qui fascine dans Berlin, c'est la cohabitation impossible entre le poids de
+    l'histoire et l'insouciance bruyante de la ville actuelle. Les berlinois ont
+    appris à ne pas regarder en arrière, et cette résolution forcée crée une tension
+    photographique permanente.
+    J'ai photographié Berlin en cherchant les points de friction : là où le béton
+    rencontre le street art, là où la brutalité des formes rencontre la douceur des
+    corps qui se déplacent dessous. Berlin ne demande pas à être aimée. Elle demande
+    à être regardée.
+
+  casablanca: |
+    Casablanca n'est pas la ville du film. C'est mieux que ça — et plus difficile.
+    Une mégapole nord-africaine contemporaine qui ne ressemble à aucune autre : ni
+    arabe, ni française, ni africaine, mais tout ça à la fois dans un désordre
+    magnifique.
+    La lumière y est d'une crudité rare. Pas la lumière dorée de Marrakech, mais une
+    lumière blanche et directe qui ne pardonne rien. Les contrastes sont immédiats,
+    les ombres presque noires à midi, les façades brûlées.
+    J'ai cherché à photographier la tension entre une ville qui se modernise à toute
+    vitesse et une vie de quartier qui n'a pas changé. Les deux coexistent à un mètre
+    l'un de l'autre, sans se voir.
 
 # --- Comptes "safe" globaux (utilisés si aucune liste par galerie) -----------
 safe_mentions:
