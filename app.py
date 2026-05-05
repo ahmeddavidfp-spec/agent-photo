@@ -366,7 +366,6 @@ def _handle_action(chat_id: int, action: str) -> None:
             f"✅ Auto-pub quotidien *{display}* activé.\n"
             "_Je publierai automatiquement une photo chaque jour à partir de 8h._",
         )
-        _send_daily_menu(chat_id)
         return
 
     if action.startswith("daily_off_"):
@@ -375,7 +374,6 @@ def _handle_action(chat_id: int, action: str) -> None:
         config = load_yaml_config()
         display = _display_name_for(galerie, config)
         send_message(chat_id, f"⏸ Auto-pub quotidien *{display}* désactivé.")
-        _send_daily_menu(chat_id)
         return
 
     if action == "autopub_menu":
