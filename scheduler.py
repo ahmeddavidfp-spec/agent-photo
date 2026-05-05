@@ -32,7 +32,7 @@ ALERT_HOUR_LOCAL = 9
 # Intervalle de collecte des insights (en secondes) — sobre pour Meta rate limits
 INSIGHTS_COLLECT_INTERVAL = 3600  # 1×/h
 # Heure locale minimale pour déclencher l'auto-pub quotidien
-DAILY_AUTOPUB_TRIGGER_HOUR = 8
+DAILY_AUTOPUB_TRIGGER_HOUR = 0  # TEST — remettre à 8 en prod
 
 # État du check quotidien (pas besoin de lock : un seul thread scheduler)
 _last_alert_check_date: Optional[dt.date] = None
