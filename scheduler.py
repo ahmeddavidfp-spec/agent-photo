@@ -12,15 +12,17 @@ from typing import Optional
 
 from alerts import send_token_alert_if_needed
 from db import (
-    due_scheduled_posts, mark_photo_as_sent, posts_pending_metrics,
-    record_published_post, save_metrics, set_scheduled_status,
+    due_scheduled_posts, get_active_daily_autopubs, get_daily_autopub_last_run,
+    mark_photo_as_sent, posts_pending_metrics,
+    record_published_post, save_metrics, schedule_post, set_daily_autopub_last_run,
+    set_scheduled_status,
 )
 from meta_api import (
     fetch_ig_insights, fetch_th_insights,
     publish_to_instagram, publish_to_threads,
 )
 from telegram_bot import send_message
-from timezones import now_local, now_utc
+from timezones import DEFAULT_SLOTS, next_slot_for_hour, now_local, now_utc, to_utc
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +31,8 @@ POLL_SECONDS = 30
 ALERT_HOUR_LOCAL = 9
 # Intervalle de collecte des insights (en secondes) — sobre pour Meta rate limits
 INSIGHTS_COLLECT_INTERVAL = 3600  # 1×/h
+# Heure locale minimale pour déclencher l'auto-pub quotidien
+DAILY_AUTOPUB_TRIGGER_HOUR = 8
 
 # État du check quotidien (pas besoin de lock : un seul thread scheduler)
 _last_alert_check_date: Optional[dt.date] = None
@@ -126,12 +130,86 @@ def _process_due_posts() -> None:
         send_message(chat_id, msg)
 
 
+def _silent_autopub(chat_id: int, galerie: str) -> None:
+    """Auto-pub quotidien sans confirmation : sélectionne, génère, programme."""
+    from ai import generate_caption, split_content
+    from db import best_posting_hour
+    from gallery import pick_unseen_photo
+    from settings import load_yaml_config
+
+    config = load_yaml_config()
+    names = config.get("gallery_names") or {}
+    display = names.get(galerie) or galerie.replace("-", " ").replace("_", " ").title()
+
+    logger.info("[daily_autopub] start galerie=%s chat=%s", galerie, chat_id)
+    try:
+        img_url = pick_unseen_photo(config["site_url"], galerie)
+    except Exception as e:
+        logger.exception("[daily_autopub] pick_unseen_photo failed: %s", e)
+        send_message(chat_id, f"⚠️ Auto-pub quotidien *{display}* : erreur de sélection.")
+        return
+
+    if not img_url:
+        send_message(
+            chat_id,
+            f"⚠️ Auto-pub quotidien *{display}* : galerie épuisée, toutes les photos ont été publiées.",
+        )
+        return
+
+    try:
+        full_content = generate_caption(img_url, galerie)
+    except Exception as e:
+        logger.exception("[daily_autopub] generate_caption failed: %s", e)
+        send_message(chat_id, f"⚠️ Auto-pub quotidien *{display}* : erreur de génération de légende.")
+        return
+
+    hour = best_posting_hour(galerie) or best_posting_hour()
+    if hour is None:
+        now_h = now_local().hour
+        hour = next((h for h in DEFAULT_SLOTS if h > now_h), DEFAULT_SLOTS[0])
+
+    target_local = next_slot_for_hour(hour)
+    run_at_utc = to_utc(target_local).replace(tzinfo=None)
+    schedule_post(chat_id, img_url, full_content, run_at_utc)
+
+    day_label = "aujourd'hui" if target_local.date() == now_local().date() else "demain"
+    time_label = target_local.strftime("%H:%M")
+    send_message(
+        chat_id,
+        f"🔄 *Auto-pub quotidien* — *{display}*\n"
+        f"📅 Programmé *{day_label} à {time_label}* automatiquement.",
+    )
+    logger.info("[daily_autopub] scheduled galerie=%s at %s", galerie, run_at_utc)
+
+
+def _run_daily_autopubs() -> None:
+    """Lance une fois par jour (après DAILY_AUTOPUB_TRIGGER_HOUR) les auto-pubs actifs."""
+    nowl = now_local()
+    if nowl.hour < DAILY_AUTOPUB_TRIGGER_HOUR:
+        return
+    today_str = nowl.strftime("%Y-%m-%d")
+
+    active = get_active_daily_autopubs()
+    for chat_id, galerie in active:
+        last_run = get_daily_autopub_last_run(chat_id, galerie)
+        if last_run == today_str:
+            continue
+        set_daily_autopub_last_run(chat_id, galerie, today_str)
+        threading.Thread(
+            target=_silent_autopub,
+            args=(chat_id, galerie),
+            daemon=True,
+            name=f"daily-autopub-{galerie}-{chat_id}",
+        ).start()
+
+
 def scheduler_loop() -> None:
     while True:
         try:
             _process_due_posts()
             _run_daily_token_check()
             _collect_pending_insights()
+            _run_daily_autopubs()
         except Exception as e:
             logger.exception("Scheduler loop error: %s", e)
         time.sleep(POLL_SECONDS)

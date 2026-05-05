@@ -100,6 +100,12 @@ def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_metrics_pending "
             "ON post_metrics(collected_at, published_at)"
         )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS daily_autopub ("
+            "chat_id INTEGER, galerie TEXT, active INTEGER DEFAULT 1, "
+            "last_run_date TEXT, created_at TEXT, "
+            "PRIMARY KEY (chat_id, galerie))"
+        )
 
         # Migrations douces : ajout de colonnes si manquantes
         cols = {row[1] for row in conn.execute("PRAGMA table_info(sent_photos)")}
@@ -431,3 +437,49 @@ def best_posting_hour(galerie: Optional[str] = None) -> Optional[int]:
         return None
 
     return max(hour_scores, key=lambda h: sum(hour_scores[h]) / len(hour_scores[h]))
+
+
+# --- Auto-pub quotidien ---
+
+def set_daily_autopub(chat_id: int, galerie: str, active: bool) -> None:
+    with connection() as conn:
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute(
+            "INSERT INTO daily_autopub (chat_id, galerie, active, created_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(chat_id, galerie) DO UPDATE SET active = excluded.active",
+            (chat_id, galerie, int(active), now),
+        )
+
+
+def is_daily_autopub_active(chat_id: int, galerie: str) -> bool:
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT active FROM daily_autopub WHERE chat_id = ? AND galerie = ?",
+            (chat_id, galerie),
+        ).fetchone()
+    return bool(row and row[0])
+
+
+def get_active_daily_autopubs() -> List[Tuple[int, str]]:
+    """Retourne [(chat_id, galerie)] pour tous les abonnements actifs."""
+    with connection() as conn:
+        return conn.execute(
+            "SELECT chat_id, galerie FROM daily_autopub WHERE active = 1"
+        ).fetchall()
+
+
+def get_daily_autopub_last_run(chat_id: int, galerie: str) -> Optional[str]:
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT last_run_date FROM daily_autopub WHERE chat_id = ? AND galerie = ?",
+            (chat_id, galerie),
+        ).fetchone()
+    return row[0] if row else None
+
+
+def set_daily_autopub_last_run(chat_id: int, galerie: str, date_str: str) -> None:
+    with connection() as conn:
+        conn.execute(
+            "UPDATE daily_autopub SET last_run_date = ? WHERE chat_id = ? AND galerie = ?",
+            (date_str, chat_id, galerie),
+        )

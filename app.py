@@ -8,8 +8,10 @@ from flask import Flask, abort, jsonify, request
 
 from db import (
     already_sent_urls, best_posting_hour, cancel_scheduled_post, clear_session,
-    export_to_csv, get_session, get_stats, init_db, list_scheduled_posts,
+    export_to_csv, get_active_daily_autopubs, get_session, get_stats, init_db,
+    is_daily_autopub_active, list_scheduled_posts,
     mark_photo_as_sent, record_published_post, save_session, schedule_post,
+    set_daily_autopub,
 )
 from ai import SEPARATOR, generate_caption, split_content
 from gallery import (
@@ -25,7 +27,7 @@ from settings import (
     load_yaml_config,
 )
 from telegram_bot import answer_callback_query, send_document, send_message, send_photo, send_typing_action
-from timezones import from_utc_str, now_local, now_utc, to_utc
+from timezones import DEFAULT_SLOTS, from_utc_str, next_slot_for_hour, now_local, now_utc, to_utc
 
 logging.basicConfig(
     level=logging.INFO,
@@ -350,6 +352,32 @@ def _handle_action(chat_id: int, action: str) -> None:
         send_message(chat_id, "✅ Post annulé." if ok else "⚠️ Post introuvable ou déjà publié.")
         return
 
+    if action == "daily_menu":
+        _send_daily_menu(chat_id)
+        return
+
+    if action.startswith("daily_on_"):
+        galerie = action[len("daily_on_"):]
+        set_daily_autopub(chat_id, galerie, True)
+        config = load_yaml_config()
+        display = _display_name_for(galerie, config)
+        send_message(
+            chat_id,
+            f"✅ Auto-pub quotidien *{display}* activé.\n"
+            "_Je publierai automatiquement une photo chaque jour à partir de 8h._",
+        )
+        _send_daily_menu(chat_id)
+        return
+
+    if action.startswith("daily_off_"):
+        galerie = action[len("daily_off_"):]
+        set_daily_autopub(chat_id, galerie, False)
+        config = load_yaml_config()
+        display = _display_name_for(galerie, config)
+        send_message(chat_id, f"⏸ Auto-pub quotidien *{display}* désactivé.")
+        _send_daily_menu(chat_id)
+        return
+
     if action == "autopub_menu":
         _send_autopub_menu(chat_id)
         return
@@ -456,8 +484,8 @@ def _handle_action(chat_id: int, action: str) -> None:
 
 import contextlib
 
-# Créneaux par défaut si pas assez de données historiques (heure locale Brussels)
-_DEFAULT_SLOTS = [9, 12, 18, 20]
+# Alias local (exporté depuis timezones)
+_DEFAULT_SLOTS = DEFAULT_SLOTS
 
 
 @contextlib.contextmanager
@@ -478,14 +506,7 @@ def _typing_while(chat_id: int):
         stop.set()
 
 
-def _next_slot_for_hour(hour_local: int):
-    """Prochain datetime local à hour_local:00 (aujourd'hui si futur, sinon demain)."""
-    import datetime as dt
-    now = now_local()
-    target = now.replace(hour=hour_local, minute=0, second=0, microsecond=0)
-    if target <= now:
-        target += dt.timedelta(days=1)
-    return target  # datetime avec tzinfo Europe/Brussels
+_next_slot_for_hour = next_slot_for_hour
 
 
 def _progress_dot(done: int, total: int) -> str:
@@ -545,6 +566,7 @@ def _send_menu(chat_id: int) -> None:
             ],
             [
                 {"text": "🤖 Auto-pub", "callback_data": "autopub_menu"},
+                {"text": "🔄 Quotidien", "callback_data": "daily_menu"},
                 {"text": "📥 Export", "callback_data": "export_db_btn"},
             ],
         ]
@@ -685,6 +707,27 @@ def _send_scheduled_list(chat_id: int) -> None:
 
     kb.append([{"text": "⬅️ Menu", "callback_data": "menu"}])
     send_message(chat_id, "\n".join(lines), reply_markup={"inline_keyboard": kb})
+
+
+def _send_daily_menu(chat_id: int) -> None:
+    """Sous-menu : active/désactive l'auto-pub quotidien par galerie."""
+    config = load_yaml_config()
+    galeries = config.get("galeries", [])
+    keyboard = []
+    for g in galeries:
+        display = _display_name_for(g, config)
+        if is_daily_autopub_active(chat_id, g):
+            keyboard.append([{"text": f"✅ {display} — désactiver", "callback_data": f"daily_off_{g}"}])
+        else:
+            keyboard.append([{"text": f"▶️ {display}", "callback_data": f"daily_on_{g}"}])
+    keyboard.append([{"text": "⬅️ Menu", "callback_data": "menu"}])
+    send_message(
+        chat_id,
+        "🔄 *Auto-pub quotidien*\n"
+        "_Active une galerie : je publierai automatiquement une photo chaque jour sans que tu aies à intervenir._\n\n"
+        "✅ = actif (cliquer pour désactiver) · ▶️ = inactif",
+        reply_markup={"inline_keyboard": keyboard},
+    )
 
 
 def _send_autopub_menu(chat_id: int) -> None:
