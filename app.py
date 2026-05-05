@@ -572,7 +572,7 @@ def _send_menu(chat_id: int) -> None:
         galeries = config.get("galeries", [])
         # Scraping parallèle ; counts_for_gallery a son propre cache 5min.
         t1 = time.time()
-        with ThreadPoolExecutor(max_workers=8) as pool:
+        with ThreadPoolExecutor(max_workers=3) as pool:
             results = list(pool.map(
                 lambda g: (g, counts_for_gallery(config["site_url"], g, sent)),
                 galeries,

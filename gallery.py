@@ -37,12 +37,17 @@ def _canonical(url: str) -> str:
 def _fetch_live(site_url: str, galerie: str) -> list[str]:
     """Appel réseau réel, sans cache. Dédup par URL canonique."""
     url = f"{site_url.rstrip('/')}/{galerie}"
-    try:
-        r = safe_get(url)
-        r.raise_for_status()
-    except Exception as e:
-        logger.error("Scraping %s échoué : %s", url, e)
-        return []
+    for attempt in range(2):
+        try:
+            r = safe_get(url)
+            r.raise_for_status()
+            break
+        except Exception as e:
+            if attempt == 0:
+                time.sleep(2)
+                continue
+            logger.error("Scraping %s échoué : %s", url, e)
+            return []
 
     soup = BeautifulSoup(r.text, "html.parser")
     # dict {canonical_url -> full_url} préserve l'ordre et dédup.
