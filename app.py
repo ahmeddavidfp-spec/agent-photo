@@ -89,6 +89,18 @@ def health():
     return jsonify(checks), status_code
 
 
+@app.route("/cron/reset-ig-token", methods=["POST", "GET"])
+def cron_reset_ig_token():
+    """Supprime le token IG stocké en DB pour forcer le fallback sur l'env var."""
+    if CRON_SECRET and request.headers.get("X-Cron-Secret") != CRON_SECRET:
+        abort(403)
+    from db import connection
+    with connection() as conn:
+        conn.execute("DELETE FROM token_store WHERE key = 'ig_access_token'")
+    logger.info("IG token DB supprimé — fallback sur env var IG_ACCESS_TOKEN")
+    return jsonify({"ok": True, "message": "Token IG réinitialisé depuis env var"})
+
+
 @app.route("/cron/refresh-tokens", methods=["POST", "GET"])
 def cron_refresh_tokens():
     """À appeler tous les 45 jours via un Cron Job Render.
