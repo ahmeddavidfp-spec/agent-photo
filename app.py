@@ -339,9 +339,15 @@ def _handle_action(chat_id: int, action: str) -> None:
         send_document(chat_id, export_to_csv())
         return
     if action == "renew_threads_btn":
-        ok, res = renew_threads_token()
-        msg = f"✅ **TOKEN TH renouvelé ({res[1]}j)**\n`{res[0]}`" if ok else f"❌ {res}"
-        send_message(chat_id, msg)
+        # Purge les tokens DB invalides pour forcer le fallback sur les env vars
+        from db import connection as _db_conn
+        with _db_conn() as _c:
+            _c.execute("DELETE FROM token_store WHERE key IN ('ig_access_token', 'th_access_token')")
+        ig_ok, ig_res = renew_instagram_token()
+        th_ok, th_res = renew_threads_token()
+        ig_msg = f"IG ✅ {ig_res[1]}j" if ig_ok else f"IG ❌ {str(ig_res)[:80]}"
+        th_msg = f"TH ✅ {th_res[1]}j" if th_ok else f"TH ❌ {str(th_res)[:80]}"
+        send_message(chat_id, f"🔄 *Tokens renouvelés*\n{ig_msg}\n{th_msg}")
         return
 
     if action == "schedule_btn":
