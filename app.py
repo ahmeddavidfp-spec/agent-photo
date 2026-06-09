@@ -730,16 +730,27 @@ def _send_daily_menu(chat_id: int) -> None:
     config = load_yaml_config()
     galeries = config.get("galeries", [])
     keyboard = []
+    actives = []
     for g in galeries:
         display = _display_name_for(g, config)
         if is_daily_autopub_active(chat_id, g):
+            actives.append(display)
             keyboard.append([{"text": f"✅ {display} — désactiver", "callback_data": f"daily_off_{g}"}])
         else:
             keyboard.append([{"text": f"▶️ {display}", "callback_data": f"daily_on_{g}"}])
     keyboard.append([{"text": "⬅️ Menu", "callback_data": "menu"}])
+
+    if not actives:
+        statut = "🔘 *Galerie active : aucune*"
+    elif len(actives) == 1:
+        statut = f"🟢 *Galerie active : {actives[0]}*"
+    else:
+        statut = "🟢 *Galeries actives : " + ", ".join(actives) + "*"
+
     send_message(
         chat_id,
         "🔄 *Auto-pub quotidien*\n"
+        f"{statut}\n\n"
         "_Active une galerie : je publierai automatiquement une photo chaque jour sans que tu aies à intervenir._\n\n"
         "✅ = actif (cliquer pour désactiver) · ▶️ = inactif",
         reply_markup={"inline_keyboard": keyboard},

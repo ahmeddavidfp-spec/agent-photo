@@ -444,6 +444,14 @@ def best_posting_hour(galerie: Optional[str] = None) -> Optional[int]:
 def set_daily_autopub(chat_id: int, galerie: str, active: bool) -> None:
     with connection() as conn:
         now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if active:
+            # Exclusivité : une seule galerie en auto-pub quotidien par chat.
+            # Activer une galerie désactive automatiquement toutes les autres,
+            # sinon les anciens abonnements (ex. New York) continuent de publier.
+            conn.execute(
+                "UPDATE daily_autopub SET active = 0 WHERE chat_id = ? AND galerie != ?",
+                (chat_id, galerie),
+            )
         conn.execute(
             "INSERT INTO daily_autopub (chat_id, galerie, active, created_at) VALUES (?, ?, ?, ?) "
             "ON CONFLICT(chat_id, galerie) DO UPDATE SET active = excluded.active",
