@@ -433,6 +433,18 @@ def _handle_action(chat_id: int, action: str) -> None:
             logger.info("🚫 Dédupe autopub: %s déjà en cours pour chat=%s", galerie, chat_id)
             return
 
+        # Choisir une galerie en auto-pub = en faire LA galerie publiée
+        # chaque jour. On bascule l'abonnement quotidien sur celle-ci (exclusif),
+        # ce qui désactive automatiquement l'ancienne (ex. New York).
+        set_daily_autopub(chat_id, galerie, True)
+        config = load_yaml_config()
+        display = _display_name_for(galerie, config)
+        send_message(
+            chat_id,
+            f"🔄 *Auto-pub quotidien basculé sur {display}.*\n"
+            "_Chaque jour je publierai automatiquement une photo de cette galerie à la meilleure heure._",
+        )
+
         def _run_autopub():
             try:
                 _auto_publish_flow(chat_id, galerie)
@@ -770,7 +782,7 @@ def _send_autopub_menu(chat_id: int) -> None:
     send_message(
         chat_id,
         "🤖 *Auto-pub* — Choisis une galerie :\n"
-        "_Je sélectionne une photo, génère la légende et programme à l'heure optimale._",
+        "_La galerie choisie devient celle publiée automatiquement chaque jour à la meilleure heure (l'ancienne est désactivée)._",
         reply_markup={"inline_keyboard": keyboard},
     )
 
