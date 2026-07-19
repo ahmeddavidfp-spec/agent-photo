@@ -59,7 +59,13 @@ photographer_bio: |
   Esthétique.
 
 # --- Hashtags globaux (fallback si pas de hashtags par galerie) ---
-hashtags: "#streetphotography #spicollective #street_perfection #burnmyeye #hcsc_street #streetdreamsmag #life_is_street #zonestreet #bnw_demand #streetphotographer #storyofthestreet #raw_street #leicaphotography #documentaryphotography #davidmertens #leica #bnw"
+# Mix stratégique 2 / 4 / 2 (les tailles sont des ESTIMATIONS — IG masque les
+# compteurs depuis 2023, à revalider périodiquement) :
+#   2 GRANDS (visibilité, plusieurs M de posts) : streetphotography, streetphotographer
+#   4 MOYENS (~50k–500k, communautés/feature actives) : spicollective,
+#            streetdreamsmag, life_is_street, storyofthestreet
+#   2 MICRO  (<50k, tu peux monter en "top posts") : raw_street, zonestreet
+hashtags: "#streetphotography #streetphotographer #spicollective #streetdreamsmag #life_is_street #storyofthestreet #raw_street #zonestreet"
 
 # --- Exemples de voix (pass 2) -----------------------------------------------
 # Vraies captions IG de @davidmertens.me. L'IA s'en sert pour calibrer le
@@ -274,3 +280,201 @@ per_gallery:
     mentions:
       - ig_morocco
       - streetphotographyinternational
+  # --- Villes complétées (mix 2 grands / 4 moyens / 2 micro) -----------------
+  # Tailles = estimations (IG masque les compteurs). Les comptes @mentions
+  # marqués tourisme/geo sont à VÉRIFIER (qu'ils existent bien) avant usage réel.
+  berlin:
+    hashtags:
+      - "#streetphotography"     # grand
+      - "#streetphotographer"    # grand
+      - "#berlinstreet"          # moyen
+      - "#igersberlin"           # moyen
+      - "#visitberlin"           # moyen
+      - "#streetdreamsmag"       # moyen
+      - "#bnw_berlin"            # micro
+      - "#berlingram"            # micro
+    mentions:
+      - visitberlin
+      - streetphotographyinternational
+  bruxelles:
+    hashtags:
+      - "#streetphotography"
+      - "#streetphotographer"
+      - "#brusselsstreet"
+      - "#igersbrussels"
+      - "#visitbrussels"
+      - "#life_is_street"
+      - "#bnw_brussels"
+      - "#brusselslife"
+    mentions:
+      - visit.brussels
+      - streetclassics
+  dubrovnik:
+    hashtags:
+      - "#streetphotography"
+      - "#streetphotographer"
+      - "#dubrovnik"
+      - "#croatiafulloflife"
+      - "#visitdubrovnik"
+      - "#storyofthestreet"
+      - "#bnw_captures"
+      - "#dubrovnikcity"
+    mentions:
+      - croatiafulloflife
+      - streetclassics
+  dusseldorf:
+    hashtags:
+      - "#streetphotography"
+      - "#streetphotographer"
+      - "#dusseldorf"
+      - "#igersdusseldorf"
+      - "#visitdusseldorf"
+      - "#spicollective"
+      - "#bnw_germany"
+      - "#düsseldorf"
+    mentions:
+      - visitdusseldorf
+      - streetphotographyinternational
+  ljubljana:
+    hashtags:
+      - "#streetphotography"
+      - "#streetphotographer"
+      - "#ljubljana"
+      - "#ifeelslovenia"
+      - "#visitljubljana"
+      - "#life_is_street"
+      - "#bnw_slovenia"
+      - "#ljubljanamoja"
+    mentions:
+      - ifeelslovenia
+      - streetclassics
+  londres:
+    hashtags:
+      - "#streetphotography"
+      - "#streetphotographer"
+      - "#londonstreet"
+      - "#igerslondon"
+      - "#visitlondon"
+      - "#spicollective"
+      - "#bnw_london"
+      - "#londonlife"
+    mentions:
+      - visitlondon
+      - streetphotographyinternational
+  milan:
+    hashtags:
+      - "#streetphotography"
+      - "#streetphotographer"
+      - "#milanostreet"
+      - "#igersmilano"
+      - "#visitmilano"
+      - "#streetdreamsmag"
+      - "#bnw_milano"
+      - "#milanocity"
+    mentions:
+      - visitmilano
+      - streetclassics
+  munich:
+    hashtags:
+      - "#streetphotography"
+      - "#streetphotographer"
+      - "#munichstreet"
+      - "#igersmunich"
+      - "#visitmunich"
+      - "#spicollective"
+      - "#bnw_germany"
+      - "#münchen"
+    mentions:
+      - muenchen
+      - streetphotographyinternational
+  namur:
+    hashtags:
+      - "#streetphotography"
+      - "#streetphotographer"
+      - "#namur"
+      - "#igersbelgium"
+      - "#visitwallonia"
+      - "#storyofthestreet"
+      - "#bnw_belgium"
+      - "#namurcity"
+    mentions:
+      - visitwallonia
+      - streetclassics
+  san-francisco:
+    hashtags:
+      - "#streetphotography"
+      - "#streetphotographer"
+      - "#sanfranciscostreet"
+      - "#igerssf"
+      - "#onlyinsf"
+      - "#streetdreamsmag"
+      - "#bnw_sf"
+      - "#sanfranciscoworld"
+    mentions:
+      - onlyinsf
+      - streetphotographyinternational
+  split:
+    hashtags:
+      - "#streetphotography"
+      - "#streetphotographer"
+      - "#split"
+      - "#croatiafulloflife"
+      - "#visitsplit"
+      - "#life_is_street"
+      - "#bnw_captures"
+      - "#splitcroatia"
+    mentions:
+      - visitsplit
+      - streetclassics
+  trogir:
+    hashtags:
+      - "#streetphotography"
+      - "#streetphotographer"
+      - "#trogir"
+      - "#croatiafulloflife"
+      - "#visitcroatia"
+      - "#storyofthestreet"
+      - "#bnw_captures"
+      - "#trogircroatia"
+    mentions:
+      - croatiafulloflife
+      - streetclassics
+  vienne:
+    hashtags:
+      - "#streetphotography"
+      - "#streetphotographer"
+      - "#viennastreet"
+      - "#igersvienna"
+      - "#viennanow"
+      - "#spicollective"
+      - "#bnw_vienna"
+      - "#wien"
+    mentions:
+      - viennatouristboard
+      - streetclassics
+  zadar:
+    hashtags:
+      - "#streetphotography"
+      - "#streetphotographer"
+      - "#zadar"
+      - "#croatiafulloflife"
+      - "#visitzadar"
+      - "#life_is_street"
+      - "#bnw_captures"
+      - "#zadarcroatia"
+    mentions:
+      - visitzadar
+      - streetclassics
+  zagreb:
+    hashtags:
+      - "#streetphotography"
+      - "#streetphotographer"
+      - "#zagreb"
+      - "#croatiafulloflife"
+      - "#visitzagreb"
+      - "#storyofthestreet"
+      - "#bnw_croatia"
+      - "#igerszagreb"
+    mentions:
+      - visitzagreb
+      - streetclassics
