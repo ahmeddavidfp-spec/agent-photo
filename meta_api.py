@@ -1,6 +1,5 @@
 """Publication Instagram + Threads avec polling du statut au lieu de sleep fixes."""
 import logging
-import re
 import time
 from typing import Tuple
 
@@ -331,12 +330,9 @@ def publish_to_instagram(image_url: str, full_text: str) -> Tuple[bool, str]:
         return False, "IG_ACCESS_TOKEN ou IG_USER_ID manquant"
 
     caption, _alt = split_content(full_text)
-    # IG ne rend pas les liens cliquables dans la caption.
-    caption = re.sub(
-        r"(?:https?://)?(?:www\.)?(?:davidmertens|davidahmed)\.me[^\s\n]*",
-        "🔗 Link in Bio for full series",
-        caption,
-    )
+    # IG ne rend pas les liens cliquables, mais on affiche l'URL en clair
+    # (lisible/recopiable, cohérent avec Threads). On retire juste le schéma.
+    caption = caption.replace("https://", "").replace("http://", "")
     # Extraire les hashtags → premier commentaire (caption plus propre)
     caption_clean, hashtag_block = _extract_hashtag_block(caption)
 
@@ -397,11 +393,8 @@ def publish_carousel_to_instagram(image_urls: list, full_text: str) -> Tuple[boo
         return publish_to_instagram(urls[0] if urls else "", full_text)
 
     caption, _alt = split_content(full_text)
-    caption = re.sub(
-        r"(?:https?://)?(?:www\.)?(?:davidmertens|davidahmed)\.me[^\s\n]*",
-        "🔗 Link in Bio for full series",
-        caption,
-    )
+    # URL affichée en clair (voir publish_to_instagram)
+    caption = caption.replace("https://", "").replace("http://", "")
     caption_clean, hashtag_block = _extract_hashtag_block(caption)
 
     try:
