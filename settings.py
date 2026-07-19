@@ -59,6 +59,7 @@ def load_yaml_config(path: str = "config.yaml") -> dict:
         "site_url": "https://www.davidmertens.me",
         "galeries": [],
         "custom_hashtag": "",
+        "carousel": {"enabled": False, "count": 5},
     }
     try:
         with open(path, "r", encoding="utf-8") as f:

@@ -15,10 +15,11 @@ from db import (
 )
 from ai import SEPARATOR, generate_caption, split_content
 from gallery import (
-    counts_for_gallery, fetch_gallery_photos, invalidate_cache, pick_unseen_photo,
+    carousel_settings, counts_for_gallery, fetch_gallery_photos, invalidate_cache,
+    pack_urls, pick_unseen_photo, pick_unseen_photos, unpack_urls,
 )
 from meta_api import (
-    publish_to_instagram, publish_to_threads,
+    publish_carousel_to_instagram, publish_to_instagram, publish_to_threads,
     renew_instagram_token, renew_threads_token, token_status,
 )
 from scheduler import start_scheduler
@@ -674,22 +675,25 @@ def _send_suggestion(chat_id: int, galerie: str) -> None:
     config = load_yaml_config()
     logger.info("[suggest] config loaded (+%dms)", int((time.time() - t0) * 1000))
 
+    car_enabled, car_count = carousel_settings(config)
     with _typing_while(chat_id):
-        img_url = pick_unseen_photo(config["site_url"], galerie)
-        logger.info("[suggest] pick_unseen_photo → %s (+%dms)",
-                    img_url[:60] if img_url else "None", int((time.time() - t0) * 1000))
-        if not img_url:
+        urls = pick_unseen_photos(config["site_url"], galerie, car_count if car_enabled else 1)
+        logger.info("[suggest] pick %d photos (+%dms)", len(urls), int((time.time() - t0) * 1000))
+        if not urls:
             send_message(chat_id, "Galerie vide ou toutes les photos déjà envoyées.")
             return
 
-        full_content = generate_caption(img_url, galerie)
+        cover = urls[0]  # la couverture génère la légende + sert de preview
+        full_content = generate_caption(cover, galerie)
     logger.info("[suggest] caption generated %d chars (+%dms)",
                 len(full_content or ""), int((time.time() - t0) * 1000))
 
-    save_session(chat_id, img_url, full_content)
+    save_session(chat_id, pack_urls(urls), full_content)
     logger.info("[suggest] session saved (+%dms)", int((time.time() - t0) * 1000))
 
     visible_caption, _alt = split_content(full_content)
+    if len(urls) >= 2:
+        visible_caption = f"🖼️ Carrousel de {len(urls)} photos\n\n" + visible_caption
 
     kb = [
         [{"text": "🚀 Publier sur les deux", "callback_data": "pub_both"}],
@@ -700,7 +704,7 @@ def _send_suggestion(chat_id: int, galerie: str) -> None:
         [{"text": "🔄 Autre", "callback_data": f"select_{galerie}"},
          {"text": "⬅️ Menu", "callback_data": "menu"}],
     ]
-    send_photo(chat_id, img_url, visible_caption, reply_markup={"inline_keyboard": kb})
+    send_photo(chat_id, cover, visible_caption, reply_markup={"inline_keyboard": kb})
     logger.info("[suggest] ✅ send_photo done TOTAL %dms", int((time.time() - t0) * 1000))
 
 
@@ -796,12 +800,14 @@ def _auto_publish_flow(chat_id: int, galerie: str) -> None:
 
     send_message(chat_id, f"🤖 *Auto-pub {display}* — sélection en cours…")
 
+    car_enabled, car_count = carousel_settings(config)
     with _typing_while(chat_id):
-        img_url = pick_unseen_photo(config["site_url"], galerie)
-        if not img_url:
+        urls = pick_unseen_photos(config["site_url"], galerie, car_count if car_enabled else 1)
+        if not urls:
             send_message(chat_id, f"⚠️ *{display}* est épuisée — toutes les photos ont déjà été envoyées.")
             return
-        full_content = generate_caption(img_url, galerie)
+        cover = urls[0]
+        full_content = generate_caption(cover, galerie)
 
     visible_caption, _alt = split_content(full_content)
     logger.info("[autopub] caption %d chars (+%dms)", len(full_content), int((time.time()-t0)*1000))
@@ -820,8 +826,8 @@ def _auto_publish_flow(chat_id: int, galerie: str) -> None:
     day_label = "aujourd'hui" if target_local.date() == now_local().date() else "demain"
     time_label = target_local.strftime("%H:%M")
 
-    # Sauvegarde session (même mécanique que _send_suggestion)
-    save_session(chat_id, img_url, full_content)
+    # Sauvegarde session (même mécanique que _send_suggestion) — URLs packées
+    save_session(chat_id, pack_urls(urls), full_content)
 
     # Preview + boutons de confirmation
     kb = [
@@ -831,9 +837,10 @@ def _auto_publish_flow(chat_id: int, galerie: str) -> None:
         [{"text": "✍️ Éditer légende", "callback_data": "manual_edit"}],
         [{"text": "❌ Annuler", "callback_data": "autopub_cancel"}],
     ]
-    header = f"🤖 *{display}* — {source}\n📅 Proposé : *{day_label} à {time_label}*\n\n"
+    format_label = f"🖼️ Carrousel de {len(urls)} photos\n" if len(urls) >= 2 else ""
+    header = f"🤖 *{display}* — {source}\n{format_label}📅 Proposé : *{day_label} à {time_label}*\n\n"
     preview = visible_caption[:450] + ("…" if len(visible_caption) > 450 else "")
-    send_photo(chat_id, img_url, header + preview, reply_markup={"inline_keyboard": kb})
+    send_photo(chat_id, cover, header + preview, reply_markup={"inline_keyboard": kb})
 
 
 # =============================================================================
@@ -859,11 +866,18 @@ def _background_publish(chat_id: int, mode: str, image_url: str, caption: str) -
     ok_ig = ok_th = False
     res_ig = res_th = "Non demandé"
 
+    # image_url peut contenir plusieurs URLs packées (carrousel).
+    urls = unpack_urls(image_url)
+    cover = urls[0] if urls else image_url
+
     try:
         if mode in ("both", "ig"):
-            ok_ig, res_ig = publish_to_instagram(image_url, caption)
+            if len(urls) >= 2:
+                ok_ig, res_ig = publish_carousel_to_instagram(urls, caption)
+            else:
+                ok_ig, res_ig = publish_to_instagram(cover, caption)
         if mode in ("both", "th"):
-            ok_th, res_th = publish_to_threads(image_url, caption)
+            ok_th, res_th = publish_to_threads(cover, caption)  # Threads = couverture seule
     except Exception as e:
         logger.exception("Erreur background_publish")
         send_message(chat_id, f"🔥 Erreur : {e}")
@@ -872,22 +886,35 @@ def _background_publish(chat_id: int, mode: str, image_url: str, caption: str) -
     # Enregistre chaque publish réussi pour la boucle d'apprentissage
     # (caption sans alt → c'est ce que l'audience voit)
     visible_caption, _alt = split_content(caption)
-    galerie = _gallery_from_url(image_url)
+    galerie = _gallery_from_url(cover)
     if ok_ig and isinstance(res_ig, str) and res_ig:
         try:
-            record_published_post("IG", res_ig, image_url, visible_caption, galerie)
+            record_published_post("IG", res_ig, cover, visible_caption, galerie)
         except Exception as e:
             logger.warning("record_published_post IG failed: %s", e)
     if ok_th and isinstance(res_th, str) and res_th:
         try:
-            record_published_post("TH", res_th, image_url, visible_caption, galerie)
+            record_published_post("TH", res_th, cover, visible_caption, galerie)
         except Exception as e:
             logger.warning("record_published_post TH failed: %s", e)
+
+    # Ne marquer que les photos RÉELLEMENT publiées (évite de "brûler" des
+    # photos non publiées, qui ne seraient alors jamais resuggérées) :
+    #  - carrousel IG réussi (≥2) → les N photos sont sur IG → toutes marquées
+    #  - sinon si IG simple OU Threads réussi → seule la couverture a été publiée
+    #  - rien réussi → rien marquer
+    if ok_ig and len(urls) >= 2:
+        published_urls = urls
+    elif ok_ig or ok_th:
+        published_urls = [cover]
+    else:
+        published_urls = []
+    for _u in published_urls:
+        mark_photo_as_sent(_u, galerie)
 
     if mode == "both":
         if ok_ig and ok_th:
             final = "🚀 **Succès Total !**\nInsta & Threads : ✅"
-            mark_photo_as_sent(image_url, galerie)
             clear_session(chat_id)
         else:
             final = (
@@ -896,17 +923,9 @@ def _background_publish(chat_id: int, mode: str, image_url: str, caption: str) -
                 f"TH: {'✅' if ok_th else '❌ ' + str(res_th)[:80]}"
             )
     elif mode == "ig":
-        if ok_ig:
-            final = "📸 **Instagram :** ✅"
-            mark_photo_as_sent(image_url, galerie)
-        else:
-            final = f"❌ **Erreur Insta :** {res_ig}"
+        final = "📸 **Instagram :** ✅" if ok_ig else f"❌ **Erreur Insta :** {res_ig}"
     else:  # th
-        if ok_th:
-            final = "🧵 **Threads :** ✅"
-            mark_photo_as_sent(image_url, galerie)
-        else:
-            final = f"❌ **Erreur Threads :** {res_th}"
+        final = "🧵 **Threads :** ✅" if ok_th else f"❌ **Erreur Threads :** {res_th}"
 
     send_message(chat_id, final)
 

@@ -1,6 +1,18 @@
 site_url: "https://www.davidmertens.me"
 custom_hashtag: ""
 
+# --- Carrousel Instagram -----------------------------------------------------
+# Publie plusieurs photos de la même galerie en un seul post (meilleure portée :
+# Instagram remontre le carrousel à ceux qui n'ont pas réagi la 1re fois).
+# enabled: false  → repasse en mono-photo partout, sans toucher au code.
+# count          → nombre de photos visé (Instagram accepte 2 à 10).
+# La 1re photo = couverture (sert à générer la légende). Threads reçoit la
+# couverture seule. Si la galerie n'a plus assez de photos neuves, le carrousel
+# est réduit automatiquement (et tombe sur un post simple s'il n'en reste qu'1).
+carousel:
+  enabled: true
+  count: 5
+
 # --- Noms d'affichage par galerie -------------------------------------------
 # Utilisés dans les captions à la place du slug (qui reste utilisé pour l'URL).
 # Si un slug n'est pas listé, il sera "titlé" automatiquement (bruxelles -> Bruxelles).

@@ -379,6 +379,92 @@ def publish_to_instagram(image_url: str, full_text: str) -> Tuple[bool, str]:
         return False, str(e)
 
 
+def publish_carousel_to_instagram(image_urls: list, full_text: str) -> Tuple[bool, str]:
+    """Publie un carrousel Instagram (2 à 10 photos).
+
+    Flux Meta : 1 conteneur enfant par photo (is_carousel_item=true) → 1
+    conteneur parent media_type=CAROUSEL(children=...) → media_publish.
+    Hashtags postés en 1er commentaire (comme le post simple). Si <2 URLs
+    valides, bascule automatiquement sur le post simple.
+    """
+    ig_token = get_ig_token()
+    if not (ig_token and IG_USER_ID):
+        return False, "IG_ACCESS_TOKEN ou IG_USER_ID manquant"
+
+    urls = [u for u in (image_urls or []) if u][:10]  # IG max 10
+    if len(urls) < 2:
+        # Pas de quoi faire un carrousel → post simple sur la couverture
+        return publish_to_instagram(urls[0] if urls else "", full_text)
+
+    caption, _alt = split_content(full_text)
+    caption = re.sub(
+        r"(?:https?://)?(?:www\.)?(?:davidmertens|davidahmed)\.me[^\s\n]*",
+        "🔗 Link in Bio for full series",
+        caption,
+    )
+    caption_clean, hashtag_block = _extract_hashtag_block(caption)
+
+    try:
+        # 1) Conteneurs enfants (images prêtes quasi-instantanément côté Meta)
+        child_ids: list[str] = []
+        for url in urls:
+            r = safe_post(
+                f"{FB_API}{IG_USER_ID}/media",
+                data={
+                    "image_url": url,
+                    "is_carousel_item": "true",
+                    "access_token": ig_token,
+                },
+            )
+            cid = (r.json() or {}).get("id")
+            if cid:
+                child_ids.append(cid)
+            else:
+                logger.warning("Carrousel : enfant KO (%s) : %s", url[:60], r.text[:150])
+        if len(child_ids) < 2:
+            # Pas assez d'enfants valides → repli sur un post simple (couverture)
+            logger.warning("Carrousel : <2 enfants valides, repli post simple")
+            return publish_to_instagram(urls[0], full_text)
+
+        # 2) Conteneur parent CAROUSEL
+        r = safe_post(
+            f"{FB_API}{IG_USER_ID}/media",
+            data={
+                "media_type": "CAROUSEL",
+                "children": ",".join(child_ids),
+                "caption": caption_clean,
+                "access_token": ig_token,
+            },
+        )
+        parent_id = (r.json() or {}).get("id")
+        if not parent_id:
+            return False, str(r.json())
+
+        # 3) Polling parent puis publish
+        poll = _poll_container_status(parent_id, ig_token, FB_API)
+        if poll == "error":
+            return False, "Container carrousel IG ERROR côté Meta"
+
+        pub = safe_post(
+            f"{FB_API}{IG_USER_ID}/media_publish",
+            data={"creation_id": parent_id, "access_token": ig_token},
+        )
+        if pub.status_code != 200:
+            err = str(pub.json())
+            if poll == "timeout":
+                return False, f"Carrousel IG pas prêt (timeout polling) : {err}"
+            return False, err
+
+        media_id = (pub.json() or {}).get("id", "")
+        if media_id and hashtag_block:
+            _post_ig_comment(media_id, hashtag_block, ig_token)
+        logger.info("Carrousel IG publié : %d photos, media_id=%s", len(child_ids), media_id)
+        return True, media_id
+    except Exception as e:
+        logger.exception("publish_carousel_to_instagram error")
+        return False, str(e)
+
+
 # =========================================================================
 # PUBLICATION THREADS
 # =========================================================================

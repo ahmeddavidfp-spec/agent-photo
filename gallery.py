@@ -116,6 +116,52 @@ def pick_unseen_photo(site_url: str, galerie: str) -> Optional[str]:
     return random.choice(fresh)
 
 
+# =========================================================================
+# CARROUSEL : sélection multi-photos + (dé)packing d'URLs
+# =========================================================================
+# Plusieurs URLs voyagent dans le même champ `image_url` (session DB +
+# scheduled_posts) sans migration de schéma. Séparateur = newline (jamais
+# présent dans une URL). Les backends de publication dépackent au moment de
+# publier ; une URL simple (sans séparateur) reste valide → dépack = [url].
+URL_SEP = "\n"
+
+
+def pack_urls(urls: list[str]) -> str:
+    """Joint N URLs en une seule string stockable. 1 URL → inchangée."""
+    return URL_SEP.join(u for u in urls if u)
+
+
+def unpack_urls(packed: str) -> list[str]:
+    """Redécoupe une string packée en liste d'URLs. Tolère l'URL simple."""
+    if not packed:
+        return []
+    return [u for u in packed.split(URL_SEP) if u]
+
+
+def carousel_settings(config: dict) -> tuple[bool, int]:
+    """(enabled, count) depuis config['carousel'], bornés à [2, 10]."""
+    car = config.get("carousel") or {}
+    enabled = bool(car.get("enabled", False))
+    count = int(car.get("count", 5) or 5)
+    return enabled, max(2, min(10, count))
+
+
+def pick_unseen_photos(site_url: str, galerie: str, n: int = 1) -> list[str]:
+    """N photos jamais publiées (1re = couverture). Peut renvoyer moins si la
+    galerie est presque épuisée, ou [] si tout a été publié.
+
+    Comparaison par URL canonique (comme pick_unseen_photo) pour ne pas
+    resuggérer une variante déjà en DB.
+    """
+    all_urls = fetch_gallery_photos(site_url, galerie)
+    sent_canon = {_canonical(s) for s in already_sent_urls()}
+    fresh = [u for u in all_urls if _canonical(u) not in sent_canon]
+    if not fresh:
+        return []
+    random.shuffle(fresh)
+    return fresh[:max(1, n)]
+
+
 def counts_for_gallery(site_url: str, galerie: str, sent: set[str]) -> tuple[int, int]:
     """(n_envoyées, n_total) pour affichage dans le menu.
 
