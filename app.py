@@ -90,6 +90,19 @@ def health():
     return jsonify(checks), status_code
 
 
+@app.route("/stats")
+def stats_page():
+    """Dashboard HTML : reach / saves / engagement par galerie et post.
+
+    Protégé par ?key=CRON_SECRET (si défini). Données collectées ~24h après
+    publication par le scheduler. Ouvre : https://<app>.onrender.com/stats?key=<secret>
+    """
+    if CRON_SECRET and request.args.get("key") != CRON_SECRET:
+        abort(403)
+    from dashboard import render_stats_html
+    return render_stats_html()
+
+
 @app.route("/cron/reset-ig-token", methods=["POST", "GET"])
 def cron_reset_ig_token():
     """Supprime le token IG stocké en DB pour forcer le fallback sur l'env var."""
