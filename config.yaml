@@ -239,44 +239,52 @@ per_gallery:
   barcelone:
     hashtags:
       - "#streetphotography"
+      - "#streetphotographer"
       - "#barcelonastreet"
       - "#bcn"
-      - "#bnw_barcelona"
       - "#visitbarcelona"
       - "#spicollective"
+      - "#bnw_barcelona"
+      - "#barcelonagram"
     mentions:
       - visitbarcelona
       - streetclassics
   new-york:
     hashtags:
       - "#streetphotography"
+      - "#streetphotographer"
       - "#nycstreet"
       - "#newyork_instagram"
-      - "#bnw_nyc"
       - "#nyc"
       - "#magnumphotos"
+      - "#bnw_nyc"
+      - "#nyc_streetphotography"
     mentions:
       - magnumphotos
       - streetphotographyinternational
   tokyo:
     hashtags:
+      - "#streetphotography"
+      - "#streetphotographer"
       - "#tokyostreet"
       - "#tokyocameraclub"
-      - "#streetphotography"
-      - "#bnw_tokyo"
       - "#japan_of_insta"
       - "#leica_street"
+      - "#bnw_tokyo"
+      - "#tokyogram"
     mentions:
       - tokyocameraclub
       - leica_street
   casablanca:
     hashtags:
+      - "#streetphotography"
+      - "#streetphotographer"
       - "#casablanca"
       - "#streetphotographymorocco"
-      - "#bnw_morocco"
       - "#morocco_travel"
-      - "#streetphotography"
       - "#ig_morocco"
+      - "#bnw_morocco"
+      - "#casablancacity"
     mentions:
       - ig_morocco
       - streetphotographyinternational
