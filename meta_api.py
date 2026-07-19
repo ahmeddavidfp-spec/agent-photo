@@ -333,7 +333,7 @@ def publish_to_instagram(image_url: str, full_text: str) -> Tuple[bool, str]:
     caption, _alt = split_content(full_text)
     # IG ne rend pas les liens cliquables dans la caption.
     caption = re.sub(
-        r"(davidmertens|davidahmed)\.me[^\s\n]*",
+        r"(?:https?://)?(?:www\.)?(?:davidmertens|davidahmed)\.me[^\s\n]*",
         "🔗 Link in Bio for full series",
         caption,
     )

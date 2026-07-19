@@ -341,6 +341,7 @@ def generate_caption(image_url: str, galerie: str) -> str:
         config.get("site_url", "davidmertens.me")
         .replace("https://", "")
         .replace("http://", "")
+        .replace("www.", "")  # lien affiché sans www (cohérent avec voice_examples)
         .rstrip("/")
     )
     display_link = f"{base_url}/{galerie}"
