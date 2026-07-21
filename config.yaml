@@ -19,7 +19,7 @@ carousel:
 # ajoutant un SON TENDANCE (c'est ce qui fait la portée — l'API IG ne permet
 # pas la musique tendance, d'où l'étape manuelle). enabled:false masque l'action.
 reel:
-  enabled: true
+  enabled: false   # DÉSACTIVÉ : l'encodage vidéo fait OOM sur l'instance Render 512 Mo
   photos: 6        # nb de photos dans le diaporama
   seconds: 2.5     # durée d'affichage par photo
 
