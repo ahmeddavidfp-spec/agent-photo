@@ -83,16 +83,24 @@ def send_document(chat_id: int, path: str) -> None:
 
 
 def send_video(chat_id: int, path: str, caption: str = "") -> None:
-    """Envoie une vidéo (MP4) jouable dans Telegram (ex. un Reel généré)."""
+    """Envoie une vidéo (MP4) jouable dans Telegram (ex. un Reel généré).
+
+    On lit le fichier EN MÉMOIRE (bytes) et non comme handle ouvert : sinon les
+    retries urllib3 (connexion Telegram capricieuse depuis Render) ne peuvent pas
+    renvoyer un fichier déjà consommé. Timeout large car l'upload est plus lourd.
+    """
     if not TELEGRAM_TOKEN:
         return
     try:
         with open(path, "rb") as f:
-            safe_post(
-                _url("sendVideo"),
-                data={"chat_id": chat_id, "caption": caption, "parse_mode": "Markdown"},
-                files={"video": f},
-                timeout=120,
-            )
+            video_bytes = f.read()
+        r = safe_post(
+            _url("sendVideo"),
+            data={"chat_id": chat_id, "caption": caption, "parse_mode": "Markdown"},
+            files={"video": ("reel.mp4", video_bytes, "video/mp4")},
+            timeout=180,
+        )
+        if r.status_code != 200:
+            logger.warning("send_video HTTP %s : %s", r.status_code, r.text[:200])
     except Exception as e:
         logger.error("send_video failed: %s", e)
