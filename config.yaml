@@ -13,6 +13,16 @@ carousel:
   enabled: true
   count: 5
 
+# --- Reels (Chemin B) --------------------------------------------------------
+# Le bot MONTE un diaporama vidéo 9:16 (muet) et te l'envoie sur Telegram via
+# le bouton « 🎬 Générer un Reel ». Tu le postes dans l'app Instagram en
+# ajoutant un SON TENDANCE (c'est ce qui fait la portée — l'API IG ne permet
+# pas la musique tendance, d'où l'étape manuelle). enabled:false masque l'action.
+reel:
+  enabled: true
+  photos: 6        # nb de photos dans le diaporama
+  seconds: 2.5     # durée d'affichage par photo
+
 # --- Noms d'affichage par galerie -------------------------------------------
 # Utilisés dans les captions à la place du slug (qui reste utilisé pour l'URL).
 # Si un slug n'est pas listé, il sera "titlé" automatiquement (bruxelles -> Bruxelles).

@@ -80,3 +80,19 @@ def send_document(chat_id: int, path: str) -> None:
             )
     except Exception as e:
         logger.error("send_document failed: %s", e)
+
+
+def send_video(chat_id: int, path: str, caption: str = "") -> None:
+    """Envoie une vidéo (MP4) jouable dans Telegram (ex. un Reel généré)."""
+    if not TELEGRAM_TOKEN:
+        return
+    try:
+        with open(path, "rb") as f:
+            safe_post(
+                _url("sendVideo"),
+                data={"chat_id": chat_id, "caption": caption, "parse_mode": "Markdown"},
+                files={"video": f},
+                timeout=120,
+            )
+    except Exception as e:
+        logger.error("send_video failed: %s", e)

@@ -7,6 +7,10 @@ gunicorn==22.0.0
 openai==1.51.2
 anthropic==0.39.0
 httpx==0.27.2
+# Génération de Reels (diaporama vidéo 9:16). imageio-ffmpeg embarque le
+# binaire ffmpeg dans le wheel → aucune install système requise sur Render.
+Pillow==10.4.0
+imageio-ffmpeg==0.5.1
 # zoneinfo fait partie de la stdlib dès Python 3.9.
 # Sur Python <3.9 décommenter :
 # backports.zoneinfo==0.2.1 ; python_version < "3.9"

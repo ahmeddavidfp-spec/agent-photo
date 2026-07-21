@@ -27,7 +27,7 @@ from settings import (
     ALLOWED_CHAT_ID, CRON_SECRET, TELEGRAM_TOKEN, TELEGRAM_WEBHOOK_SECRET,
     load_yaml_config,
 )
-from telegram_bot import answer_callback_query, send_document, send_message, send_photo, send_typing_action
+from telegram_bot import answer_callback_query, send_document, send_message, send_photo, send_typing_action, send_video
 from timezones import DEFAULT_SLOTS, from_utc_str, next_slot_for_hour, now_local, now_utc, to_utc
 
 logging.basicConfig(
@@ -499,6 +499,28 @@ def _handle_action(chat_id: int, action: str) -> None:
         threading.Thread(target=_run_suggestion, daemon=True).start()
         return
 
+    if action.startswith("reel_"):
+        galerie = action.split("_", 1)[1]
+        key = f"reel:{chat_id}:{galerie}"
+        if not _acquire_inflight(key):
+            logger.info("🚫 Dédupe reel: %s déjà en cours", galerie)
+            return
+
+        def _run_reel():
+            try:
+                _reel_flow(chat_id, galerie)
+            except Exception as e:
+                logger.exception("[reel] ❌ crashed galerie=%s: %s", galerie, e)
+                try:
+                    send_message(chat_id, f"❌ Erreur Reel : {str(e)[:180]}")
+                except Exception:
+                    pass
+            finally:
+                _release_inflight(key)
+
+        threading.Thread(target=_run_reel, daemon=True, name=f"reel-{galerie}").start()
+        return
+
     if action == "manual_edit":
         session = get_session(chat_id)
         if session:
@@ -714,11 +736,63 @@ def _send_suggestion(chat_id: int, galerie: str) -> None:
         [{"text": "📸 Insta", "callback_data": "pub_ig"},
          {"text": "🧵 Threads", "callback_data": "pub_th"}],
         [{"text": "✍️ Éditer légende", "callback_data": "manual_edit"}],
+        [{"text": "🎬 Générer un Reel", "callback_data": f"reel_{galerie}"}],
         [{"text": "🔄 Autre", "callback_data": f"select_{galerie}"},
          {"text": "⬅️ Menu", "callback_data": "menu"}],
     ]
     send_photo(chat_id, cover, visible_caption, reply_markup={"inline_keyboard": kb})
     logger.info("[suggest] ✅ send_photo done TOTAL %dms", int((time.time() - t0) * 1000))
+
+
+def _reel_flow(chat_id: int, galerie: str) -> None:
+    """Chemin B : monte un diaporama vidéo 9:16 (muet) et l'envoie sur Telegram.
+
+    L'utilisateur le poste ensuite dans l'app Instagram en ajoutant un son
+    tendance (meilleure portée — l'API IG ne permet pas la musique tendance).
+    """
+    import os
+    import random
+
+    config = load_yaml_config()
+    display = _display_name_for(galerie, config)
+    reel_cfg = config.get("reel") or {}
+    if not reel_cfg.get("enabled", False):
+        send_message(chat_id, "🎬 Les Reels sont désactivés (config `reel.enabled`).")
+        return
+    n = int(reel_cfg.get("photos", 6) or 6)
+    sec = float(reel_cfg.get("seconds", 2.5) or 2.5)
+
+    send_message(chat_id, f"🎬 *Reel {display}* — montage en cours (~30-60s)…")
+
+    # Photos : d'abord les non-publiées, complétées par d'autres de la galerie
+    # (la réutilisation est OK pour un Reel — c'est un "best of").
+    urls = pick_unseen_photos(config["site_url"], galerie, n)
+    if len(urls) < n:
+        allp = fetch_gallery_photos(config["site_url"], galerie)
+        extra = [u for u in allp if u not in urls]
+        random.shuffle(extra)
+        urls = (urls + extra)[:n]
+    if len(urls) < 2:
+        send_message(chat_id, f"⚠️ *{display}* : pas assez de photos pour un Reel.")
+        return
+
+    from reel import build_reel
+    path = build_reel(urls, sec=sec)
+    if not path:
+        send_message(chat_id, "❌ Échec du montage vidéo (voir logs Render).")
+        return
+
+    caption = (
+        f"🎬 *Reel {display}* prêt — {len(urls)} photos.\n"
+        "📲 Poste-le dans l'app Instagram et *ajoute un son tendance* "
+        "(c'est ce qui déclenche la portée). La vidéo est muette exprès."
+    )
+    send_video(chat_id, path, caption)
+    try:
+        os.remove(path)
+    except Exception:
+        pass
+    logger.info("[reel] ✅ envoyé galerie=%s (%d photos)", galerie, len(urls))
 
 
 # =============================================================================
