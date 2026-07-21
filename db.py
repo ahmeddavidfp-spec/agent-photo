@@ -19,6 +19,7 @@ import datetime as dt
 import json
 import logging
 import sqlite3
+import time
 from contextlib import contextmanager
 from typing import Any, Iterator, List, Optional, Tuple
 
@@ -39,16 +40,38 @@ logger = logging.getLogger(__name__)
 # on ferme — rien d'autre.
 
 
+def _commit_with_retry(conn: sqlite3.Connection, attempts: int = 6) -> None:
+    """Commit résilient à 'database is locked'.
+
+    Le disque /data de Render est lent (type NFS) et sans WAL possible : sous
+    contention, un commit peut échouer. On préfère plusieurs tentatives courtes
+    avec backoff (on attrape une fenêtre libre) qu'une seule longue attente.
+    """
+    for i in range(attempts):
+        try:
+            conn.commit()
+            return
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e).lower() and i < attempts - 1:
+                time.sleep(0.25 * (i + 1))  # 0.25,0.5,0.75,1.0,1.25 → ~3.75s cumulés
+                continue
+            raise
+
+
 @contextmanager
 def connection() -> Iterator[sqlite3.Connection]:
-    # timeout=30s = attente max d'un writer en cas de concurrence.
-    # busy_timeout côté SQLite = même chose côté C (double filet).
-    # Pas de WAL : disque Render ne supporte pas -shm/-wal.
-    conn = sqlite3.connect(DB_PATH, timeout=30.0)
+    # Disque Render lent (type NFS), pas de WAL (-shm/-wal non supportés).
+    # busy_timeout court (3s) : on échoue vite puis on réessaie le commit avec
+    # backoff (voir _commit_with_retry) → bien plus robuste sous contention.
+    # synchronous=NORMAL : commits plus rapides (moins de fsync) ; sûr face à un
+    # crash process (recovery par journal), seule une panne d'alim pourrait poser
+    # souci — négligeable sur Render et la DB est reconstructible.
+    conn = sqlite3.connect(DB_PATH, timeout=3.0)
     try:
-        conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute("PRAGMA busy_timeout=3000")
+        conn.execute("PRAGMA synchronous=NORMAL")
         yield conn
-        conn.commit()
+        _commit_with_retry(conn)
     finally:
         conn.close()
 
