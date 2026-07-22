@@ -47,7 +47,16 @@ TH_API = "https://graph.threads.net/v1.0/"
 
 # --- Base de données ---
 # Sur Render le disque persistant est monté dans /data
-DB_PATH = "/data/photos.db" if Path("/data").exists() else "photos.db"
+# v2 : NOUVEAU fichier (nouvel inode). Les verrous NFS orphelins laissés par
+# les instances tuées (OOM/crash) collent à l'inode de l'ancien fichier et
+# faisaient PENDRE toute écriture. db.py migre les données automatiquement
+# depuis l'ancien fichier (simple copie en lecture) au premier démarrage.
+if Path("/data").exists():
+    DB_PATH = "/data/photos_v2.db"
+    LEGACY_DB_PATH = "/data/photos.db"
+else:
+    DB_PATH = "photos_v2.db"
+    LEGACY_DB_PATH = "photos.db"
 
 # --- Fuseau horaire ---
 LOCAL_TZ = "Europe/Brussels"

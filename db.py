@@ -18,12 +18,14 @@ import csv
 import datetime as dt
 import json
 import logging
+import os
+import shutil
 import sqlite3
 import threading
 from contextlib import contextmanager
 from typing import Any, Iterator, List, Optional, Tuple
 
-from settings import DB_PATH
+from settings import DB_PATH, LEGACY_DB_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +64,25 @@ _LOCK_TIMEOUT = 30  # filet de sécurité : échec clair plutôt que blocage inf
 _CONN: Optional[sqlite3.Connection] = None
 
 
+def _migrate_legacy_db() -> None:
+    """Copie l'ancienne DB (photos.db) vers le nouveau fichier (photos_v2.db).
+
+    Une seule fois : les verrous NFS orphelins (instances tuées par OOM/crash)
+    collent à l'INODE de l'ancien fichier et faisaient pendre toute écriture —
+    un fichier neuf en est exempt. Copie par LECTURE simple (shutil, aucun
+    verrou fichier pris). Si la copie échoue, on démarre sur une DB vierge
+    (dégradé mais vivant : init_db recrée les tables, tokens en fallback env).
+    """
+    if os.path.exists(DB_PATH) or not os.path.exists(LEGACY_DB_PATH):
+        return
+    try:
+        shutil.copyfile(LEGACY_DB_PATH, DB_PATH)
+        logger.info("DB migrée %s → %s (nouvel inode, verrous NFS neufs)",
+                    LEGACY_DB_PATH, DB_PATH)
+    except Exception as e:
+        logger.error("Migration DB échouée (%s) — démarrage sur une DB vierge", e)
+
+
 def _get_conn() -> sqlite3.Connection:
     """Connexion SQLite persistante UNIQUE (protégée par _DB_LOCK).
 
@@ -78,6 +99,7 @@ def _get_conn() -> sqlite3.Connection:
     """
     global _CONN
     if _CONN is None:
+        _migrate_legacy_db()
         conn = sqlite3.connect(DB_PATH, timeout=3.0, check_same_thread=False)
         conn.execute("PRAGMA busy_timeout=3000")
         conn.execute("PRAGMA synchronous=NORMAL")
