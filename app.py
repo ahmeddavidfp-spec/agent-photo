@@ -759,24 +759,19 @@ def _reel_flow(chat_id: int, galerie: str) -> None:
     if not reel_cfg.get("enabled", False):
         send_message(chat_id, "🎬 Les Reels sont désactivés (config `reel.enabled`).")
         return
-    n = int(reel_cfg.get("photos", 6) or 6)
+    n_color = int(reel_cfg.get("photos_color", 4) or 4)
+    n_bw = int(reel_cfg.get("photos_bw", 5) or 5)
     sec = float(reel_cfg.get("seconds", 2.5) or 2.5)
 
-    send_message(chat_id, f"🎬 *Reel {display}* — montage en cours (~30-60s)…")
+    send_message(chat_id, f"🎬 *Reel {display}* — sélection + montage en cours (~1 min)…")
 
-    # Photos : d'abord les non-publiées, complétées par d'autres de la galerie
-    # (la réutilisation est OK pour un Reel — c'est un "best of").
-    urls = pick_unseen_photos(config["site_url"], galerie, n)
-    if len(urls) < n:
-        allp = fetch_gallery_photos(config["site_url"], galerie)
-        extra = [u for u in allp if u not in urls]
-        random.shuffle(extra)
-        urls = (urls + extra)[:n]
+    # Sélection HOMOGÈNE : 5 photos N&B ou 4 couleur, jamais de mélange
+    from reel import build_reel, pick_reel_photos
+    urls, kind = pick_reel_photos(config["site_url"], galerie, n_color, n_bw)
     if len(urls) < 2:
         send_message(chat_id, f"⚠️ *{display}* : pas assez de photos pour un Reel.")
         return
 
-    from reel import build_reel
     label = f"STREET {display.upper()}"  # bandeau incrusté (ex. STREET BRUXELLES)
     tagline = (reel_cfg.get("tagline") or "").strip() or None  # accroche signature
     path = build_reel(urls, sec=sec, label=label, tagline=tagline)
@@ -784,9 +779,10 @@ def _reel_flow(chat_id: int, galerie: str) -> None:
         send_message(chat_id, "❌ Échec du montage vidéo (voir logs Render).")
         return
 
+    kind_label = {"bw": "noir & blanc", "color": "couleur"}.get(kind, "mixtes")
     caption = (
-        f"🎬 *Reel {display}* prêt — {len(urls)} photos.\n"
-        "📲 Poste-le dans l'app Instagram et *ajoute un son tendance* "
+        f"🎬 *Reel {display}* prêt — {len(urls)} photos {kind_label}.\n"
+        "📲 Poste-le dans l'app Instagram/TikTok et *ajoute un son tendance* "
         "(c'est ce qui déclenche la portée). La vidéo est muette exprès."
     )
     send_video(chat_id, path, caption)
@@ -794,7 +790,51 @@ def _reel_flow(chat_id: int, galerie: str) -> None:
         os.remove(path)
     except Exception:
         pass
-    logger.info("[reel] ✅ envoyé galerie=%s (%d photos)", galerie, len(urls))
+
+    # Description prête à coller (IG/TikTok) : texte + 5 hashtags + 1 mention
+    desc = _reel_description(urls[0], galerie, display, config)
+    if desc:
+        send_message(chat_id, desc)
+    logger.info("[reel] ✅ envoyé galerie=%s (%d photos %s)", galerie, len(urls), kind)
+
+
+def _reel_description(cover_url: str, galerie: str, display: str, config: dict) -> str:
+    """Compose la description à coller sur IG/TikTok avec le Reel.
+
+    Texte court (bloc EN de la caption IA générée depuis la couverture) +
+    5 hashtags de la galerie + 1 @mention. Envoyée en bloc code Telegram
+    (un appui = tout copier). NB : la @mention vient des comptes Instagram —
+    à adapter sur TikTok si le compte n'y existe pas.
+    """
+    import random as _random
+
+    # Texte : bloc EN (jusqu'à la 1re ligne vide) de la caption IA
+    try:
+        full = generate_caption(cover_url, galerie)
+        visible, _alt = split_content(full)
+        en_lines = []
+        for line in visible.split("\n"):
+            if not line.strip():
+                break
+            en_lines.append(line.strip())
+        text = " ".join(en_lines) or f"Street photography — {display}."
+    except Exception as e:
+        logger.warning("[reel] description IA échouée : %s", e)
+        text = f"Street photography — {display}. Look again. Slower this time."
+
+    pg = (config.get("per_gallery") or {}).get(galerie) or {}
+    tags = list(pg.get("hashtags") or (config.get("hashtags") or "").split())
+    tags = _random.sample(tags, min(5, len(tags))) if tags else []
+    mentions = list(pg.get("mentions") or config.get("safe_mentions") or [])
+    mention = _random.choice(mentions) if mentions else None
+
+    bloc = text + "\n\n" + " ".join(tags)
+    if mention:
+        bloc += f"\n@{mention}"
+    return (
+        "📋 *Description prête (Instagram / TikTok)* — appuie pour copier :\n"
+        f"```\n{bloc}\n```"
+    )
 
 
 # =============================================================================

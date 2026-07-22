@@ -10,10 +10,11 @@ d'elle-même — le rendu "pro" standard des Reels photo.
 """
 import logging
 import os
+import random
 import shutil
 import subprocess
 import tempfile
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
@@ -159,6 +160,74 @@ def _normalize(src_path: str, dst_path: str, label: Optional[str] = None,
 def _ffmpeg_exe() -> str:
     import imageio_ffmpeg
     return imageio_ffmpeg.get_ffmpeg_exe()
+
+
+# =========================================================================
+# SÉLECTION HOMOGÈNE : 4 photos COULEUR ou 5 photos NOIR & BLANC
+# =========================================================================
+# Ne jamais mélanger couleur et N&B dans un même Reel (unité visuelle).
+# Classification par saturation moyenne sur une miniature (300w → ~96px),
+# coût mémoire/réseau négligeable.
+
+_BW_SAT_THRESHOLD = 0.09   # saturation moyenne < 9% → photo considérée N&B
+
+
+def _mean_saturation(path: str) -> float:
+    """Saturation moyenne (0..1) d'une image, calculée sur une miniature."""
+    img = Image.open(path)
+    img.draft("RGB", (240, 240))
+    img = img.convert("RGB")
+    img.thumbnail((96, 96))
+    hsv = img.convert("HSV")
+    hist = hsv.histogram()[256:512]  # canal S
+    total = sum(hist) or 1
+    mean = sum(i * c for i, c in enumerate(hist)) / total / 255.0
+    img.close()
+    hsv.close()
+    return mean
+
+
+def pick_reel_photos(site_url: str, galerie: str, n_color: int = 4,
+                     n_bw: int = 5, sample: int = 12) -> Tuple[List[str], str]:
+    """Choisit des photos HOMOGÈNES pour un Reel : n_bw N&B ou n_color couleur.
+
+    Échantillonne `sample` photos de la galerie, les classe par saturation,
+    et prend le groupe majoritaire (égalité → N&B, l'ADN du compte).
+    Retourne (urls, "bw"|"color"|"mixed"|"none").
+    """
+    from gallery import fetch_gallery_photos  # import local (pas de cycle)
+    allp = fetch_gallery_photos(site_url, galerie)
+    if len(allp) < 2:
+        return [], "none"
+    cands = allp[:]
+    random.shuffle(cands)
+    cands = cands[:sample]
+
+    tmpd = tempfile.mkdtemp(prefix="reelclass_")
+    bw: List[str] = []
+    color: List[str] = []
+    try:
+        for i, u in enumerate(cands):
+            p = os.path.join(tmpd, f"c{i}.jpg")
+            try:
+                r = safe_get(u.split("?")[0] + "?format=300w", timeout=15)
+                r.raise_for_status()
+                with open(p, "wb") as f:
+                    f.write(r.content)
+                (bw if _mean_saturation(p) < _BW_SAT_THRESHOLD else color).append(u)
+            except Exception as e:
+                logger.warning("Classification photo KO (%s) : %s", u[:60], e)
+    finally:
+        shutil.rmtree(tmpd, ignore_errors=True)
+
+    logger.info("Reel %s : %d N&B / %d couleur sur %d échantillonnées",
+                galerie, len(bw), len(color), len(cands))
+    if len(bw) >= 2 and (len(bw) >= len(color) or len(color) < 2):
+        return bw[:n_bw], "bw"
+    if len(color) >= 2:
+        return color[:n_color], "color"
+    mixed = (bw + color)[:n_color]
+    return mixed, ("mixed" if len(mixed) >= 2 else "none")
 
 
 def _assemble(frame_paths: list[str], out_path: str, sec: float = SEC_PER_PHOTO) -> None:
