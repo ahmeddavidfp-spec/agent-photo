@@ -251,9 +251,10 @@ def _assemble(frame_paths: list[str], out_path: str, sec: float = SEC_PER_PHOTO)
         if p != seq:
             os.replace(p, seq)
     total = len(frame_paths) * sec
+    # Pas de fondu d'entrée (la 1re frame = miniature/couverture propre)
     vf = (
         f"fps={FPS},format=yuv420p,"
-        f"fade=t=in:st=0:d={FADE},fade=t=out:st={total - FADE:.2f}:d={FADE}"
+        f"fade=t=out:st={total - FADE:.2f}:d={FADE}"
     )
     cmd = [
         _ffmpeg_exe(), "-y",
@@ -298,9 +299,11 @@ def _assemble_motion(frame_paths: list[str], overlay_png: str, out_path: str,
     total = n * sec
     concat_in = "".join(f"[v{k}]" for k in range(n))
     parts.append(f"{concat_in}concat=n={n}:v=1:a=0[cat]")
+    # Pas de fondu d'ENTRÉE : la 1re frame = la photo (miniature/couverture
+    # Instagram propre, pas un carré noir). Fondu de sortie conservé.
     parts.append(
         f"[cat][{n}:v]overlay=0:0,"
-        f"fade=t=in:st=0:d={FADE},fade=t=out:st={total - FADE:.2f}:d={FADE},"
+        f"fade=t=out:st={total - FADE:.2f}:d={FADE},"
         f"format=yuv420p[vout]"
     )
     cmd += ["-filter_complex", ";".join(parts), "-map", "[vout]",
