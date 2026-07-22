@@ -33,44 +33,70 @@ _MARGIN = 40               # marge autour de la photo (px) sur le fond flou
 _FONT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "Archivo.ttf")
 
 
-def _label_font(size: int) -> "ImageFont.FreeTypeFont":
+def _label_font(size: int, weight: str = "SemiBold") -> "ImageFont.FreeTypeFont":
     f = ImageFont.truetype(_FONT_PATH, size)
     try:
-        f.set_variation_by_name("SemiBold")  # poids stable (Archivo est variable)
+        f.set_variation_by_name(weight)  # poids stable (Archivo est variable)
     except Exception:
         pass  # défaut = SemiBold de toute façon
     return f
 
 
-def _draw_label(img: Image.Image, text: str) -> Image.Image:
-    """Ajoute un bandeau 'STREET <VILLE>' centré en bas : texte espacé encadré de
-    deux filets fins, sur un dégradé sombre (lisible sur photo portrait comme sur
-    le fond flou). Taille auto-ajustée pour tenir dans la largeur. Retourne RGB."""
+def _tracked(d: "ImageDraw.ImageDraw", cy: float, text: str,
+             font: "ImageFont.FreeTypeFont", fill: tuple, track: int) -> float:
+    """Dessine `text` centré horizontalement à `cy`, lettres espacées de `track`.
+    Retourne la largeur totale."""
+    widths = [d.textlength(c, font=font) for c in text]
+    total = sum(widths) + track * (len(text) - 1)
+    asc, desc = font.getmetrics()
+    x, y = W / 2 - total / 2, cy - (asc + desc) / 2
+    for c, w in zip(text, widths):
+        d.text((x, y), c, font=font, fill=fill)
+        x += w + track
+    return total
+
+
+def _draw_label(img: Image.Image, text: str, tagline: Optional[str] = None) -> Image.Image:
+    """Bloc signature en bas de frame, sur un dégradé sombre :
+
+        LOOK AGAIN. SLOWER THIS TIME.     ← accroche fixe (optionnelle, config)
+        ─────────────────────────
+           STREET BRUXELLES               ← ville, encadrée de filets fins
+        ─────────────────────────
+
+    Tailles auto-ajustées pour tenir dans la largeur. Retourne RGB."""
     base = img.convert("RGBA")
     # Dégradé sombre transparent→opaque sur la bande basse
     scrim = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     sd = ImageDraw.Draw(scrim)
-    band = 230
+    band = 290
     for i in range(band):
         sd.line([(0, H - band + i), (W, H - band + i)], fill=(0, 0, 0, int(150 * i / band)))
     base = Image.alpha_composite(base, scrim)
     d = ImageDraw.Draw(base)
 
-    # Auto-fit : réduit la taille jusqu'à tenir dans la largeur (villes longues)
-    max_w, track, size = W - 80, 5, 46
+    # Accroche signature (au-dessus du bandeau), auto-fit 21→14
+    if tagline:
+        tag = tagline.upper()
+        size, track = 21, 4
+        while size > 14:
+            tfont = _label_font(size, "Regular")
+            tw = sum(d.textlength(c, font=tfont) for c in tag) + track * (len(tag) - 1)
+            if tw <= W - 100:
+                break
+            size -= 1
+        _tracked(d, H - 162, tag, tfont, (255, 255, 255, 225), track)
+
+    # Bandeau ville : auto-fit 46→26 (villes longues)
+    size, track = 46, 5
     while size > 26:
         font = _label_font(size)
-        widths = [d.textlength(c, font=font) for c in text]
-        total = sum(widths) + track * (len(text) - 1)
-        if total <= max_w:
+        total = sum(d.textlength(c, font=font) for c in text) + track * (len(text) - 1)
+        if total <= W - 80:
             break
         size -= 2
-    asc, desc = font.getmetrics()
     cy = H - 92
-    x, y = W / 2 - total / 2, cy - (asc + desc) / 2
-    for c, w in zip(text, widths):
-        d.text((x, y), c, font=font, fill=(255, 255, 255, 255))
-        x += w + track
+    total = _tracked(d, cy, text, font, (255, 255, 255, 255), track)
     half = total / 2
     for dy in (-38, 38):
         d.line([(W / 2 - half, cy + dy), (W / 2 + half, cy + dy)], fill=(255, 255, 255, 235), width=2)
@@ -91,7 +117,8 @@ def _download(url: str, dest: str) -> bool:
         return False
 
 
-def _normalize(src_path: str, dst_path: str, label: Optional[str] = None) -> None:
+def _normalize(src_path: str, dst_path: str, label: Optional[str] = None,
+               tagline: Optional[str] = None) -> None:
     """Ajuste une photo en WxH sur un fond flou d'elle-même (faible mémoire).
 
     Optimisations mémoire (instance Render 512 Mo) :
@@ -120,7 +147,7 @@ def _normalize(src_path: str, dst_path: str, label: Optional[str] = None) -> Non
     img.thumbnail((W - 2 * _MARGIN, H - 2 * _MARGIN), Image.LANCZOS)
     bg.paste(img, ((W - img.width) // 2, (H - img.height) // 2))
     if label:
-        labeled = _draw_label(bg, label)
+        labeled = _draw_label(bg, label, tagline)
         labeled.save(dst_path, "JPEG", quality=88)
         labeled.close()
     else:
@@ -165,7 +192,8 @@ def _assemble(frame_paths: list[str], out_path: str, sec: float = SEC_PER_PHOTO)
 
 def build_reel_from_paths(image_paths: list[str], out_path: str,
                           sec: float = SEC_PER_PHOTO,
-                          label: Optional[str] = None) -> str:
+                          label: Optional[str] = None,
+                          tagline: Optional[str] = None) -> str:
     """Monte un Reel à partir de fichiers image locaux. Retourne out_path."""
     if len(image_paths) < 2:
         raise ValueError("Au moins 2 photos requises pour un Reel")
@@ -174,7 +202,7 @@ def build_reel_from_paths(image_paths: list[str], out_path: str,
         frames = []
         for i, src in enumerate(image_paths):
             dst = os.path.join(workdir, f"frame_{i:04d}.jpg")
-            _normalize(src, dst, label)
+            _normalize(src, dst, label, tagline)
             frames.append(dst)
         _assemble(frames, out_path, sec)
         return out_path
@@ -183,11 +211,13 @@ def build_reel_from_paths(image_paths: list[str], out_path: str,
 
 
 def build_reel(image_urls: List[str], out_path: Optional[str] = None,
-               sec: float = SEC_PER_PHOTO, label: Optional[str] = None) -> Optional[str]:
+               sec: float = SEC_PER_PHOTO, label: Optional[str] = None,
+               tagline: Optional[str] = None) -> Optional[str]:
     """Télécharge les photos et monte un Reel muet 9:16. Retourne le chemin MP4
     ou None si échec (téléchargements insuffisants / erreur ffmpeg).
 
-    `label` : bandeau 'STREET <VILLE>' incrusté en bas de chaque photo (optionnel).
+    `label`   : bandeau 'STREET <VILLE>' incrusté en bas de chaque photo.
+    `tagline` : accroche signature fixe au-dessus du bandeau (config reel.tagline).
     """
     urls = [u for u in (image_urls or []) if u]
     if len(urls) < 2:
@@ -204,7 +234,7 @@ def build_reel(image_urls: List[str], out_path: Optional[str] = None,
             logger.warning("Reel : téléchargements insuffisants (%d)", len(local))
             return None
         out_path = out_path or tempfile.mktemp(prefix="reel_", suffix=".mp4")
-        return build_reel_from_paths(local, out_path, sec, label)
+        return build_reel_from_paths(local, out_path, sec, label, tagline)
     except Exception as e:
         logger.exception("Reel : build échoué : %s", e)
         return None

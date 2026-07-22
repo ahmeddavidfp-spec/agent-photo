@@ -22,6 +22,9 @@ reel:
   enabled: true    # RÉACTIVÉ (test du montage 720p allégé sur 512 Mo)
   photos: 4        # 4 pour le 1er test (moins de RAM ffmpeg) ; remonte à 6 si OK
   seconds: 2.5     # durée d'affichage par photo
+  # Accroche signature fixe, affichée au-dessus du bandeau "STREET <VILLE>"
+  # sur chaque Reel (affichée en majuscules). Mets "" pour la désactiver.
+  tagline: "Look again. Slower this time."
 
 # --- Noms d'affichage par galerie -------------------------------------------
 # Utilisés dans les captions à la place du slug (qui reste utilisé pour l'URL).

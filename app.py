@@ -778,7 +778,8 @@ def _reel_flow(chat_id: int, galerie: str) -> None:
 
     from reel import build_reel
     label = f"STREET {display.upper()}"  # bandeau incrusté (ex. STREET BRUXELLES)
-    path = build_reel(urls, sec=sec, label=label)
+    tagline = (reel_cfg.get("tagline") or "").strip() or None  # accroche signature
+    path = build_reel(urls, sec=sec, label=label, tagline=tagline)
     if not path:
         send_message(chat_id, "❌ Échec du montage vidéo (voir logs Render).")
         return
