@@ -3,6 +3,7 @@ import logging
 import sys
 import threading
 import time
+from urllib.parse import quote as _quote
 
 from flask import Flask, abort, jsonify, request
 
@@ -24,8 +25,8 @@ from meta_api import (
 )
 from scheduler import start_scheduler
 from settings import (
-    ALLOWED_CHAT_ID, CRON_SECRET, TELEGRAM_TOKEN, TELEGRAM_WEBHOOK_SECRET,
-    load_yaml_config,
+    ALLOWED_CHAT_ID, APP_BASE_URL, CRON_SECRET, TELEGRAM_TOKEN,
+    TELEGRAM_WEBHOOK_SECRET, load_yaml_config,
 )
 from telegram_bot import answer_callback_query, send_document, send_message, send_photo, send_typing_action, send_video
 from timezones import DEFAULT_SLOTS, from_utc_str, next_slot_for_hour, now_local, now_utc, to_utc
@@ -736,7 +737,10 @@ def _send_suggestion(chat_id: int, galerie: str) -> None:
         [{"text": "📸 Insta", "callback_data": "pub_ig"},
          {"text": "🧵 Threads", "callback_data": "pub_th"}],
         [{"text": "✍️ Éditer légende", "callback_data": "manual_edit"}],
-        [{"text": "🎬 Générer un Reel", "callback_data": f"reel_{galerie}"}],
+        [{"text": "🎬 Reel auto", "callback_data": f"reel_{galerie}"},
+         {"text": "🖼 Composer un Reel", "web_app": {
+             "url": f"{APP_BASE_URL}/app/picker?galerie={_quote(galerie)}"
+                    f"&nom={_quote(_display_name_for(galerie, config))}"}}],
         [{"text": "🔄 Autre", "callback_data": f"select_{galerie}"},
          {"text": "⬅️ Menu", "callback_data": "menu"}],
     ]
@@ -744,7 +748,7 @@ def _send_suggestion(chat_id: int, galerie: str) -> None:
     logger.info("[suggest] ✅ send_photo done TOTAL %dms", int((time.time() - t0) * 1000))
 
 
-def _reel_flow(chat_id: int, galerie: str) -> None:
+def _reel_flow(chat_id: int, galerie: str, urls=None) -> None:
     """Chemin B : monte un diaporama vidéo 9:16 (muet) et l'envoie sur Telegram.
 
     L'utilisateur le poste ensuite dans l'app Instagram en ajoutant un son
@@ -760,14 +764,20 @@ def _reel_flow(chat_id: int, galerie: str) -> None:
         send_message(chat_id, "🎬 Les Reels sont désactivés (config `reel.enabled`).")
         return
     n_color = int(reel_cfg.get("photos_color", 4) or 4)
-    n_bw = int(reel_cfg.get("photos_bw", 5) or 5)
+    n_bw = int(reel_cfg.get("photos_bw", 4) or 4)
     sec = float(reel_cfg.get("seconds", 2.5) or 2.5)
 
-    send_message(chat_id, f"🎬 *Reel {display}* — sélection + montage en cours (~1 min)…")
-
-    # Sélection HOMOGÈNE : 5 photos N&B ou 4 couleur, jamais de mélange
     from reel import build_reel, pick_reel_photos
-    urls, kind = pick_reel_photos(config["site_url"], galerie, n_color, n_bw)
+    if urls:
+        # Sélection MANUELLE via la Mini App (l'ordre choisi = l'ordre du Reel)
+        urls = list(urls)[:6]
+        kind = "manuel"
+        send_message(chat_id, f"🎬 *Reel {display}* — montage de ta sélection "
+                              f"({len(urls)} photos)…")
+    else:
+        send_message(chat_id, f"🎬 *Reel {display}* — sélection + montage en cours (~1 min)…")
+        # Sélection AUTO homogène : N&B ou couleur, jamais de mélange
+        urls, kind = pick_reel_photos(config["site_url"], galerie, n_color, n_bw)
     if len(urls) < 2:
         send_message(chat_id, f"⚠️ *{display}* : pas assez de photos pour un Reel.")
         return
@@ -779,7 +789,8 @@ def _reel_flow(chat_id: int, galerie: str) -> None:
         send_message(chat_id, "❌ Échec du montage vidéo (voir logs Render).")
         return
 
-    kind_label = {"bw": "noir & blanc", "color": "couleur"}.get(kind, "mixtes")
+    kind_label = {"bw": "noir & blanc", "color": "couleur",
+                  "manuel": "choisies par toi"}.get(kind, "mixtes")
     caption = (
         f"🎬 *Reel {display}* prêt — {len(urls)} photos {kind_label}.\n"
         "📲 Poste-le dans l'app Instagram/TikTok et *ajoute un son tendance* "
@@ -1057,6 +1068,32 @@ def _background_publish(chat_id: int, mode: str, image_url: str, caption: str) -
         final = "🧵 **Threads :** ✅" if ok_th else f"❌ **Erreur Threads :** {res_th}"
 
     send_message(chat_id, final)
+
+
+# =============================================================================
+# MINI APP TELEGRAM (sélecteur de photos — voir miniapp.py)
+# =============================================================================
+
+def _launch_reel_from_miniapp(chat_id: int, galerie: str, urls: list) -> None:
+    """Callback appelé par la Mini App : montage avec les photos CHOISIES."""
+    key = f"reel:{chat_id}:{galerie}"
+    if not _acquire_inflight(key):
+        send_message(chat_id, "⏳ Un Reel est déjà en cours pour cette galerie.")
+        return
+    try:
+        _reel_flow(chat_id, galerie, urls=urls)
+    except Exception as e:
+        logger.exception("[miniapp-reel] ❌ crashed galerie=%s: %s", galerie, e)
+        try:
+            send_message(chat_id, f"❌ Erreur Reel : {str(e)[:180]}")
+        except Exception:
+            pass
+    finally:
+        _release_inflight(key)
+
+
+from miniapp import register_miniapp  # noqa: E402  (après les définitions)
+register_miniapp(app, _launch_reel_from_miniapp)
 
 
 if __name__ == "__main__":

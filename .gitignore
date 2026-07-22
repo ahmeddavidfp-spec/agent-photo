@@ -5,6 +5,8 @@
 __pycache__/
 .DS_Store
 photos.db
+photos_v2.db
+photos_live.db
 /tmp/
 "Dernier Token Insta"
 DOCUMENTATION.md

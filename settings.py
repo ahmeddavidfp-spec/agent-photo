@@ -15,6 +15,12 @@ TELEGRAM_WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
 # Accepte ALLOWED_CHAT_ID (v2) ou TELEGRAM_CHAT_ID (nom historique).
 ALLOWED_CHAT_ID = os.environ.get("ALLOWED_CHAT_ID") or os.environ.get("TELEGRAM_CHAT_ID", "")
 
+# URL publique de l'app (Render la fournit via RENDER_EXTERNAL_URL).
+# Utilisée par la Mini App Telegram (boutons web_app).
+APP_BASE_URL = os.environ.get(
+    "RENDER_EXTERNAL_URL", "https://agent-photo.onrender.com"
+).rstrip("/")
+
 IG_ACCESS_TOKEN = os.environ.get("IG_ACCESS_TOKEN", "")
 # Accepte IG_USER_ID (v2) ou INSTAGRAM_BUSINESS_ID (nom historique Render).
 IG_USER_ID = os.environ.get("IG_USER_ID") or os.environ.get("INSTAGRAM_BUSINESS_ID", "")
