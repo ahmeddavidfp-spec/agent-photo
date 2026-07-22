@@ -24,7 +24,7 @@ reel:
   enabled: true
   # Sélection HOMOGÈNE (jamais de mélange couleur/N&B dans un Reel) :
   photos_color: 4  # un Reel couleur = 4 photos
-  photos_bw: 5     # un Reel noir & blanc = 5 photos
+  photos_bw: 4     # un Reel noir & blanc = 4 photos
   seconds: 2.5     # durée d'affichage par photo
   # Accroche signature fixe, affichée au-dessus du bandeau "STREET <VILLE>"
   # sur chaque Reel (affichée en majuscules). Mets "" pour la désactiver.

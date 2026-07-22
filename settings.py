@@ -75,7 +75,7 @@ def load_yaml_config(path: str = "config.yaml") -> dict:
         "galeries": [],
         "custom_hashtag": "",
         "carousel": {"enabled": False, "count": 5},
-        "reel": {"enabled": False, "photos_color": 4, "photos_bw": 5,
+        "reel": {"enabled": False, "photos_color": 4, "photos_bw": 4,
                  "seconds": 2.5, "tagline": ""},
     }
     try:
