@@ -20,7 +20,6 @@ import json
 import logging
 import sqlite3
 import threading
-import time
 from contextlib import contextmanager
 from typing import Any, Iterator, List, Optional, Tuple
 
@@ -60,50 +59,69 @@ _DB_LOCK = threading.RLock()
 _LOCK_TIMEOUT = 30  # filet de sécurité : échec clair plutôt que blocage infini
 
 
-def _commit_with_retry(conn: sqlite3.Connection, attempts: int = 3) -> None:
-    """Commit résilient (filet — avec la sérialisation, ne devrait jamais jouer)."""
-    for i in range(attempts):
-        try:
-            conn.commit()
-            return
-        except sqlite3.OperationalError as e:
-            if "locked" in str(e).lower() and i < attempts - 1:
-                time.sleep(0.3 * (i + 1))
-                continue
-            raise
+_CONN: Optional[sqlite3.Connection] = None
+
+
+def _get_conn() -> sqlite3.Connection:
+    """Connexion SQLite persistante UNIQUE (protégée par _DB_LOCK).
+
+    Sur le disque /data (NFS) : ouvrir/fermer une connexion par opération =
+    négociation de verrous fichier à chaque fois, et chaque commit en mode
+    DELETE crée/fsync/supprime un fichier -journal — opérations qui peuvent
+    PENDRE quand le NFS est dégradé (c'est ce qui gelait le bot). Remède :
+    - une seule connexion, ouverte une fois (check_same_thread=False, on est
+      sérialisés par _DB_LOCK, un seul process) ;
+    - journal en MÉMOIRE : plus aucun fichier -journal sur le disque.
+    Trade-off journal MEMORY : un crash process PILE pendant un commit peut
+    corrompre la DB → fenêtre microscopique (transactions minuscules) et DB
+    reconstructible (runbook §9 ; tokens re-régénérables via /renew).
+    """
+    global _CONN
+    if _CONN is None:
+        conn = sqlite3.connect(DB_PATH, timeout=3.0, check_same_thread=False)
+        conn.execute("PRAGMA busy_timeout=3000")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA journal_mode=MEMORY")
+        _CONN = conn
+    return _CONN
 
 
 @contextmanager
 def connection() -> Iterator[sqlite3.Connection]:
+    global _CONN
     if not _DB_LOCK.acquire(timeout=_LOCK_TIMEOUT):
         raise sqlite3.OperationalError(
             f"DB serialization lock non obtenu en {_LOCK_TIMEOUT}s "
             "(un bloc connection() fait-il quelque chose de lent ?)"
         )
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=3.0)
+        conn = _get_conn()
         try:
-            conn.execute("PRAGMA busy_timeout=3000")
-            # synchronous=NORMAL : commits plus rapides (moins de fsync). Sûr
-            # face à un crash process ; la DB reste reconstructible.
-            conn.execute("PRAGMA synchronous=NORMAL")
             yield conn
-            _commit_with_retry(conn)
-        finally:
-            conn.close()
+            conn.commit()
+        except Exception:
+            # Laisse la connexion persistante propre ; si elle est morte
+            # (erreur disque), on la jette — la prochaine opération ré-ouvre.
+            try:
+                conn.rollback()
+            except Exception:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                _CONN = None
+            raise
     finally:
         _DB_LOCK.release()
 
 
 def init_db() -> None:
-    """Création idempotente des tables + index. Force journal_mode=DELETE."""
+    """Création idempotente des tables + index.
+
+    NB : le journal_mode est géré par la connexion persistante (_get_conn →
+    MEMORY, voir plus haut). Ne PAS forcer DELETE ici — ça écraserait MEMORY.
+    """
     with connection() as conn:
-        # One-shot au démarrage : si la DB traîne en WAL depuis une tentative
-        # précédente, on la repasse en DELETE. Idempotent si déjà DELETE.
-        try:
-            conn.execute("PRAGMA journal_mode=DELETE")
-        except Exception as e:
-            logger.warning("PRAGMA journal_mode=DELETE failed: %s", e)
         conn.execute(
             "CREATE TABLE IF NOT EXISTS sent_photos ("
             "url TEXT PRIMARY KEY, galerie TEXT, date_envoi TEXT)"
