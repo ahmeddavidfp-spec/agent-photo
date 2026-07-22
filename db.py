@@ -14,6 +14,7 @@ la fermeture et le commit.
 """
 from __future__ import annotations
 
+import atexit
 import csv
 import datetime as dt
 import json
@@ -22,10 +23,11 @@ import os
 import shutil
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 from typing import Any, Iterator, List, Optional, Tuple
 
-from settings import DB_PATH, LEGACY_DB_PATH
+from settings import BACKUP_DB_PATH, DB_PATH, RESTORE_SOURCES
 
 logger = logging.getLogger(__name__)
 
@@ -64,23 +66,111 @@ _LOCK_TIMEOUT = 30  # filet de sécurité : échec clair plutôt que blocage inf
 _CONN: Optional[sqlite3.Connection] = None
 
 
-def _migrate_legacy_db() -> None:
-    """Copie l'ancienne DB (photos.db) vers le nouveau fichier (photos_v2.db).
+# --- Sauvegarde/restauration vers le disque persistant (/data, NFS fragile) --
+# La DB vive est LOCALE (DB_PATH). Tout accès à /data (qui peut GELER au
+# niveau OS) est confiné : restauration au boot bornée par un timeout,
+# sauvegardes dans un thread jetable. Le bot lui-même ne touche jamais /data.
+_BACKUPS_ENABLED = True
+_BACKUP_MIN_INTERVAL = 300          # 5 min entre sauvegardes
+_commit_count = 0                   # incrémenté à chaque commit (détection "dirty")
+_backup_state = {"inflight": False, "last_ts": 0.0, "last_commit": -1}
 
-    Une seule fois : les verrous NFS orphelins (instances tuées par OOM/crash)
-    collent à l'INODE de l'ancien fichier et faisaient pendre toute écriture —
-    un fichier neuf en est exempt. Copie par LECTURE simple (shutil, aucun
-    verrou fichier pris). Si la copie échoue, on démarre sur une DB vierge
-    (dégradé mais vivant : init_db recrée les tables, tokens en fallback env).
+
+def _restore_at_boot() -> None:
+    """Restaure la DB locale depuis /data (borné : jamais plus de 60s).
+
+    Tout se passe dans un thread jetable (même os.path.exists peut geler sur
+    un NFS malade). Si la restauration échoue/gèle : DB vierge + sauvegardes
+    DÉSACTIVÉES pour ce boot (on n'écrase jamais un bon backup avec du vide).
     """
-    if os.path.exists(DB_PATH) or not os.path.exists(LEGACY_DB_PATH):
+    global _BACKUPS_ENABLED
+    if os.path.exists(DB_PATH) or not RESTORE_SOURCES:
         return
+    result: dict = {}
+
+    def work():
+        try:
+            for src in RESTORE_SOURCES:
+                if os.path.exists(src):
+                    shutil.copyfile(src, DB_PATH + ".restoring")
+                    os.replace(DB_PATH + ".restoring", DB_PATH)
+                    result["src"] = src
+                    return
+            result["src"] = None  # aucun backup → première installation
+        except Exception as e:
+            result["err"] = str(e)
+
+    t = threading.Thread(target=work, daemon=True, name="db-restore")
+    t.start()
+    t.join(timeout=60)
+    if t.is_alive() or "err" in result:
+        _BACKUPS_ENABLED = False
+        logger.error(
+            "⚠️ Restore DB depuis /data IMPOSSIBLE (%s) — démarrage sur DB "
+            "VIERGE, sauvegardes désactivées ce boot (protection du backup). "
+            "Redémarre l'instance quand le disque répond pour récupérer l'historique.",
+            result.get("err", "accès /data gelé"),
+        )
+    elif result.get("src"):
+        logger.info("DB restaurée depuis %s → %s", result["src"], DB_PATH)
+    else:
+        logger.info("Aucun backup sur /data — nouvelle DB locale (première installation)")
+
+
+def _do_backup() -> None:
+    """Snapshot cohérent (local, sous verrou, ms) puis upload vers /data.
+
+    L'upload NFS peut geler : ce thread est jetable, le flag inflight évite
+    l'empilement. `os.replace` rend le remplacement du backup atomique."""
+    global _backup_state
     try:
-        shutil.copyfile(LEGACY_DB_PATH, DB_PATH)
-        logger.info("DB migrée %s → %s (nouvel inode, verrous NFS neufs)",
-                    LEGACY_DB_PATH, DB_PATH)
+        snap = DB_PATH + ".snap"
+        with _DB_LOCK:
+            dst = sqlite3.connect(snap)
+            _get_conn().backup(dst)
+            dst.close()
+            commits_at_snap = _commit_count
+        tmp = BACKUP_DB_PATH + ".tmp"
+        shutil.copyfile(snap, tmp)          # ← seul point qui peut geler (NFS)
+        os.replace(tmp, BACKUP_DB_PATH)
+        os.remove(snap)
+        _backup_state["last_ts"] = time.time()
+        _backup_state["last_commit"] = commits_at_snap
+        logger.info("💾 Backup DB → %s (commit #%d)", BACKUP_DB_PATH, commits_at_snap)
     except Exception as e:
-        logger.error("Migration DB échouée (%s) — démarrage sur une DB vierge", e)
+        logger.warning("Backup DB échoué : %s", e)
+    finally:
+        _backup_state["inflight"] = False
+
+
+def maybe_backup_db(force: bool = False) -> None:
+    """Appelé par le scheduler (toutes les 30s) : sauvegarde si nécessaire.
+
+    Conditions : activé + pas déjà en cours + ≥5 min depuis la dernière +
+    au moins un commit depuis. `force=True` ignore l'intervalle (shutdown)."""
+    if not (BACKUP_DB_PATH and _BACKUPS_ENABLED) or _backup_state["inflight"]:
+        return
+    if not force and time.time() - _backup_state["last_ts"] < _BACKUP_MIN_INTERVAL:
+        return
+    if _commit_count == _backup_state["last_commit"]:
+        return  # rien de nouveau à sauver
+    _backup_state["inflight"] = True
+    threading.Thread(target=_do_backup, daemon=True, name="db-backup").start()
+
+
+def _final_backup() -> None:
+    """Best effort à l'arrêt propre (deploy/SIGTERM) : sauvegarde synchrone.
+
+    Rend la fenêtre de perte quasi nulle sur les redéploiements. Si /data gèle
+    à ce moment, gunicorn tuera le process après son délai de grâce — tant pis,
+    la sauvegarde périodique précédente fait foi."""
+    if (BACKUP_DB_PATH and _BACKUPS_ENABLED and _CONN is not None
+            and _commit_count != _backup_state["last_commit"]):
+        _backup_state["inflight"] = True
+        _do_backup()
+
+
+atexit.register(_final_backup)
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -99,7 +189,7 @@ def _get_conn() -> sqlite3.Connection:
     """
     global _CONN
     if _CONN is None:
-        _migrate_legacy_db()
+        _restore_at_boot()
         conn = sqlite3.connect(DB_PATH, timeout=3.0, check_same_thread=False)
         conn.execute("PRAGMA busy_timeout=3000")
         conn.execute("PRAGMA synchronous=NORMAL")
@@ -121,6 +211,8 @@ def connection() -> Iterator[sqlite3.Connection]:
         try:
             yield conn
             conn.commit()
+            global _commit_count
+            _commit_count += 1  # marque la DB "dirty" pour la sauvegarde
         except Exception:
             # Laisse la connexion persistante propre ; si elle est morte
             # (erreur disque), on la jette — la prochaine opération ré-ouvre.

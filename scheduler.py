@@ -227,6 +227,10 @@ def scheduler_loop() -> None:
             _run_daily_token_check()
             _collect_pending_insights()
             _run_daily_autopubs()
+            # Sauvegarde DB locale → /data (rate-limitée 5 min, thread isolé,
+            # seulement si la DB a changé — voir db.maybe_backup_db)
+            from db import maybe_backup_db
+            maybe_backup_db()
         except Exception as e:
             logger.exception("Scheduler loop error: %s", e)
         time.sleep(POLL_SECONDS)

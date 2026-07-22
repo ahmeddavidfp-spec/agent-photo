@@ -47,16 +47,22 @@ TH_API = "https://graph.threads.net/v1.0/"
 
 # --- Base de données ---
 # Sur Render le disque persistant est monté dans /data
-# v2 : NOUVEAU fichier (nouvel inode). Les verrous NFS orphelins laissés par
-# les instances tuées (OOM/crash) collent à l'inode de l'ancien fichier et
-# faisaient PENDRE toute écriture. db.py migre les données automatiquement
-# depuis l'ancien fichier (simple copie en lecture) au premier démarrage.
+# ARCHITECTURE DB (voir doc §10) : le disque persistant /data (NFS) gèle par
+# intermittence au niveau OS → la DB VIVE habite le disque LOCAL de l'instance
+# (rapide, fiable), et une SAUVEGARDE part vers /data en arrière-plan (thread
+# isolé : si /data gèle, seule la sauvegarde attend — jamais le bot).
+# Au boot, db.py restaure depuis la sauvegarde /data la plus récente.
+# Trade-off assumé : un crash peut perdre les toutes dernières minutes d'écritures.
 if Path("/data").exists():
-    DB_PATH = "/data/photos_v2.db"
-    LEGACY_DB_PATH = "/data/photos.db"
+    DB_PATH = "/tmp/photos_live.db"            # DB vive : disque local
+    BACKUP_DB_PATH = "/data/photos_backup.db"  # sauvegarde persistante
+    # Sources de restauration au boot, par ordre de préférence (les deux
+    # derniers = anciens emplacements, pour la première migration).
+    RESTORE_SOURCES = ["/data/photos_backup.db", "/data/photos_v2.db", "/data/photos.db"]
 else:
-    DB_PATH = "photos_v2.db"
-    LEGACY_DB_PATH = "photos.db"
+    DB_PATH = "photos_v2.db"                   # dev local : inchangé
+    BACKUP_DB_PATH = None
+    RESTORE_SOURCES = []
 
 # --- Fuseau horaire ---
 LOCAL_TZ = "Europe/Brussels"
