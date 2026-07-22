@@ -1092,8 +1092,37 @@ def _launch_reel_from_miniapp(chat_id: int, galerie: str, urls: list) -> None:
         _release_inflight(key)
 
 
+def _launch_publish_from_miniapp(chat_id: int, mode: str, packed: str, full: str) -> None:
+    """Callback Studio : publication immédiate (réutilise _background_publish)."""
+    threading.Thread(
+        target=_background_publish, args=(chat_id, mode, packed, full),
+        daemon=True, name="miniapp-publish",
+    ).start()
+
+
+def _setup_menu_button() -> None:
+    """Bouton ☰ du chat Telegram → ouvre le Studio. Best effort au boot."""
+    if not TELEGRAM_TOKEN:
+        return
+    try:
+        from http_client import safe_post
+        safe_post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setChatMenuButton",
+            json={"menu_button": {"type": "web_app", "text": "🎨 Studio",
+                                  "web_app": {"url": f"{APP_BASE_URL}/app"}}},
+            timeout=10,
+        )
+        logger.info("Menu ☰ → Studio (%s/app)", APP_BASE_URL)
+    except Exception as e:
+        logger.warning("setChatMenuButton failed: %s", e)
+
+
 from miniapp import register_miniapp  # noqa: E402  (après les définitions)
-register_miniapp(app, _launch_reel_from_miniapp)
+register_miniapp(app, {
+    "reel": _launch_reel_from_miniapp,
+    "publish": _launch_publish_from_miniapp,
+})
+threading.Thread(target=_setup_menu_button, daemon=True).start()
 
 
 if __name__ == "__main__":
