@@ -254,19 +254,26 @@ _STUDIO_HTML = r"""<!doctype html>
     return r.json();
   }
 
-  // ---- Galeries ----
+  // ---- Galeries : liste instantanée, compteurs remplis en arrière-plan ----
   async function loadGalleries() {
     try {
-      const d = await api("/api/galleries", { headers: H() });
+      const d = await api("/api/galleries", { headers: H() });   // instantané
       const list = $("gal-list"); list.innerHTML = "";
       d.galleries.forEach(g => {
         const row = document.createElement("div");
-        row.className = "row";
-        row.innerHTML = "<b>" + g.nom + "</b><span class='cnt'>" + g.done + "/" + g.total + " publiées</span>";
+        row.className = "row"; row.id = "gal-" + g.slug;
+        row.innerHTML = "<b>" + g.nom + "</b><span class='cnt'>…</span>";
         row.onclick = () => openGallery(g.slug, g.nom);
         list.appendChild(row);
       });
       $("gal-state").hidden = true;
+      // Compteurs en arrière-plan (peut prendre 10-30 s à froid)
+      api("/api/galleries?counts=1", { headers: H() }).then(dc => {
+        dc.galleries.forEach(g => {
+          const row = $("gal-" + g.slug);
+          if (row) row.querySelector(".cnt").textContent = g.done + "/" + g.total + " publiées";
+        });
+      }).catch(() => {});
     } catch (e) { $("gal-state").textContent = "Erreur : " + e.message; }
   }
 
@@ -502,12 +509,19 @@ def register_miniapp(app, hooks) -> None:
 
     @app.route("/api/galleries")
     def api_galleries():
+        """Sans param : liste INSTANTANÉE (noms seuls, zéro scraping).
+        Avec ?counts=1 : ajoute les compteurs publiées/total (scraping, lent à
+        froid) — appelé en arrière-plan par le Studio."""
         _require_user()
+        config = load_yaml_config()
+        galeries = config.get("galeries") or []
+        if request.args.get("counts") != "1":
+            return jsonify({"galleries": [
+                {"slug": g, "nom": _display_name(g, config)} for g in galeries
+            ]})
         from concurrent.futures import ThreadPoolExecutor
         from db import already_sent_urls
         from gallery import counts_for_gallery
-        config = load_yaml_config()
-        galeries = config.get("galeries") or []
         sent = already_sent_urls()
         with ThreadPoolExecutor(max_workers=3) as pool:
             results = list(pool.map(
