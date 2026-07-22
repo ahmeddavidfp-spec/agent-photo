@@ -26,6 +26,7 @@ reel:
   photos_color: 4  # un Reel couleur = 4 photos
   photos_bw: 4     # un Reel noir & blanc = 4 photos
   seconds: 2.5     # durée d'affichage par photo
+  motion: true     # zoom lent "Ken Burns" sur chaque photo (false = statique)
   # Accroche signature fixe, affichée au-dessus du bandeau "STREET <VILLE>"
   # sur chaque Reel (affichée en majuscules). Mets "" pour la désactiver.
   tagline: "Look again. Slower this time."

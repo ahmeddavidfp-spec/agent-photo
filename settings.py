@@ -82,7 +82,7 @@ def load_yaml_config(path: str = "config.yaml") -> dict:
         "custom_hashtag": "",
         "carousel": {"enabled": False, "count": 5},
         "reel": {"enabled": False, "photos_color": 4, "photos_bw": 4,
-                 "seconds": 2.5, "tagline": ""},
+                 "seconds": 2.5, "tagline": "", "motion": True},
     }
     try:
         with open(path, "r", encoding="utf-8") as f:
