@@ -15,7 +15,7 @@ import subprocess
 import tempfile
 from typing import List, Optional
 
-from PIL import Image, ImageEnhance, ImageFilter
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
 from http_client import safe_get
 
@@ -28,6 +28,53 @@ FPS = 30
 SEC_PER_PHOTO = 2.5        # durée d'affichage par photo
 FADE = 0.4                 # fondu entrée/sortie (s)
 _MARGIN = 40               # marge autour de la photo (px) sur le fond flou
+
+# Police embarquée (Archivo, SIL OFL) pour le bandeau "STREET <VILLE>".
+_FONT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "Archivo.ttf")
+
+
+def _label_font(size: int) -> "ImageFont.FreeTypeFont":
+    f = ImageFont.truetype(_FONT_PATH, size)
+    try:
+        f.set_variation_by_name("SemiBold")  # poids stable (Archivo est variable)
+    except Exception:
+        pass  # défaut = SemiBold de toute façon
+    return f
+
+
+def _draw_label(img: Image.Image, text: str) -> Image.Image:
+    """Ajoute un bandeau 'STREET <VILLE>' centré en bas : texte espacé encadré de
+    deux filets fins, sur un dégradé sombre (lisible sur photo portrait comme sur
+    le fond flou). Taille auto-ajustée pour tenir dans la largeur. Retourne RGB."""
+    base = img.convert("RGBA")
+    # Dégradé sombre transparent→opaque sur la bande basse
+    scrim = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(scrim)
+    band = 230
+    for i in range(band):
+        sd.line([(0, H - band + i), (W, H - band + i)], fill=(0, 0, 0, int(150 * i / band)))
+    base = Image.alpha_composite(base, scrim)
+    d = ImageDraw.Draw(base)
+
+    # Auto-fit : réduit la taille jusqu'à tenir dans la largeur (villes longues)
+    max_w, track, size = W - 80, 5, 46
+    while size > 26:
+        font = _label_font(size)
+        widths = [d.textlength(c, font=font) for c in text]
+        total = sum(widths) + track * (len(text) - 1)
+        if total <= max_w:
+            break
+        size -= 2
+    asc, desc = font.getmetrics()
+    cy = H - 92
+    x, y = W / 2 - total / 2, cy - (asc + desc) / 2
+    for c, w in zip(text, widths):
+        d.text((x, y), c, font=font, fill=(255, 255, 255, 255))
+        x += w + track
+    half = total / 2
+    for dy in (-38, 38):
+        d.line([(W / 2 - half, cy + dy), (W / 2 + half, cy + dy)], fill=(255, 255, 255, 235), width=2)
+    return base.convert("RGB")
 
 
 def _download(url: str, dest: str) -> bool:
@@ -44,7 +91,7 @@ def _download(url: str, dest: str) -> bool:
         return False
 
 
-def _normalize(src_path: str, dst_path: str) -> None:
+def _normalize(src_path: str, dst_path: str, label: Optional[str] = None) -> None:
     """Ajuste une photo en WxH sur un fond flou d'elle-même (faible mémoire).
 
     Optimisations mémoire (instance Render 512 Mo) :
@@ -72,7 +119,12 @@ def _normalize(src_path: str, dst_path: str) -> None:
     # Premier plan : ajuster DANS le cadre (sans crop), marge autour
     img.thumbnail((W - 2 * _MARGIN, H - 2 * _MARGIN), Image.LANCZOS)
     bg.paste(img, ((W - img.width) // 2, (H - img.height) // 2))
-    bg.save(dst_path, "JPEG", quality=88)
+    if label:
+        labeled = _draw_label(bg, label)
+        labeled.save(dst_path, "JPEG", quality=88)
+        labeled.close()
+    else:
+        bg.save(dst_path, "JPEG", quality=88)
     img.close()
     bg.close()
 
@@ -112,7 +164,8 @@ def _assemble(frame_paths: list[str], out_path: str, sec: float = SEC_PER_PHOTO)
 
 
 def build_reel_from_paths(image_paths: list[str], out_path: str,
-                          sec: float = SEC_PER_PHOTO) -> str:
+                          sec: float = SEC_PER_PHOTO,
+                          label: Optional[str] = None) -> str:
     """Monte un Reel à partir de fichiers image locaux. Retourne out_path."""
     if len(image_paths) < 2:
         raise ValueError("Au moins 2 photos requises pour un Reel")
@@ -121,7 +174,7 @@ def build_reel_from_paths(image_paths: list[str], out_path: str,
         frames = []
         for i, src in enumerate(image_paths):
             dst = os.path.join(workdir, f"frame_{i:04d}.jpg")
-            _normalize(src, dst)
+            _normalize(src, dst, label)
             frames.append(dst)
         _assemble(frames, out_path, sec)
         return out_path
@@ -130,9 +183,12 @@ def build_reel_from_paths(image_paths: list[str], out_path: str,
 
 
 def build_reel(image_urls: List[str], out_path: Optional[str] = None,
-               sec: float = SEC_PER_PHOTO) -> Optional[str]:
+               sec: float = SEC_PER_PHOTO, label: Optional[str] = None) -> Optional[str]:
     """Télécharge les photos et monte un Reel muet 9:16. Retourne le chemin MP4
-    ou None si échec (téléchargements insuffisants / erreur ffmpeg)."""
+    ou None si échec (téléchargements insuffisants / erreur ffmpeg).
+
+    `label` : bandeau 'STREET <VILLE>' incrusté en bas de chaque photo (optionnel).
+    """
     urls = [u for u in (image_urls or []) if u]
     if len(urls) < 2:
         logger.warning("Reel : moins de 2 URLs")
@@ -148,7 +204,7 @@ def build_reel(image_urls: List[str], out_path: Optional[str] = None,
             logger.warning("Reel : téléchargements insuffisants (%d)", len(local))
             return None
         out_path = out_path or tempfile.mktemp(prefix="reel_", suffix=".mp4")
-        return build_reel_from_paths(local, out_path, sec)
+        return build_reel_from_paths(local, out_path, sec, label)
     except Exception as e:
         logger.exception("Reel : build échoué : %s", e)
         return None
