@@ -19,6 +19,7 @@ import datetime as dt
 import json
 import logging
 import sqlite3
+import threading
 import time
 from contextlib import contextmanager
 from typing import Any, Iterator, List, Optional, Tuple
@@ -40,40 +41,58 @@ logger = logging.getLogger(__name__)
 # on ferme — rien d'autre.
 
 
-def _commit_with_retry(conn: sqlite3.Connection, attempts: int = 6) -> None:
-    """Commit résilient à 'database is locked'.
+# =========================================================================
+# SÉRIALISATION DES ACCÈS DB
+# =========================================================================
+# L'app tourne en UN SEUL process (gunicorn --workers 1) : tous les accès à
+# photos.db viennent d'ici (threads web + scheduler). On sérialise donc TOUT
+# accès SQLite derrière un verrou process-wide → une seule connexion à la
+# fois → "database is locked" devient impossible par construction. Sur le
+# disque Render lent (NFS, pas de WAL), la contention SQLite provoquait des
+# embouteillages de 20s+ (un commit poussif garde ses verrous et bloque même
+# les lecteurs).
+#
+# ⚠️ RÈGLE ABSOLUE (leçon du deadlock historique, voir doc §10) : RIEN de
+# lent ne doit JAMAIS s'exécuter dans un bloc `with connection()` — pas
+# d'appel réseau, pas de sleep, pas d'OpenAI. Ouvrir → lire/écrire → sortir.
+# Le verrou n'est tenu que quelques millisecondes (+ fsync du commit).
+_DB_LOCK = threading.RLock()
+_LOCK_TIMEOUT = 30  # filet de sécurité : échec clair plutôt que blocage infini
 
-    Le disque /data de Render est lent (type NFS) et sans WAL possible : sous
-    contention, un commit peut échouer. On préfère plusieurs tentatives courtes
-    avec backoff (on attrape une fenêtre libre) qu'une seule longue attente.
-    """
+
+def _commit_with_retry(conn: sqlite3.Connection, attempts: int = 3) -> None:
+    """Commit résilient (filet — avec la sérialisation, ne devrait jamais jouer)."""
     for i in range(attempts):
         try:
             conn.commit()
             return
         except sqlite3.OperationalError as e:
             if "locked" in str(e).lower() and i < attempts - 1:
-                time.sleep(0.25 * (i + 1))  # 0.25,0.5,0.75,1.0,1.25 → ~3.75s cumulés
+                time.sleep(0.3 * (i + 1))
                 continue
             raise
 
 
 @contextmanager
 def connection() -> Iterator[sqlite3.Connection]:
-    # Disque Render lent (type NFS), pas de WAL (-shm/-wal non supportés).
-    # busy_timeout court (3s) : on échoue vite puis on réessaie le commit avec
-    # backoff (voir _commit_with_retry) → bien plus robuste sous contention.
-    # synchronous=NORMAL : commits plus rapides (moins de fsync) ; sûr face à un
-    # crash process (recovery par journal), seule une panne d'alim pourrait poser
-    # souci — négligeable sur Render et la DB est reconstructible.
-    conn = sqlite3.connect(DB_PATH, timeout=3.0)
+    if not _DB_LOCK.acquire(timeout=_LOCK_TIMEOUT):
+        raise sqlite3.OperationalError(
+            f"DB serialization lock non obtenu en {_LOCK_TIMEOUT}s "
+            "(un bloc connection() fait-il quelque chose de lent ?)"
+        )
     try:
-        conn.execute("PRAGMA busy_timeout=3000")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        yield conn
-        _commit_with_retry(conn)
+        conn = sqlite3.connect(DB_PATH, timeout=3.0)
+        try:
+            conn.execute("PRAGMA busy_timeout=3000")
+            # synchronous=NORMAL : commits plus rapides (moins de fsync). Sûr
+            # face à un crash process ; la DB reste reconstructible.
+            conn.execute("PRAGMA synchronous=NORMAL")
+            yield conn
+            _commit_with_retry(conn)
+        finally:
+            conn.close()
     finally:
-        conn.close()
+        _DB_LOCK.release()
 
 
 def init_db() -> None:
