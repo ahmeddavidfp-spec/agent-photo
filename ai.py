@@ -69,7 +69,7 @@ def _clean_link_duplicates(caption: str, display_link: str) -> str:
     out = []
     for line in caption.split("\n"):
         line_stripped = line.strip()
-        if ("davidmertens.me" in line_stripped or "davidahmed.me" in line_stripped) \
+        if ("davidmertens." in line_stripped or "davidahmed." in line_stripped) \
                 and display_link not in line_stripped:
             continue
         out.append(line)
@@ -338,7 +338,7 @@ def generate_caption(image_url: str, galerie: str) -> str:
     """Retourne `caption|||alt`. Fallback propre si tout casse."""
     config = load_yaml_config()
     base_url = (
-        config.get("site_url", "davidmertens.me")
+        config.get("site_url", "davidmertens.com")
         .replace("https://", "")
         .replace("http://", "")
         .replace("www.", "")  # lien affiché sans www (cohérent avec voice_examples)

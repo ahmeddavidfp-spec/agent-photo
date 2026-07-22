@@ -1,4 +1,4 @@
-"""Scraping du site davidmertens.me pour lister les photos d'une galerie.
+"""Scraping du site davidmertens.com pour lister les photos d'une galerie.
 
 Un cache TTL mémoire évite de re-scraper 18 fois la même page à chaque ouverture
 de menu Telegram (14s → <1s une fois chaud).

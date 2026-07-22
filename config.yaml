@@ -1,4 +1,6 @@
-site_url: "https://www.davidmertens.me"
+# Domaine CANONIQUE = .com (le .me redirige vers .com). Utilisé pour le
+# scraping des galeries ET pour le lien affiché dans les captions.
+site_url: "https://www.davidmertens.com"
 custom_hashtag: ""
 
 # --- Carrousel Instagram -----------------------------------------------------
@@ -105,7 +107,7 @@ voice_examples: |
   Trois secondes de rien. C'est ça, la photo. 📍 Bruxelles
 
   Série complète 👇
-  davidmertens.me/bruxelles
+  davidmertens.com/bruxelles
   #streetphotography #bnw #leicaphotography
   ---
   She crossed the frame in two seconds. I had one.
@@ -115,7 +117,7 @@ voice_examples: |
   La lumière, elle, était prête. 📍 New York
 
   Série complète 👇
-  davidmertens.me/new-york
+  davidmertens.com/new-york
   #nycstreet #streetphotography #bnw_nyc
   ---
   Sunday in Milano. Nobody hurries. Somebody always does.
@@ -125,7 +127,7 @@ voice_examples: |
   Le contraste vit dans les détails — lin, ombre, allure. 📍 Milano
 
   Série complète 👇
-  davidmertens.me/milan
+  davidmertens.com/milan
   #milan #streetphotography #bnw
   ---
   Tokyo doesn't explain itself.
@@ -135,7 +137,7 @@ voice_examples: |
   Tu la lis vite ou tu la rates. 📍 Tokyo
 
   Série complète 👇
-  davidmertens.me/tokyo
+  davidmertens.com/tokyo
   #tokyostreet #streetphotography #bnw_tokyo
 
 # --- Contexte curatorial par galerie (pass 2) --------------------------------
