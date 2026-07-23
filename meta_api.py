@@ -1,7 +1,7 @@
 """Publication Instagram + Threads avec polling du statut au lieu de sleep fixes."""
 import logging
 import time
-from typing import Tuple
+from typing import Optional, Tuple
 
 from ai import split_content
 from db import get_stored_token, save_token
@@ -488,76 +488,60 @@ def facebook_page_configured() -> bool:
     return bool(FB_PAGE_ID and get_fb_page_token())
 
 
-def renew_facebook_token() -> Tuple[bool, object]:
-    """Ré-échange le token de Page FB contre un long-lived frais.
+def _derive_page_token(user_token: str) -> Optional[str]:
+    """Dérive le VRAI token de Page depuis un token UTILISATEUR (la bonne
+    méthode) : on rend le token utilisateur long-lived, puis /me/accounts
+    renvoie le token de Page correspondant à FB_PAGE_ID (long-lived, publie).
 
-    Même mécanique fb_exchange_token que le token IG (même app Meta). Un token
-    de Page issu d'un user token long-lived est souvent SANS expiration — le
-    ré-échange est alors inoffensif et confirme simplement sa validité.
-    """
-    current = get_fb_page_token()
-    missing = [n for n, v in [
-        ("FB_PAGE_ACCESS_TOKEN", current),
-        ("IG_CLIENT_SECRET", IG_CLIENT_SECRET),
-        ("IG_APP_ID", IG_APP_ID),
-    ] if not v]
-    if missing:
-        return False, f"Variables manquantes : {', '.join(missing)}"
+    Retourne le token de Page, ou None si `user_token` n'est pas un token
+    utilisateur exploitable (ex. c'est déjà un token de Page)."""
     try:
-        r = safe_get(
-            f"{FB_API}oauth/access_token",
-            params={
-                "grant_type": "fb_exchange_token",
-                "client_id": IG_APP_ID,
-                "client_secret": IG_CLIENT_SECRET,
-                "fb_exchange_token": current,
-            },
-        )
-        res = r.json()
-        if "access_token" in res:
-            new_token = res["access_token"]
-            days = res.get("expires_in", 0) // 86400  # 0 = sans expiration
-            save_token(FB_PAGE_TOKEN_KEY, new_token)
-            logger.info("FB token persisté en DB (expire dans %s)",
-                        f"{days}j" if days else "∞")
-            return True, (new_token, days if days else "∞")
-        return False, res
+        r = safe_get(f"{FB_API}oauth/access_token", params={
+            "grant_type": "fb_exchange_token",
+            "client_id": IG_APP_ID, "client_secret": IG_CLIENT_SECRET,
+            "fb_exchange_token": user_token,
+        }, timeout=15)
+        long_user = (r.json() or {}).get("access_token") or user_token
+        r = safe_get(f"{FB_API}me/accounts",
+                     params={"access_token": long_user}, timeout=15)
+        for pg in (r.json() or {}).get("data", []):
+            if str(pg.get("id")) == str(FB_PAGE_ID):
+                return pg.get("access_token")
     except Exception as e:
-        logger.error("Renew FB error: %s", e)
-        return False, str(e)
+        logger.warning("Dérivation token de Page KO : %s", e)
+    return None
 
 
 def ensure_fb_page_token() -> None:
-    """Échange le token de Page fourni en env (souvent court — Graph Explorer)
-    contre un LONG-LIVED, stocké en DB. Appelé au boot, best effort, une fois.
+    """Au boot : établit le token de Page stocké en DB (source de vérité).
 
-    Utilise le même couple app (IG_APP_ID / IG_CLIENT_SECRET) que le refresh
-    des tokens Instagram — c'est la même app Meta.
+    - Si FB_PAGE_ACCESS_TOKEN est un token UTILISATEUR → on dérive le token de
+      Page via /me/accounts (long-lived, publie correctement).
+    - Sinon (c'est déjà un token de Page) → on l'utilise tel quel.
+    Écrase à chaque boot (idempotent, auto-réparateur si le token env change).
     """
-    if get_stored_token(FB_PAGE_TOKEN_KEY):
-        return  # déjà échangé
-    if not (FB_PAGE_ACCESS_TOKEN and IG_APP_ID and IG_CLIENT_SECRET):
+    if not (FB_PAGE_ACCESS_TOKEN and FB_PAGE_ID and IG_APP_ID and IG_CLIENT_SECRET):
         return
-    try:
-        r = safe_get(
-            f"{FB_API}oauth/access_token",
-            params={
-                "grant_type": "fb_exchange_token",
-                "client_id": IG_APP_ID,
-                "client_secret": IG_CLIENT_SECRET,
-                "fb_exchange_token": FB_PAGE_ACCESS_TOKEN,
-            },
-        )
-        tok = (r.json() or {}).get("access_token")
-        if tok:
-            save_token(FB_PAGE_TOKEN_KEY, tok)
-            logger.info("✅ FB Page token échangé en long-lived et stocké en DB")
-        else:
-            logger.warning("FB Page token : échange refusé (%s) — le token env "
-                           "sera utilisé tel quel (attention à son expiration)",
-                           r.text[:150])
-    except Exception as e:
-        logger.warning("FB Page token : échange impossible (%s)", e)
+    page_token = _derive_page_token(FB_PAGE_ACCESS_TOKEN)
+    if page_token:
+        save_token(FB_PAGE_TOKEN_KEY, page_token)
+        logger.info("✅ FB Page token dérivé via /me/accounts et stocké en DB")
+    else:
+        save_token(FB_PAGE_TOKEN_KEY, FB_PAGE_ACCESS_TOKEN)
+        logger.info("FB Page token utilisé tel quel (déjà un token de Page)")
+
+
+def renew_facebook_token() -> Tuple[bool, object]:
+    """Re-dérive le token de Page depuis FB_PAGE_ACCESS_TOKEN (bouton Studio)."""
+    if not (FB_PAGE_ACCESS_TOKEN and FB_PAGE_ID and IG_APP_ID and IG_CLIENT_SECRET):
+        return False, "Variables FB/IG manquantes"
+    page_token = _derive_page_token(FB_PAGE_ACCESS_TOKEN)
+    if page_token:
+        save_token(FB_PAGE_TOKEN_KEY, page_token)
+        days = token_days_left("FB", force_refresh=True)
+        return True, (page_token, "∞" if (days or 0) >= 9999 else days)
+    return False, ("Impossible de dériver le token de Page — vérifie que "
+                   "FB_PAGE_ACCESS_TOKEN est le token UTILISATEUR (Graph Explorer)")
 
 
 def publish_to_facebook_page(image_urls, message: str) -> Tuple[bool, str]:
