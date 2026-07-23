@@ -440,11 +440,22 @@ _STUDIO_HTML = r"""<!doctype html>
   async function loadStatus() {
     try {
       const d = await api("/api/status", { headers: H() });
+      let pinHtml = "";
+      if (d.pinterest && d.pinterest.connected) {
+        pinHtml = "<div class='row'><b>📌 Pinterest</b><span class='cnt'>✅ connecté</span></div>";
+      } else if (d.pinterest && d.pinterest.configured) {
+        pinHtml = "<button class='btn' onclick='connectPinterest()'>📌 Connecter Pinterest</button>";
+      } else {
+        pinHtml = "<div class='row'><b>📌 Pinterest</b><span class='cnt'>app non configurée</span></div>";
+      }
       $("status-tokens").innerHTML =
         "<div class='row'><b>📸 Token Instagram</b><span class='cnt'>" +
           (d.ig_days === null ? "?" : d.ig_days + " jours") + "</span></div>" +
         "<div class='row'><b>🧵 Token Threads</b><span class='cnt'>" +
           (d.th_days === null ? "?" : d.th_days + " jours") + "</span></div>" +
+        "<div class='row'><b>📘 Page Facebook</b><span class='cnt'>" +
+          (d.facebook ? "✅ configurée" : "non configurée") + "</span></div>" +
+        pinHtml +
         "<button class='btn sec' onclick=\"renew('IG')\">🔄 Renouveler IG</button>" +
         "<button class='btn sec' onclick=\"renew('TH')\">🔄 Renouveler Threads</button>";
       const dl = $("status-daily"); dl.classList.remove("state"); dl.innerHTML = "";
@@ -461,6 +472,12 @@ _STUDIO_HTML = r"""<!doctype html>
         row.appendChild(b); dl.appendChild(row);
       });
     } catch (e) { $("status-daily").textContent = "Erreur : " + e.message; }
+  }
+  async function connectPinterest() {
+    try {
+      const d = await api("/api/pinterest/connect-url", { headers: H() });
+      tg.openLink(d.url);  // autorisation dans le navigateur, callback → serveur
+    } catch (e) { alert("Échec : " + e.message); }
   }
   async function renew(platform) {
     try {
@@ -664,18 +681,31 @@ def register_miniapp(app, hooks) -> None:
     def api_status():
         user = _require_user()
         from db import get_active_daily_autopubs
-        from meta_api import token_days_left
+        from meta_api import facebook_page_configured, token_days_left
+        import pinterest as _pin
         config = load_yaml_config()
         active = {g for cid, g in get_active_daily_autopubs()
                   if str(cid) == str(user["id"])}
         return jsonify({
             "ig_days": token_days_left("IG"),
             "th_days": token_days_left("TH"),
+            "facebook": facebook_page_configured(),
+            "pinterest": {"configured": _pin.app_configured(),
+                          "connected": _pin.connected()},
             "galleries": [
                 {"slug": g, "nom": _display_name(g, config), "daily": g in active}
                 for g in (config.get("galeries") or [])
             ],
         })
+
+    @app.route("/api/pinterest/connect-url")
+    def api_pinterest_connect_url():
+        _require_user()
+        import pinterest as _pin
+        from settings import APP_BASE_URL
+        if not _pin.app_configured():
+            abort(400)
+        return jsonify({"url": _pin.authorize_url(f"{APP_BASE_URL}/pinterest/callback")})
 
     @app.route("/api/daily", methods=["POST"])
     def api_daily():

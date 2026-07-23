@@ -133,6 +133,14 @@ def _process_due_posts() -> None:
             except Exception as e:
                 logger.warning("Publication Facebook KO : %s", e)
 
+        # Épinglage Pinterest (SEO, tableau par ville) — best effort
+        try:
+            import pinterest
+            if pinterest.connected():
+                pinterest.pin_photos(urls or [cover], visible_caption)
+        except Exception as e:
+            logger.warning("Pinterest KO : %s", e)
+
         galerie = _gallery_from_url(cover)
 
         if ok_ig and isinstance(res_ig, str) and res_ig:

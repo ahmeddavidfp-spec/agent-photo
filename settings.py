@@ -21,6 +21,11 @@ APP_BASE_URL = os.environ.get(
     "RENDER_EXTERNAL_URL", "https://agent-photo.onrender.com"
 ).rstrip("/")
 
+# Pinterest (épinglage automatique) — vides = fonctionnalité inerte.
+# L'autorisation OAuth se fait ensuite en 1 clic depuis le Studio (onglet État).
+PINTEREST_APP_ID = os.environ.get("PINTEREST_APP_ID", "")
+PINTEREST_APP_SECRET = os.environ.get("PINTEREST_APP_SECRET", "")
+
 # Page Facebook (déclinaisons natives) — les DEUX vides = fonctionnalité inerte.
 # FB_PAGE_ACCESS_TOKEN = token de PAGE longue durée avec pages_manage_posts.
 FB_PAGE_ID = os.environ.get("FB_PAGE_ID", "")

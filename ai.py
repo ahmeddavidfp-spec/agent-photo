@@ -384,7 +384,7 @@ def decline_caption(platform: str, ig_caption: str) -> Optional[str]:
     Retourne None si l'IA échoue → l'appelant garde son fallback (ex. la
     légende IG telle quelle pour Threads).
     """
-    if not ig_caption or platform not in ("threads", "facebook"):
+    if not ig_caption or platform not in ("threads", "facebook", "pinterest"):
         return None
     m = re.search(r"davidmertens\.com/[a-z0-9_-]+", ig_caption)
     link = m.group(0) if m else "davidmertens.com"

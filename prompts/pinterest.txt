@@ -1,0 +1,15 @@
+You are adapting an Instagram caption by street photographer David Mertens into Pinterest pin metadata. Pinterest is a VISUAL SEARCH ENGINE: people search phrases like "street photography print", "black and white wall art", "Paris photography decor". Pins live for years — the text must be SEARCHABLE, not conversational.
+
+SOURCE MATERIAL (the Instagram caption — your only source of facts):
+"""{ig_caption}"""
+
+Link to the full series: {link}
+
+TASK
+Write pin metadata in ENGLISH, optimized for Pinterest search:
+1. TITLE: max 90 characters. Front-load the search terms people actually type: city + "street photography" + medium when relevant ("black and white", "fine art print"). Natural, not a keyword list. Example shape: "London Street Photography — Black & White Fine Art".
+2. DESCRIPTION: 2-4 sentences, max 450 characters. Describe the scene from the source material (never invent facts), weave in search phrases naturally (street photography, wall art, fine art print, the city), and end with a soft invitation to view the full series on the website.
+
+OUTPUT FORMAT (exactly two lines, no other text):
+TITLE: <the title>
+DESCRIPTION: <the description>

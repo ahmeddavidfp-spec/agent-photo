@@ -1044,6 +1044,14 @@ def _background_publish(chat_id: int, mode: str, image_url: str, caption: str) -
             except Exception as e:
                 logger.warning("Publication Facebook KO : %s", e)
                 ok_fb, res_fb = False, str(e)[:120]
+        if mode == "both":
+            # Épinglage Pinterest (SEO, tableau par ville) — best effort
+            try:
+                import pinterest
+                if pinterest.connected():
+                    pinterest.pin_photos(urls or [cover], visible_caption)
+            except Exception as e:
+                logger.warning("Pinterest KO : %s", e)
     except Exception as e:
         logger.exception("Erreur background_publish")
         send_message(chat_id, f"🔥 Erreur : {e}")
@@ -1164,6 +1172,9 @@ def _setup_fb_page_token() -> None:
 
 
 threading.Thread(target=_setup_fb_page_token, daemon=True).start()
+
+from pinterest import register_pinterest  # noqa: E402
+register_pinterest(app, f"{APP_BASE_URL}/pinterest/callback")
 
 
 if __name__ == "__main__":
