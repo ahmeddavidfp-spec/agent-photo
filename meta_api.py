@@ -572,48 +572,63 @@ def publish_to_facebook_page(image_urls, message: str) -> Tuple[bool, str]:
     if not facebook_page_configured():
         return False, "Page Facebook non configurée (FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN)"
     token = get_fb_page_token()
-    urls = [u for u in (image_urls or []) if u][:4]
+    # Version allégée (1000w) : Facebook télécharge l'image côté serveur ; sur
+    # l'original (plusieurs Mo) l'appel dépassait le timeout et retentait ~50s.
+    urls = [u.split("?")[0] + "?format=1000w" for u in (image_urls or []) if u][:4]
     if not urls:
         return False, "aucune image"
+    # Timeout FB généreux mais borné (le fetch image côté Meta peut prendre du temps)
+    FB_TIMEOUT = 40
     try:
+        logger.info("FB Page : publication de %d photo(s)…", len(urls))
         if len(urls) == 1:
             r = safe_post(
                 f"{FB_API}{FB_PAGE_ID}/photos",
-                data={"url": urls[0], "message": message,
-                      "access_token": token},
+                data={"url": urls[0], "message": message, "access_token": token},
+                timeout=FB_TIMEOUT,
             )
             data = r.json() or {}
             if r.status_code == 200 and data.get("id"):
-                logger.info("FB Page : photo publiée (%s)", data.get("post_id") or data["id"])
-                return True, data.get("post_id") or data["id"]
-            return False, str(data)[:200]
+                pid = data.get("post_id") or data["id"]
+                logger.info("FB Page : ✅ photo publiée (%s)", pid)
+                return True, pid
+            logger.warning("FB Page : ❌ /photos HTTP %s : %s", r.status_code, str(data)[:250])
+            return False, _fb_error(data)
 
         media_ids = []
-        for u in urls:
+        for i, u in enumerate(urls):
             r = safe_post(
                 f"{FB_API}{FB_PAGE_ID}/photos",
-                data={"url": u, "published": "false",
-                      "access_token": token},
+                data={"url": u, "published": "false", "access_token": token},
+                timeout=FB_TIMEOUT,
             )
             pid = (r.json() or {}).get("id")
             if pid:
                 media_ids.append(pid)
+                logger.info("FB Page : photo %d/%d uploadée", i + 1, len(urls))
             else:
-                logger.warning("FB Page : upload photo KO (%s) : %s", u[:60], r.text[:150])
+                logger.warning("FB Page : ❌ upload photo %d KO : %s", i + 1, r.text[:200])
         if not media_ids:
-            return False, "upload des photos échoué"
+            return False, "upload des photos échoué (voir logs)"
         payload = {"message": message, "access_token": token}
         for i, pid in enumerate(media_ids):
             payload[f"attached_media[{i}]"] = _json.dumps({"media_fbid": pid})
-        r = safe_post(f"{FB_API}{FB_PAGE_ID}/feed", data=payload)
+        r = safe_post(f"{FB_API}{FB_PAGE_ID}/feed", data=payload, timeout=FB_TIMEOUT)
         data = r.json() or {}
         if r.status_code == 200 and data.get("id"):
-            logger.info("FB Page : album %d photos publié (%s)", len(media_ids), data["id"])
+            logger.info("FB Page : ✅ album %d photos publié (%s)", len(media_ids), data["id"])
             return True, data["id"]
-        return False, str(data)[:200]
+        logger.warning("FB Page : ❌ /feed HTTP %s : %s", r.status_code, str(data)[:250])
+        return False, _fb_error(data)
     except Exception as e:
         logger.exception("publish_to_facebook_page error")
-        return False, str(e)
+        return False, str(e)[:180]
+
+
+def _fb_error(data: dict) -> str:
+    """Extrait le message d'erreur lisible de la réponse Meta."""
+    err = (data or {}).get("error") or {}
+    return err.get("message") or str(data)[:180]
 
 
 # =========================================================================
