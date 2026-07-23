@@ -191,9 +191,10 @@ _STUDIO_HTML = r"""<!doctype html>
   <button class="btn sec" id="cap-gen" onclick="genCaption()">✨ Générer la légende (IA)</button>
   <textarea id="cap-text" placeholder="La légende apparaîtra ici — tu peux l'éditer."></textarea>
   <div class="seg" style="margin-top:10px">
-    <button id="m-both" class="on" onclick="setPubMode('both')">Les deux</button>
-    <button id="m-ig" onclick="setPubMode('ig')">Instagram</button>
+    <button id="m-both" class="on" onclick="setPubMode('both')">Tous</button>
+    <button id="m-ig" onclick="setPubMode('ig')">Insta</button>
     <button id="m-th" onclick="setPubMode('th')">Threads</button>
+    <button id="m-fb" onclick="setPubMode('fb')">Facebook</button>
   </div>
   <button class="btn" id="cap-pub" onclick="publishNow()">🚀 Publier maintenant</button>
   <input type="datetime-local" id="cap-when">
@@ -366,8 +367,8 @@ _STUDIO_HTML = r"""<!doctype html>
   }
   function setPubMode(m) {
     pubMode = m;
-    ["m-both","m-ig","m-th"].forEach(x => $(x).classList.remove("on"));
-    $({ both:"m-both", ig:"m-ig", th:"m-th" }[m]).classList.add("on");
+    ["m-both","m-ig","m-th","m-fb"].forEach(x => $(x).classList.remove("on"));
+    $({ both:"m-both", ig:"m-ig", th:"m-th", fb:"m-fb" }[m]).classList.add("on");
   }
   async function genCaption() {
     $("cap-gen").disabled = true; $("cap-gen").textContent = "✨ Génération… (~15 s)";
@@ -599,7 +600,7 @@ def register_miniapp(app, hooks) -> None:
         config = load_yaml_config()
         _check_gallery(galerie, config)
         urls = _legit_urls(galerie, data.get("urls"), config, 10)
-        mode = data.get("mode") if data.get("mode") in ("both", "ig", "th") else "both"
+        mode = data.get("mode") if data.get("mode") in ("both", "ig", "th", "fb") else "both"
         visible = str(data.get("visible", "")).strip()
         if not visible:
             abort(400)

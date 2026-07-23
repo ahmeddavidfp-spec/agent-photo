@@ -308,7 +308,8 @@ def _handle_text(chat_id: int, text: str) -> None:
             [{"text": "🚀 Les deux", "callback_data": "pub_both"},
              {"text": "📅 Programmer", "callback_data": "schedule_btn"}],
             [{"text": "📸 Insta", "callback_data": "pub_ig"},
-             {"text": "🧵 Threads", "callback_data": "pub_th"}],
+             {"text": "🧵 Threads", "callback_data": "pub_th"},
+             {"text": "📘 Facebook", "callback_data": "pub_fb"}],
         ]
         send_message(chat_id, "✅ Prêt !", reply_markup={"inline_keyboard": kb})
         return
@@ -530,7 +531,7 @@ def _handle_action(chat_id: int, action: str) -> None:
             send_message(chat_id, "✍️ Envoie ta nouvelle légende.")
         return
 
-    mode_map = {"pub_both": "both", "pub_ig": "ig", "pub_th": "th"}
+    mode_map = {"pub_both": "both", "pub_ig": "ig", "pub_th": "th", "pub_fb": "fb"}
     if action in mode_map:
         session = get_session(chat_id)
         if not session:
@@ -736,7 +737,8 @@ def _send_suggestion(chat_id: int, galerie: str) -> None:
         [{"text": "🚀 Publier sur les deux", "callback_data": "pub_both"}],
         [{"text": "📅 Programmer", "callback_data": "schedule_btn"}],
         [{"text": "📸 Insta", "callback_data": "pub_ig"},
-         {"text": "🧵 Threads", "callback_data": "pub_th"}],
+         {"text": "🧵 Threads", "callback_data": "pub_th"},
+         {"text": "📘 Facebook", "callback_data": "pub_fb"}],
         [{"text": "✍️ Éditer légende", "callback_data": "manual_edit"}],
         [{"text": "🎬 Reel auto", "callback_data": f"reel_{galerie}"},
          {"text": "🖼 Composer un Reel", "web_app": {
@@ -1031,9 +1033,9 @@ def _background_publish(chat_id: int, mode: str, image_url: str, caption: str) -
             except Exception as e:
                 logger.warning("Déclinaison Threads KO : %s", e)
             ok_th, res_th = publish_to_threads(cover, th_text or caption)
-        if mode == "both" and facebook_page_configured():
-            # Déclinaison NATIVE Facebook (récit en français) — seulement si
-            # la Page est configurée. Non bloquant pour IG/TH.
+        if mode == "fb" or (mode == "both" and facebook_page_configured()):
+            # Déclinaison NATIVE Facebook (récit en français). En mode "fb"
+            # seul, on tente même sans config pour renvoyer l'erreur claire.
             try:
                 from ai import decline_caption
                 fb_text = decline_caption("facebook", visible_caption)
@@ -1101,8 +1103,10 @@ def _background_publish(chat_id: int, mode: str, image_url: str, caption: str) -
             )
     elif mode == "ig":
         final = "📸 **Instagram :** ✅" if ok_ig else f"❌ **Erreur Insta :** {res_ig}"
-    else:  # th
+    elif mode == "th":
         final = "🧵 **Threads :** ✅" if ok_th else f"❌ **Erreur Threads :** {res_th}"
+    else:  # fb
+        final = "📘 **Facebook :** ✅" if ok_fb else f"❌ **Erreur Facebook :** {res_fb}"
 
     send_message(chat_id, final)
 
