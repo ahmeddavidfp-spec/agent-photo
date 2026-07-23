@@ -38,6 +38,29 @@ DAILY_AUTOPUB_TRIGGER_HOUR = 8
 # État du check quotidien (pas besoin de lock : un seul thread scheduler)
 _last_alert_check_date: Optional[dt.date] = None
 _last_insights_run: float = 0.0
+_last_report_date: Optional[dt.date] = None
+
+WEEKLY_REPORT_HOUR = 18  # dimanche à partir de 18h (heure locale)
+
+
+def _run_weekly_report() -> None:
+    """Envoie le rapport du Copilote le dimanche soir (1×/semaine)."""
+    global _last_report_date
+    from settings import ALLOWED_CHAT_ID
+    if not ALLOWED_CHAT_ID:
+        return
+    nowl = now_local()
+    if nowl.weekday() != 6 or nowl.hour < WEEKLY_REPORT_HOUR:  # 6 = dimanche
+        return
+    if _last_report_date == nowl.date():
+        return
+    _last_report_date = nowl.date()
+    try:
+        from analyzer import build_report
+        send_message(int(ALLOWED_CHAT_ID), build_report())
+        logger.info("📬 Rapport hebdo envoyé.")
+    except Exception as e:
+        logger.exception("Rapport hebdo échoué : %s", e)
 
 
 def _collect_pending_insights() -> None:
@@ -257,6 +280,7 @@ def scheduler_loop() -> None:
             _run_daily_token_check()
             _collect_pending_insights()
             _run_daily_autopubs()
+            _run_weekly_report()
             # Sauvegarde DB locale → /data (rate-limitée 5 min, thread isolé,
             # seulement si la DB a changé — voir db.maybe_backup_db)
             from db import maybe_backup_db

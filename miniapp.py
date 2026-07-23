@@ -209,6 +209,8 @@ _STUDIO_HTML = r"""<!doctype html>
 
 <section id="v-stats" hidden>
   <h1>📊 Stats</h1>
+  <button class="btn sec" onclick="loadReport()">📬 Rapport de la semaine</button>
+  <div id="report-box" hidden style="white-space:pre-wrap;background:var(--tg-theme-secondary-bg-color,#1c1c1e);border-radius:12px;padding:14px;margin:8px 0;font-size:14px"></div>
   <div id="stats-state" class="state">Chargement…</div>
   <iframe id="stats-frame" hidden></iframe>
 </section>
@@ -435,6 +437,15 @@ _STUDIO_HTML = r"""<!doctype html>
       $("stats-frame").srcdoc = await r.text();
       $("stats-state").hidden = true; $("stats-frame").hidden = false;
     } catch (e) { $("stats-state").textContent = "Erreur : " + e.message; }
+  }
+
+  async function loadReport() {
+    const box = $("report-box"); box.hidden = false; box.textContent = "Génération…";
+    try {
+      const d = await api("/api/report", { headers: H() });
+      // markdown léger → texte lisible
+      box.textContent = d.report.replace(/\*/g, "").replace(/_/g, "");
+    } catch (e) { box.textContent = "Erreur : " + e.message; }
   }
 
   // ---- État ----
@@ -702,6 +713,12 @@ def register_miniapp(app, hooks) -> None:
                 for g in (config.get("galeries") or [])
             ],
         })
+
+    @app.route("/api/report")
+    def api_report():
+        _require_user()
+        from analyzer import build_report
+        return jsonify({"report": build_report()})
 
     @app.route("/api/pinterest/connect-url")
     def api_pinterest_connect_url():

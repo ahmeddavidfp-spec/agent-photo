@@ -297,6 +297,11 @@ def _handle_text(chat_id: int, text: str) -> None:
         send_message(chat_id, get_stats())
         return
 
+    if text == "/report":
+        from analyzer import build_report
+        send_message(chat_id, build_report())
+        return
+
     if text == "/health":
         send_message(chat_id, token_status())
         return
