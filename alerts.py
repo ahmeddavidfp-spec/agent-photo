@@ -23,9 +23,9 @@ ALERT_THRESHOLD_DAYS = 10
 def _build_alert_message() -> Optional[str]:
     """Retourne le message d'alerte si nécessaire, sinon None."""
     alerts = []
-    for label in ("IG", "TH"):
+    for label in ("IG", "TH", "FB"):
         days = token_days_left(label)
-        if days is None:
+        if days is None or days >= 9999:  # 9999 = token sans expiration
             continue
         if days < ALERT_THRESHOLD_DAYS:
             alerts.append(f"⚠️ **{label}** expire dans **{days}j**")
@@ -37,7 +37,8 @@ def _build_alert_message() -> Optional[str]:
         "\n\n**Action** :\n"
         "• **IG** : Graph API Explorer → régénère un long-lived user token, "
         "et colle dans `IG_ACCESS_TOKEN` sur Render.\n"
-        "• **TH** : tape `/renew_threads` dans ce chat (auto)."
+        "• **TH** : tape `/renew_threads` dans ce chat (auto).\n"
+        "• **FB** : Studio → État → Renouveler FB (auto)."
     )
     return body
 

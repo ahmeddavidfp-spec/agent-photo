@@ -454,11 +454,14 @@ _STUDIO_HTML = r"""<!doctype html>
           (d.ig_days === null ? "?" : d.ig_days + " jours") + "</span></div>" +
         "<div class='row'><b>🧵 Token Threads</b><span class='cnt'>" +
           (d.th_days === null ? "?" : d.th_days + " jours") + "</span></div>" +
-        "<div class='row'><b>📘 Page Facebook</b><span class='cnt'>" +
-          (d.facebook ? "✅ configurée" : "non configurée") + "</span></div>" +
+        "<div class='row'><b>📘 Token Facebook</b><span class='cnt'>" +
+          (!d.facebook ? "non configurée" :
+           d.fb_days === null ? "?" :
+           d.fb_days >= 9999 ? "∞ (sans expiration)" : d.fb_days + " jours") + "</span></div>" +
         pinHtml +
         "<button class='btn sec' onclick=\"renew('IG')\">🔄 Renouveler IG</button>" +
-        "<button class='btn sec' onclick=\"renew('TH')\">🔄 Renouveler Threads</button>";
+        "<button class='btn sec' onclick=\"renew('TH')\">🔄 Renouveler Threads</button>" +
+        (d.facebook ? "<button class='btn sec' onclick=\"renew('FB')\">🔄 Renouveler FB</button>" : "");
       const dl = $("status-daily"); dl.classList.remove("state"); dl.innerHTML = "";
       d.galleries.forEach(g => {
         const row = document.createElement("div"); row.className = "row";
@@ -691,6 +694,7 @@ def register_miniapp(app, hooks) -> None:
             "ig_days": token_days_left("IG"),
             "th_days": token_days_left("TH"),
             "facebook": facebook_page_configured(),
+            "fb_days": token_days_left("FB") if facebook_page_configured() else None,
             "pinterest": {"configured": _pin.app_configured(),
                           "connected": _pin.connected()},
             "galleries": [
@@ -729,6 +733,9 @@ def register_miniapp(app, hooks) -> None:
             ok, res = renew_instagram_token()
         elif platform == "TH":
             ok, res = renew_threads_token()
+        elif platform == "FB":
+            from meta_api import renew_facebook_token
+            ok, res = renew_facebook_token()
         else:
             abort(400)
         if ok:

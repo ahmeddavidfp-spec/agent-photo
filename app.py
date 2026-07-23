@@ -22,7 +22,7 @@ from gallery import (
 from meta_api import (
     facebook_page_configured, publish_carousel_to_instagram, publish_to_facebook_page,
     publish_to_instagram, publish_to_threads,
-    renew_instagram_token, renew_threads_token, token_status,
+    renew_facebook_token, renew_instagram_token, renew_threads_token, token_status,
 )
 from scheduler import start_scheduler
 from settings import (
@@ -132,6 +132,9 @@ def cron_refresh_tokens():
         "instagram": {"ok": ig_ok, "result": str(ig_res)[:200]},
         "threads": {"ok": th_ok, "result": str(th_res)[:200]},
     }
+    if facebook_page_configured():
+        fb_ok, fb_res = renew_facebook_token()
+        payload["facebook"] = {"ok": fb_ok, "result": str(fb_res)[:200]}
     logger.info("Token refresh: %s", payload)
     return jsonify(payload)
 
@@ -597,12 +600,16 @@ def _display_name_for(slug: str, config: dict) -> str:
 
 def _compact_token_line() -> str:
     """Header 1-ligne : '📸 Agent Photo · IG 35j · TH 59j'."""
-    from meta_api import token_days_left
+    from meta_api import facebook_page_configured, token_days_left
     ig = token_days_left("IG")
     th = token_days_left("TH")
     ig_s = f"IG {ig}j" if ig is not None else "IG ?"
     th_s = f"TH {th}j" if th is not None else "TH ?"
-    return f"📸 *Agent Photo* · {ig_s} · {th_s}"
+    fb_s = ""
+    if facebook_page_configured():
+        fb = token_days_left("FB")
+        fb_s = " · FB " + ("∞" if (fb or 0) >= 9999 else f"{fb}j" if fb is not None else "?")
+    return f"📸 *Agent Photo* · {ig_s} · {th_s}{fb_s}"
 
 
 def _send_menu(chat_id: int) -> None:

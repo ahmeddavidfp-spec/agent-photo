@@ -157,6 +157,9 @@ def token_days_left(platform: str, force_refresh: bool = False):
     elif platform == "TH":
         token = get_th_token()
         debug_url = "https://graph.threads.net/debug_token"
+    elif platform == "FB":
+        token = get_fb_page_token()
+        debug_url = "https://graph.facebook.com/debug_token"
     else:
         return None
     if not token:
@@ -171,7 +174,12 @@ def token_days_left(platform: str, force_refresh: bool = False):
             params={"input_token": token, "access_token": token},
             timeout=3,
         )
-        exp = (r.json() or {}).get("data", {}).get("expires_at")
+        d = (r.json() or {}).get("data", {})
+        exp = d.get("expires_at")
+        if exp == 0 and d.get("is_valid"):
+            # Token sans expiration (cas des tokens de Page long-lived)
+            _TOKEN_DAYS_CACHE[platform] = (now_ts, 9999)
+            return 9999
         if not exp:
             _TOKEN_DAYS_CACHE[platform] = (now_ts, None)
             return None
@@ -191,10 +199,14 @@ def token_status() -> str:
     from db import token_last_update
 
     msg = ["📊 **ETAT**"]
-    for label, token, debug_url, store_key in [
+    entries = [
         ("IG", get_ig_token(), "https://graph.facebook.com/debug_token", IG_TOKEN_KEY),
         ("TH", get_th_token(), "https://graph.threads.net/debug_token", TH_TOKEN_KEY),
-    ]:
+    ]
+    if get_fb_page_token():  # FB seulement si configuré (pas de bruit sinon)
+        entries.append(("FB", get_fb_page_token(),
+                        "https://graph.facebook.com/debug_token", FB_PAGE_TOKEN_KEY))
+    for label, token, debug_url, store_key in entries:
         if not token:
             msg.append(f"❌ {label} : Manquant")
             continue
@@ -474,6 +486,45 @@ def get_fb_page_token() -> str:
 
 def facebook_page_configured() -> bool:
     return bool(FB_PAGE_ID and get_fb_page_token())
+
+
+def renew_facebook_token() -> Tuple[bool, object]:
+    """Ré-échange le token de Page FB contre un long-lived frais.
+
+    Même mécanique fb_exchange_token que le token IG (même app Meta). Un token
+    de Page issu d'un user token long-lived est souvent SANS expiration — le
+    ré-échange est alors inoffensif et confirme simplement sa validité.
+    """
+    current = get_fb_page_token()
+    missing = [n for n, v in [
+        ("FB_PAGE_ACCESS_TOKEN", current),
+        ("IG_CLIENT_SECRET", IG_CLIENT_SECRET),
+        ("IG_APP_ID", IG_APP_ID),
+    ] if not v]
+    if missing:
+        return False, f"Variables manquantes : {', '.join(missing)}"
+    try:
+        r = safe_get(
+            f"{FB_API}oauth/access_token",
+            params={
+                "grant_type": "fb_exchange_token",
+                "client_id": IG_APP_ID,
+                "client_secret": IG_CLIENT_SECRET,
+                "fb_exchange_token": current,
+            },
+        )
+        res = r.json()
+        if "access_token" in res:
+            new_token = res["access_token"]
+            days = res.get("expires_in", 0) // 86400  # 0 = sans expiration
+            save_token(FB_PAGE_TOKEN_KEY, new_token)
+            logger.info("FB token persisté en DB (expire dans %s)",
+                        f"{days}j" if days else "∞")
+            return True, (new_token, days if days else "∞")
+        return False, res
+    except Exception as e:
+        logger.error("Renew FB error: %s", e)
+        return False, str(e)
 
 
 def ensure_fb_page_token() -> None:
