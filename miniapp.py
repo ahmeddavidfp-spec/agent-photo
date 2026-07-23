@@ -451,9 +451,9 @@ _STUDIO_HTML = r"""<!doctype html>
       }
       $("status-tokens").innerHTML =
         "<div class='row'><b>📸 Token Instagram</b><span class='cnt'>" +
-          (d.ig_days === null ? "?" : d.ig_days + " jours") + "</span></div>" +
+          (d.ig_days === null ? "?" : d.ig_days >= 9999 ? "∞ (sans expiration)" : d.ig_days + " jours") + "</span></div>" +
         "<div class='row'><b>🧵 Token Threads</b><span class='cnt'>" +
-          (d.th_days === null ? "?" : d.th_days + " jours") + "</span></div>" +
+          (d.th_days === null ? "?" : d.th_days >= 9999 ? "∞ (sans expiration)" : d.th_days + " jours") + "</span></div>" +
         "<div class='row'><b>📘 Token Facebook</b><span class='cnt'>" +
           (!d.facebook ? "non configurée" :
            d.fb_days === null ? "?" :

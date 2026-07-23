@@ -603,8 +603,12 @@ def _compact_token_line() -> str:
     from meta_api import facebook_page_configured, token_days_left
     ig = token_days_left("IG")
     th = token_days_left("TH")
-    ig_s = f"IG {ig}j" if ig is not None else "IG ?"
-    th_s = f"TH {th}j" if th is not None else "TH ?"
+    def _fmt(label, d):
+        if d is None:
+            return f"{label} ?"
+        return f"{label} ∞" if d >= 9999 else f"{label} {d}j"
+    ig_s = _fmt("IG", ig)
+    th_s = _fmt("TH", th)
     fb_s = ""
     if facebook_page_configured():
         fb = token_days_left("FB")
