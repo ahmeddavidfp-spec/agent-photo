@@ -1154,6 +1154,18 @@ register_miniapp(app, {
 threading.Thread(target=_setup_menu_button, daemon=True).start()
 
 
+def _setup_fb_page_token() -> None:
+    """Échange le token de Page FB (env, souvent court) en long-lived → DB."""
+    try:
+        from meta_api import ensure_fb_page_token
+        ensure_fb_page_token()
+    except Exception as e:
+        logger.warning("ensure_fb_page_token: %s", e)
+
+
+threading.Thread(target=_setup_fb_page_token, daemon=True).start()
+
+
 if __name__ == "__main__":
     import os
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))

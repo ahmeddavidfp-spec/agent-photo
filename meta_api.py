@@ -464,8 +464,49 @@ def publish_carousel_to_instagram(image_urls: list, full_text: str) -> Tuple[boo
 # PUBLICATION FACEBOOK (Page)
 # =========================================================================
 
+FB_PAGE_TOKEN_KEY = "fb_page_token"
+
+
+def get_fb_page_token() -> str:
+    """Token de Page : DB d'abord (long-lived échangé au boot), sinon env var."""
+    return get_stored_token(FB_PAGE_TOKEN_KEY) or FB_PAGE_ACCESS_TOKEN
+
+
 def facebook_page_configured() -> bool:
-    return bool(FB_PAGE_ID and FB_PAGE_ACCESS_TOKEN)
+    return bool(FB_PAGE_ID and get_fb_page_token())
+
+
+def ensure_fb_page_token() -> None:
+    """Échange le token de Page fourni en env (souvent court — Graph Explorer)
+    contre un LONG-LIVED, stocké en DB. Appelé au boot, best effort, une fois.
+
+    Utilise le même couple app (IG_APP_ID / IG_CLIENT_SECRET) que le refresh
+    des tokens Instagram — c'est la même app Meta.
+    """
+    if get_stored_token(FB_PAGE_TOKEN_KEY):
+        return  # déjà échangé
+    if not (FB_PAGE_ACCESS_TOKEN and IG_APP_ID and IG_CLIENT_SECRET):
+        return
+    try:
+        r = safe_get(
+            f"{FB_API}oauth/access_token",
+            params={
+                "grant_type": "fb_exchange_token",
+                "client_id": IG_APP_ID,
+                "client_secret": IG_CLIENT_SECRET,
+                "fb_exchange_token": FB_PAGE_ACCESS_TOKEN,
+            },
+        )
+        tok = (r.json() or {}).get("access_token")
+        if tok:
+            save_token(FB_PAGE_TOKEN_KEY, tok)
+            logger.info("✅ FB Page token échangé en long-lived et stocké en DB")
+        else:
+            logger.warning("FB Page token : échange refusé (%s) — le token env "
+                           "sera utilisé tel quel (attention à son expiration)",
+                           r.text[:150])
+    except Exception as e:
+        logger.warning("FB Page token : échange impossible (%s)", e)
 
 
 def publish_to_facebook_page(image_urls, message: str) -> Tuple[bool, str]:
@@ -479,6 +520,7 @@ def publish_to_facebook_page(image_urls, message: str) -> Tuple[bool, str]:
     import json as _json
     if not facebook_page_configured():
         return False, "Page Facebook non configurée (FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN)"
+    token = get_fb_page_token()
     urls = [u for u in (image_urls or []) if u][:4]
     if not urls:
         return False, "aucune image"
@@ -487,7 +529,7 @@ def publish_to_facebook_page(image_urls, message: str) -> Tuple[bool, str]:
             r = safe_post(
                 f"{FB_API}{FB_PAGE_ID}/photos",
                 data={"url": urls[0], "message": message,
-                      "access_token": FB_PAGE_ACCESS_TOKEN},
+                      "access_token": token},
             )
             data = r.json() or {}
             if r.status_code == 200 and data.get("id"):
@@ -500,7 +542,7 @@ def publish_to_facebook_page(image_urls, message: str) -> Tuple[bool, str]:
             r = safe_post(
                 f"{FB_API}{FB_PAGE_ID}/photos",
                 data={"url": u, "published": "false",
-                      "access_token": FB_PAGE_ACCESS_TOKEN},
+                      "access_token": token},
             )
             pid = (r.json() or {}).get("id")
             if pid:
@@ -509,7 +551,7 @@ def publish_to_facebook_page(image_urls, message: str) -> Tuple[bool, str]:
                 logger.warning("FB Page : upload photo KO (%s) : %s", u[:60], r.text[:150])
         if not media_ids:
             return False, "upload des photos échoué"
-        payload = {"message": message, "access_token": FB_PAGE_ACCESS_TOKEN}
+        payload = {"message": message, "access_token": token}
         for i, pid in enumerate(media_ids):
             payload[f"attached_media[{i}]"] = _json.dumps({"media_fbid": pid})
         r = safe_post(f"{FB_API}{FB_PAGE_ID}/feed", data=payload)
