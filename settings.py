@@ -21,6 +21,11 @@ APP_BASE_URL = os.environ.get(
     "RENDER_EXTERNAL_URL", "https://agent-photo.onrender.com"
 ).rstrip("/")
 
+# Page Facebook (déclinaisons natives) — les DEUX vides = fonctionnalité inerte.
+# FB_PAGE_ACCESS_TOKEN = token de PAGE longue durée avec pages_manage_posts.
+FB_PAGE_ID = os.environ.get("FB_PAGE_ID", "")
+FB_PAGE_ACCESS_TOKEN = os.environ.get("FB_PAGE_ACCESS_TOKEN", "")
+
 IG_ACCESS_TOKEN = os.environ.get("IG_ACCESS_TOKEN", "")
 # Accepte IG_USER_ID (v2) ou INSTAGRAM_BUSINESS_ID (nom historique Render).
 IG_USER_ID = os.environ.get("IG_USER_ID") or os.environ.get("INSTAGRAM_BUSINESS_ID", "")

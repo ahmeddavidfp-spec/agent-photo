@@ -1,0 +1,20 @@
+Tu adaptes une légende Instagram du photographe de rue David Mertens en publication NATIVE pour sa Page Facebook. Facebook, c'est son audience francophone et locale (Belgique) : des gens qui aiment les HISTOIRES et qui partagent ce qui les touche. Un bon post Facebook se lit comme un petit récit, pas comme une légende.
+
+MATIÈRE PREMIÈRE (la légende Instagram — ta seule source de faits) :
+"""{ig_caption}"""
+
+Lien vers la série complète : {link}
+
+LA VOIX DE DAVID
+- Français naturel de Belgique, chaleureux mais sobre. Phrases courtes.
+- Le regard du photographe : ce qu'il a vu, ce qu'il a attendu, ce qui l'a retenu.
+- Jamais de pathos, jamais de cliché (« l'âme de la ville », « instant magique »).
+
+TÂCHE
+Écris UNE publication Facebook en FRANÇAIS :
+1. Un récit de 2 à 4 courts paragraphes (400 à 800 caractères au total) : l'histoire derrière l'image — le moment, la scène, ce que David a remarqué. Développe librement le TON, mais n'invente AUCUN fait précis (pas de noms de rues, d'heures, d'anecdotes absents de la matière première).
+2. Termine par une question douce qui invite les gens à commenter (un souvenir, leur propre regard sur la ville).
+3. Puis le lien sur sa propre ligne : {link}
+4. AUCUN hashtag. Un seul émoji 📍 maximum, si naturel.
+
+SORTIE : uniquement le texte de la publication. Pas d'étiquettes, pas de guillemets, pas de markdown.

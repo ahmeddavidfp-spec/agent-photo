@@ -20,7 +20,8 @@ from gallery import (
     pack_urls, pick_unseen_photo, pick_unseen_photos, unpack_urls,
 )
 from meta_api import (
-    publish_carousel_to_instagram, publish_to_instagram, publish_to_threads,
+    facebook_page_configured, publish_carousel_to_instagram, publish_to_facebook_page,
+    publish_to_instagram, publish_to_threads,
     renew_instagram_token, renew_threads_token, token_status,
 )
 from scheduler import start_scheduler
@@ -1010,6 +1011,9 @@ def _background_publish(chat_id: int, mode: str, image_url: str, caption: str) -
     # image_url peut contenir plusieurs URLs packées (carrousel).
     urls = unpack_urls(image_url)
     cover = urls[0] if urls else image_url
+    visible_caption, _alt = split_content(caption)
+    ok_fb = None  # None = non tenté (Page non configurée ou mode ig/th)
+    res_fb = ""
 
     try:
         if mode in ("both", "ig"):
@@ -1018,7 +1022,28 @@ def _background_publish(chat_id: int, mode: str, image_url: str, caption: str) -
             else:
                 ok_ig, res_ig = publish_to_instagram(cover, caption)
         if mode in ("both", "th"):
-            ok_th, res_th = publish_to_threads(cover, caption)  # Threads = couverture seule
+            # Déclinaison NATIVE Threads (court, conversationnel, question) —
+            # fallback : la légende IG telle quelle si l'IA échoue.
+            th_text = None
+            try:
+                from ai import decline_caption
+                th_text = decline_caption("threads", visible_caption)
+            except Exception as e:
+                logger.warning("Déclinaison Threads KO : %s", e)
+            ok_th, res_th = publish_to_threads(cover, th_text or caption)
+        if mode == "both" and facebook_page_configured():
+            # Déclinaison NATIVE Facebook (récit en français) — seulement si
+            # la Page est configurée. Non bloquant pour IG/TH.
+            try:
+                from ai import decline_caption
+                fb_text = decline_caption("facebook", visible_caption)
+                if fb_text:
+                    ok_fb, res_fb = publish_to_facebook_page(urls or [cover], fb_text)
+                else:
+                    ok_fb, res_fb = False, "déclinaison IA indisponible"
+            except Exception as e:
+                logger.warning("Publication Facebook KO : %s", e)
+                ok_fb, res_fb = False, str(e)[:120]
     except Exception as e:
         logger.exception("Erreur background_publish")
         send_message(chat_id, f"🔥 Erreur : {e}")
@@ -1026,7 +1051,6 @@ def _background_publish(chat_id: int, mode: str, image_url: str, caption: str) -
 
     # Enregistre chaque publish réussi pour la boucle d'apprentissage
     # (caption sans alt → c'est ce que l'audience voit)
-    visible_caption, _alt = split_content(caption)
     galerie = _gallery_from_url(cover)
     if ok_ig and isinstance(res_ig, str) and res_ig:
         try:
@@ -1053,15 +1077,19 @@ def _background_publish(chat_id: int, mode: str, image_url: str, caption: str) -
     for _u in published_urls:
         mark_photo_as_sent(_u, galerie)
 
+    fb_line = ""
+    if ok_fb is not None:
+        fb_line = f"\nFB: {'✅' if ok_fb else '❌ ' + str(res_fb)[:60]}"
     if mode == "both":
         if ok_ig and ok_th:
-            final = "🚀 **Succès Total !**\nInsta & Threads : ✅"
+            final = "🚀 **Succès Total !**\nInsta & Threads : ✅" + fb_line
             clear_session(chat_id)
         else:
             final = (
                 f"⚠️ **Résultat Partiel :**\n"
                 f"IG: {'✅' if ok_ig else '❌ ' + str(res_ig)[:80]}\n"
                 f"TH: {'✅' if ok_th else '❌ ' + str(res_th)[:80]}"
+                + fb_line
             )
     elif mode == "ig":
         final = "📸 **Instagram :** ✅" if ok_ig else f"❌ **Erreur Insta :** {res_ig}"

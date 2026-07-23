@@ -18,8 +18,9 @@ from db import (
     set_scheduled_status,
 )
 from meta_api import (
-    fetch_ig_insights, fetch_th_insights,
-    publish_carousel_to_instagram, publish_to_instagram, publish_to_threads,
+    facebook_page_configured, fetch_ig_insights, fetch_th_insights,
+    publish_carousel_to_instagram, publish_to_facebook_page,
+    publish_to_instagram, publish_to_threads,
 )
 from telegram_bot import send_message
 from timezones import DEFAULT_SLOTS, next_slot_for_hour, now_local, now_utc, to_utc
@@ -104,13 +105,34 @@ def _process_due_posts() -> None:
         urls = unpack_urls(image_url)
         cover = urls[0] if urls else image_url
 
+        visible_caption, _alt = split_content(caption)
+
         if len(urls) >= 2:
             ok_ig, res_ig = publish_carousel_to_instagram(urls, caption)
         else:
             ok_ig, res_ig = publish_to_instagram(cover, caption)
-        ok_th, res_th = publish_to_threads(cover, caption)  # Threads = couverture seule
 
-        visible_caption, _alt = split_content(caption)
+        # Déclinaison NATIVE Threads (fallback : légende IG si l'IA échoue)
+        th_text = None
+        try:
+            from ai import decline_caption
+            th_text = decline_caption("threads", visible_caption)
+        except Exception as e:
+            logger.warning("Déclinaison Threads KO : %s", e)
+        ok_th, res_th = publish_to_threads(cover, th_text or caption)
+
+        # Déclinaison NATIVE Facebook (récit FR) — si la Page est configurée
+        if facebook_page_configured():
+            try:
+                from ai import decline_caption
+                fb_text = decline_caption("facebook", visible_caption)
+                if fb_text:
+                    ok_fb, res_fb = publish_to_facebook_page(urls or [cover], fb_text)
+                    logger.info("FB Page (scheduled) : %s (%s)",
+                                "OK" if ok_fb else "KO", str(res_fb)[:80])
+            except Exception as e:
+                logger.warning("Publication Facebook KO : %s", e)
+
         galerie = _gallery_from_url(cover)
 
         if ok_ig and isinstance(res_ig, str) and res_ig:

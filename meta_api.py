@@ -8,6 +8,8 @@ from db import get_stored_token, save_token
 from http_client import safe_get, safe_post
 from settings import (
     FB_API,
+    FB_PAGE_ACCESS_TOKEN,
+    FB_PAGE_ID,
     IG_ACCESS_TOKEN,
     IG_APP_ID,
     IG_CLIENT_SECRET,
@@ -455,6 +457,69 @@ def publish_carousel_to_instagram(image_urls: list, full_text: str) -> Tuple[boo
         return True, media_id
     except Exception as e:
         logger.exception("publish_carousel_to_instagram error")
+        return False, str(e)
+
+
+# =========================================================================
+# PUBLICATION FACEBOOK (Page)
+# =========================================================================
+
+def facebook_page_configured() -> bool:
+    return bool(FB_PAGE_ID and FB_PAGE_ACCESS_TOKEN)
+
+
+def publish_to_facebook_page(image_urls, message: str) -> Tuple[bool, str]:
+    """Publie un récit + 1-4 photos sur la Page Facebook.
+
+    - 1 photo  : POST /{page}/photos (url + message)
+    - Plusieurs : photos uploadées en published=false puis post /feed avec
+      attached_media (album inline, le format multi-photos natif de FB).
+    Retourne (ok, post_id_ou_erreur). Inerte si la Page n'est pas configurée.
+    """
+    import json as _json
+    if not facebook_page_configured():
+        return False, "Page Facebook non configurée (FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN)"
+    urls = [u for u in (image_urls or []) if u][:4]
+    if not urls:
+        return False, "aucune image"
+    try:
+        if len(urls) == 1:
+            r = safe_post(
+                f"{FB_API}{FB_PAGE_ID}/photos",
+                data={"url": urls[0], "message": message,
+                      "access_token": FB_PAGE_ACCESS_TOKEN},
+            )
+            data = r.json() or {}
+            if r.status_code == 200 and data.get("id"):
+                logger.info("FB Page : photo publiée (%s)", data.get("post_id") or data["id"])
+                return True, data.get("post_id") or data["id"]
+            return False, str(data)[:200]
+
+        media_ids = []
+        for u in urls:
+            r = safe_post(
+                f"{FB_API}{FB_PAGE_ID}/photos",
+                data={"url": u, "published": "false",
+                      "access_token": FB_PAGE_ACCESS_TOKEN},
+            )
+            pid = (r.json() or {}).get("id")
+            if pid:
+                media_ids.append(pid)
+            else:
+                logger.warning("FB Page : upload photo KO (%s) : %s", u[:60], r.text[:150])
+        if not media_ids:
+            return False, "upload des photos échoué"
+        payload = {"message": message, "access_token": FB_PAGE_ACCESS_TOKEN}
+        for i, pid in enumerate(media_ids):
+            payload[f"attached_media[{i}]"] = _json.dumps({"media_fbid": pid})
+        r = safe_post(f"{FB_API}{FB_PAGE_ID}/feed", data=payload)
+        data = r.json() or {}
+        if r.status_code == 200 and data.get("id"):
+            logger.info("FB Page : album %d photos publié (%s)", len(media_ids), data["id"])
+            return True, data["id"]
+        return False, str(data)[:200]
+    except Exception as e:
+        logger.exception("publish_to_facebook_page error")
         return False, str(e)
 
 

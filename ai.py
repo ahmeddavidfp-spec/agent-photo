@@ -375,6 +375,36 @@ def generate_caption(image_url: str, galerie: str) -> str:
     return f"{caption}{SEPARATOR}{alt}"
 
 
+def decline_caption(platform: str, ig_caption: str) -> Optional[str]:
+    """Décline la légende IG en version NATIVE pour un autre réseau.
+
+    `platform` : "threads" (conversationnel EN + question) ou "facebook"
+    (récit FR). La légende IG est la seule source de faits ; le lien de la
+    série est extrait de la légende elle-même (robuste, pas de recalcul).
+    Retourne None si l'IA échoue → l'appelant garde son fallback (ex. la
+    légende IG telle quelle pour Threads).
+    """
+    if not ig_caption or platform not in ("threads", "facebook"):
+        return None
+    m = re.search(r"davidmertens\.com/[a-z0-9_-]+", ig_caption)
+    link = m.group(0) if m else "davidmertens.com"
+    try:
+        template = _load_prompt(f"{platform}.txt")
+    except FileNotFoundError as e:
+        logger.warning("decline_caption : %s", e)
+        return None
+    prompt = template.format(ig_caption=ig_caption.strip(), link=link)
+    out = _write_caption_with_claude(prompt) or _write_caption_with_openai(prompt)
+    if not out:
+        logger.warning("decline_caption %s : IA indisponible, fallback appelant", platform)
+        return None
+    out = _strip_labels(out).strip()
+    # Garde-fou longueur Threads (cap dur 500 côté API)
+    if platform == "threads" and len(out) > 495:
+        out = out[:490].rstrip() + "…"
+    return out or None
+
+
 def _fallback_caption(display_name: str, display_link: str) -> str:
     """Caption minimale mais publiable en cas d'échec total de l'IA."""
     return (
