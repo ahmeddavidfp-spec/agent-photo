@@ -38,6 +38,7 @@ gallery_names:
   barcelone: "Barcelona"
   berlin: "Berlin"
   bruxelles: "Bruxelles"
+  budapest: "Budapest"
   casablanca: "Casablanca"
   dubrovnik: "Dubrovnik"
   dusseldorf: "Düsseldorf"
@@ -59,6 +60,7 @@ galeries:
   - "barcelone"
   - "berlin"
   - "bruxelles"
+  - "budapest"
   - "casablanca"
   - "dubrovnik"
   - "dusseldorf"
@@ -346,6 +348,19 @@ per_gallery:
       - "#brusselslife"
     mentions:
       - visit.brussels
+      - streetclassics
+  budapest:
+    hashtags:
+      - "#streetphotography"
+      - "#streetphotographer"
+      - "#budapest"
+      - "#igersbudapest"
+      - "#visitbudapest"
+      - "#life_is_street"
+      - "#bnw_hungary"
+      - "#budapeststreet"
+    mentions:
+      - visitbudapest
       - streetclassics
   dubrovnik:
     hashtags:
