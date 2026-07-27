@@ -22,19 +22,17 @@ from http_client import safe_get
 
 logger = logging.getLogger(__name__)
 
-# 720x1280 (et non 1080x1920) : Instagram l'accepte et ça divise ~par 2 la
-# mémoire d'encodage — critique sur une instance Render 512 Mo.
-W, H = 720, 1280           # 9:16 vertical
+# Baseline 720x1280 : sert de RÉFÉRENCE pour l'échelle de la signature/marges.
+# La résolution de SORTIE réelle est passée par `width` (720 léger, 1080 HD) —
+# tout le rendu se met à l'échelle via s = w/720.
+W, H = 720, 1280           # baseline 9:16 (pour scaling — pas la sortie forcée)
 FPS = 30
 SEC_PER_PHOTO = 2.5        # durée d'affichage par photo
 FADE = 0.4                 # fondu entrée/sortie (s)
-_MARGIN = 40               # marge autour de la photo (px) sur le fond flou
-
-# Mouvement "Ken Burns" : les photos sont rendues en ZWxZH (marge de recadrage)
-# puis ffmpeg applique un zoom lent (amplitude ZOOM, alterné avant/arrière) ;
-# la signature (bandeau + accroche) est incrustée PAR-DESSUS, FIXE.
-ZW, ZH = 1080, 1920
-ZOOM = 0.08                # 8 % de zoom sur la durée d'une photo
+XFADE = 0.5                # durée du fondu enchaîné entre photos (transitions)
+_MARGIN = 40               # marge (baseline 720) autour de la photo
+ZOOM = 0.08                # 8 % de zoom "Ken Burns" par photo
+_MOTION_SRC = 1.35         # frames sources = 1.35× la sortie (marge de zoom)
 
 # Police embarquée (Archivo, SIL OFL) pour le bandeau "STREET <VILLE>".
 _FONT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "Archivo.ttf")
@@ -49,70 +47,61 @@ def _label_font(size: int, weight: str = "SemiBold") -> "ImageFont.FreeTypeFont"
     return f
 
 
-def _tracked(d: "ImageDraw.ImageDraw", cy: float, text: str,
-             font: "ImageFont.FreeTypeFont", fill: tuple, track: int) -> float:
-    """Dessine `text` centré horizontalement à `cy`, lettres espacées de `track`.
-    Retourne la largeur totale."""
+def _tracked(d: "ImageDraw.ImageDraw", w: int, cy: float, text: str,
+             font: "ImageFont.FreeTypeFont", fill: tuple, track: float) -> float:
+    """Dessine `text` centré sur une largeur `w` à `cy`. Retourne la largeur."""
     widths = [d.textlength(c, font=font) for c in text]
     total = sum(widths) + track * (len(text) - 1)
     asc, desc = font.getmetrics()
-    x, y = W / 2 - total / 2, cy - (asc + desc) / 2
-    for c, w in zip(text, widths):
+    x, y = w / 2 - total / 2, cy - (asc + desc) / 2
+    for c, cw in zip(text, widths):
         d.text((x, y), c, font=font, fill=fill)
-        x += w + track
+        x += cw + track
     return total
 
 
-def _signature_overlay(label: str, tagline: Optional[str] = None) -> Image.Image:
-    """Calque signature RGBA 720x1280 (fond transparent) :
-
-        LOOK AGAIN. SLOWER THIS TIME.     ← accroche fixe (optionnelle, config)
-        ─────────────────────────
-           STREET BRUXELLES               ← ville, encadrée de filets fins
-        ─────────────────────────
-
-    Composité sur les frames (statique) ou incrusté FIXE par ffmpeg
-    par-dessus le zoom (motion) — le texte ne zoome jamais."""
-    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+def _signature_overlay(label: str, tagline: Optional[str], w: int, h: int) -> Image.Image:
+    """Calque signature RGBA w×h (accroche + bandeau ville + filets), mis à
+    l'échelle depuis la baseline 720. Incrusté FIXE (ne zoome jamais)."""
+    s = w / 720.0
+    layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
-    # Dégradé sombre transparent→opaque sur la bande basse
-    band = 290
+    band = round(290 * s)
     for i in range(band):
-        d.line([(0, H - band + i), (W, H - band + i)], fill=(0, 0, 0, int(150 * i / band)))
+        d.line([(0, h - band + i), (w, h - band + i)], fill=(0, 0, 0, int(150 * i / band)))
 
-    # Accroche signature (au-dessus du bandeau), auto-fit 21→14
     if tagline:
         tag = tagline.upper()
-        size, track = 21, 4
-        while size > 14:
+        size, track = round(21 * s), 4 * s
+        while size > round(14 * s):
             tfont = _label_font(size, "Regular")
             tw = sum(d.textlength(c, font=tfont) for c in tag) + track * (len(tag) - 1)
-            if tw <= W - 100:
+            if tw <= w - round(100 * s):
                 break
-            size -= 1
-        _tracked(d, H - 162, tag, tfont, (255, 255, 255, 225), track)
+            size -= max(1, round(s))
+        _tracked(d, w, h - round(162 * s), tag, tfont, (255, 255, 255, 225), track)
 
-    # Bandeau ville : auto-fit 46→26 (villes longues)
-    size, track = 46, 5
-    while size > 26:
+    size, track = round(46 * s), 5 * s
+    while size > round(26 * s):
         font = _label_font(size)
         total = sum(d.textlength(c, font=font) for c in label) + track * (len(label) - 1)
-        if total <= W - 80:
+        if total <= w - round(80 * s):
             break
-        size -= 2
-    cy = H - 92
-    total = _tracked(d, cy, label, font, (255, 255, 255, 255), track)
+        size -= max(1, round(2 * s))
+    cy = h - round(92 * s)
+    total = _tracked(d, w, cy, label, font, (255, 255, 255, 255), track)
     half = total / 2
-    for dy in (-38, 38):
-        d.line([(W / 2 - half, cy + dy), (W / 2 + half, cy + dy)], fill=(255, 255, 255, 235), width=2)
+    lw = max(2, round(2 * s))
+    for dy in (-round(38 * s), round(38 * s)):
+        d.line([(w / 2 - half, cy + dy), (w / 2 + half, cy + dy)], fill=(255, 255, 255, 235), width=lw)
     return layer
 
 
 def _download(url: str, dest: str) -> bool:
     try:
-        # Squarespace : 1000w suffit pour un rendu 720p et allège la mémoire
-        clean = url.split("?")[0] + "?format=1000w"
-        r = safe_get(clean, timeout=20)
+        # Squarespace : 2000w → assez pour le 1080p HD (+ marge de zoom motion)
+        clean = url.split("?")[0] + "?format=2000w"
+        r = safe_get(clean, timeout=25)
         r.raise_for_status()
         with open(dest, "wb") as f:
             f.write(r.content)
@@ -261,24 +250,22 @@ def _assemble(frame_paths: list[str], out_path: str, sec: float = SEC_PER_PHOTO)
         "-framerate", f"1/{sec}",
         "-i", os.path.join(workdir, "seq_%04d.jpg"),
         "-vf", vf,
-        # ultrafast + threads 1 : plafonne la mémoire de l'encodeur (Render 512 Mo)
-        "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
+        "-c:v", "libx264", "-preset", "veryfast", "-threads", "1",
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         out_path,
     ]
     logger.info("Reel : ffmpeg assemble %d frames → %s", len(frame_paths), out_path)
-    res = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if res.returncode != 0:
         raise RuntimeError(f"ffmpeg failed: {res.stderr[-400:]}")
 
 
 def _assemble_motion(frame_paths: list[str], overlay_png: str, out_path: str,
-                     sec: float = SEC_PER_PHOTO) -> None:
-    """Assemble avec zoom lent "Ken Burns" (alterné avant/arrière par photo).
+                     sec: float, w: int, h: int, transitions: bool = False) -> None:
+    """Zoom lent "Ken Burns" (alterné) + signature FIXE, sortie w×h.
 
-    Frames sources en ZWxZH → zoompan sort du 720x1280@30fps, puis la
-    signature (PNG transparent) est incrustée FIXE par-dessus, et fondu global.
-    ffmpeg reste en -threads 1 -preset ultrafast (budget mémoire 512 Mo)."""
+    `transitions` : fondu enchaîné (xfade) entre les photos plutôt que coupures.
+    Frames sources plus grandes que w×h (marge de zoom) ; zoompan sort en w×h."""
     d = max(2, round(sec * FPS))
     n = len(frame_paths)
     cmd = [_ffmpeg_exe(), "-y"]
@@ -287,29 +274,38 @@ def _assemble_motion(frame_paths: list[str], overlay_png: str, out_path: str,
     cmd += ["-i", overlay_png]
     parts = []
     for k in range(n):
-        if k % 2 == 0:
-            z = f"1+{ZOOM}*on/{d - 1}"           # zoom avant
-        else:
-            z = f"{1 + ZOOM}-{ZOOM}*on/{d - 1}"  # zoom arrière
+        z = f"1+{ZOOM}*on/{d - 1}" if k % 2 == 0 else f"{1 + ZOOM}-{ZOOM}*on/{d - 1}"
         parts.append(
             f"[{k}:v]zoompan=z='{z}':d={d}"
             f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
-            f":s={W}x{H}:fps={FPS}[v{k}]"
+            f":s={w}x{h}:fps={FPS},format=yuv420p[v{k}]"
         )
-    total = n * sec
-    concat_in = "".join(f"[v{k}]" for k in range(n))
-    parts.append(f"{concat_in}concat=n={n}:v=1:a=0[cat]")
-    # Pas de fondu d'ENTRÉE : la 1re frame = la photo (miniature/couverture
-    # Instagram propre, pas un carré noir). Fondu de sortie conservé.
+
+    if transitions and n >= 2:
+        # Chaîne de xfade : offset_i = i*(sec - XFADE)
+        prev = "[v0]"
+        for i in range(1, n):
+            tag = "[cat]" if i == n - 1 else f"[x{i}]"
+            off = i * (sec - XFADE)
+            parts.append(f"{prev}[v{i}]xfade=transition=fade:duration={XFADE}"
+                         f":offset={off:.3f}{tag}")
+            prev = tag
+        total = n * sec - (n - 1) * XFADE
+    else:
+        concat_in = "".join(f"[v{k}]" for k in range(n))
+        parts.append(f"{concat_in}concat=n={n}:v=1:a=0[cat]")
+        total = n * sec
+
+    # Signature fixe par-dessus + fondu de sortie (pas de fondu d'entrée).
     parts.append(
         f"[cat][{n}:v]overlay=0:0,"
-        f"fade=t=out:st={total - FADE:.2f}:d={FADE},"
-        f"format=yuv420p[vout]"
+        f"fade=t=out:st={total - FADE:.2f}:d={FADE},format=yuv420p[vout]"
     )
     cmd += ["-filter_complex", ";".join(parts), "-map", "[vout]",
-            "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
-            "-movflags", "+faststart", out_path]
-    logger.info("Reel : ffmpeg motion %d segments → %s", n, out_path)
+            "-c:v", "libx264", "-preset", "veryfast", "-threads", "1",
+            "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_path]
+    logger.info("Reel : ffmpeg motion %d segments (%dx%d, transitions=%s) → %s",
+                n, w, h, transitions, out_path)
     res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if res.returncode != 0:
         raise RuntimeError(f"ffmpeg motion failed: {res.stderr[-400:]}")
@@ -319,27 +315,32 @@ def build_reel_from_paths(image_paths: list[str], out_path: str,
                           sec: float = SEC_PER_PHOTO,
                           label: Optional[str] = None,
                           tagline: Optional[str] = None,
-                          motion: bool = False) -> str:
+                          motion: bool = False, transitions: bool = False,
+                          width: int = 720) -> str:
     """Monte un Reel à partir de fichiers image locaux. Retourne out_path."""
     if len(image_paths) < 2:
         raise ValueError("Au moins 2 photos requises pour un Reel")
+    w = max(360, int(width)) & ~1          # pair (libx264)
+    h = (round(w * 16 / 9)) & ~1
     workdir = tempfile.mkdtemp(prefix="reelwork_")
     try:
-        overlay = _signature_overlay(label, tagline) if label else None
+        overlay = _signature_overlay(label, tagline, w, h) if label else None
         frames = []
         if motion:
-            # Frames de base en ZWxZH SANS signature (elle ne doit pas zoomer)
+            # Frames sources plus grandes (marge de zoom), SANS signature
+            sw = (round(w * _MOTION_SRC)) & ~1
+            sh = (round(h * _MOTION_SRC)) & ~1
             for i, src in enumerate(image_paths):
                 dst = os.path.join(workdir, f"frame_{i:04d}.jpg")
-                _normalize(src, dst, overlay=None, w=ZW, h=ZH)
+                _normalize(src, dst, overlay=None, w=sw, h=sh)
                 frames.append(dst)
             ov_png = os.path.join(workdir, "signature.png")
-            (overlay or Image.new("RGBA", (W, H), (0, 0, 0, 0))).save(ov_png)
-            _assemble_motion(frames, ov_png, out_path, sec)
+            (overlay or Image.new("RGBA", (w, h), (0, 0, 0, 0))).save(ov_png)
+            _assemble_motion(frames, ov_png, out_path, sec, w, h, transitions)
         else:
             for i, src in enumerate(image_paths):
                 dst = os.path.join(workdir, f"frame_{i:04d}.jpg")
-                _normalize(src, dst, overlay=overlay)
+                _normalize(src, dst, overlay=overlay, w=w, h=h)
                 frames.append(dst)
             _assemble(frames, out_path, sec)
         if overlay is not None:
@@ -351,13 +352,13 @@ def build_reel_from_paths(image_paths: list[str], out_path: str,
 
 def build_reel(image_urls: List[str], out_path: Optional[str] = None,
                sec: float = SEC_PER_PHOTO, label: Optional[str] = None,
-               tagline: Optional[str] = None, motion: bool = False) -> Optional[str]:
+               tagline: Optional[str] = None, motion: bool = False,
+               transitions: bool = False, width: int = 720) -> Optional[str]:
     """Télécharge les photos et monte un Reel muet 9:16. Retourne le chemin MP4
-    ou None si échec (téléchargements insuffisants / erreur ffmpeg).
+    ou None si échec.
 
-    `label`   : bandeau 'STREET <VILLE>' incrusté en bas de chaque photo.
-    `tagline` : accroche signature fixe au-dessus du bandeau (config reel.tagline).
-    `motion`  : zoom lent "Ken Burns" par photo (config reel.motion).
+    `label`/`tagline` : signature incrustée. `motion` : zoom Ken Burns.
+    `transitions` : fondu enchaîné entre photos. `width` : 720 ou 1080.
     """
     urls = [u for u in (image_urls or []) if u]
     if len(urls) < 2:
@@ -374,7 +375,8 @@ def build_reel(image_urls: List[str], out_path: Optional[str] = None,
             logger.warning("Reel : téléchargements insuffisants (%d)", len(local))
             return None
         out_path = out_path or tempfile.mktemp(prefix="reel_", suffix=".mp4")
-        return build_reel_from_paths(local, out_path, sec, label, tagline, motion)
+        return build_reel_from_paths(local, out_path, sec, label, tagline,
+                                     motion, transitions, width)
     except Exception as e:
         logger.exception("Reel : build échoué : %s", e)
         return None
