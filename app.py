@@ -824,11 +824,14 @@ def _reel_flow(chat_id: int, galerie: str, urls=None) -> None:
 
     # Description prête à coller (IG/TikTok) : texte + 5 hashtags + 1 mention,
     # avec bouton(s) de copie directe (copy_text Telegram).
-    bloc = _reel_description(urls[0], galerie, display, config)
+    bloc, fr = _reel_description(urls[0], galerie, display, config)
     if bloc:
         msg = ("📋 *Description prête (Instagram / TikTok)* :\n"
                f"```\n{bloc}\n```")
         send_message(chat_id, msg, reply_markup=_copy_keyboard(bloc))
+    if fr:
+        # Traduction française — pour ton info perso, à ne pas coller.
+        send_message(chat_id, f"🇫🇷 _Traduction (pour toi) :_\n{fr}")
     logger.info("[reel] ✅ envoyé galerie=%s (%d photos %s)", galerie, len(urls), kind)
 
 
@@ -852,27 +855,34 @@ def _copy_keyboard(bloc: str):
     return {"inline_keyboard": [row]} if row else None
 
 
-def _reel_description(cover_url: str, galerie: str, display: str, config: dict) -> str:
-    """Compose le BLOC brut de description (texte EN + 5 hashtags + 1 @mention).
+def _reel_description(cover_url: str, galerie: str, display: str, config: dict):
+    """Compose la description Reel. Retourne (bloc, traduction_fr).
 
-    Le texte vient du bloc EN de la caption IA (couverture). Le formatage
-    Telegram + le(s) bouton(s) de copie sont gérés par l'appelant.
+    - bloc : texte EN (à coller sur IG/TikTok) + 5 hashtags + 1 @mention.
+    - traduction_fr : le bloc FR de la caption bilingue, pour l'info perso
+      de l'utilisateur (jamais collé). "" si indisponible.
     """
     import random as _random
 
-    # Texte : bloc EN (jusqu'à la 1re ligne vide) de la caption IA
+    text = f"Street photography — {display}. Look again. Slower this time."
+    fr = ""
     try:
         full = generate_caption(cover_url, galerie)
         visible, _alt = split_content(full)
-        en_lines = []
-        for line in visible.split("\n"):
-            if not line.strip():
-                break
-            en_lines.append(line.strip())
-        text = " ".join(en_lines) or f"Street photography — {display}."
+        # Caption bilingue : paragraphes séparés par une ligne vide.
+        # [0] = bloc EN · [1] = bloc FR · suivants = "Série complète"/hashtags.
+        paras = [p.strip() for p in visible.split("\n\n") if p.strip()]
+        if paras:
+            text = " ".join(paras[0].split("\n")).strip() or text
+        for cand in paras[1:]:
+            low = cand.lower()
+            if ("davidmertens" in low or cand.startswith("Série")
+                    or all(w.startswith("#") for w in cand.split())):
+                break  # on a atteint la partie lien/hashtags
+            fr = " ".join(cand.split("\n")).strip()
+            break
     except Exception as e:
         logger.warning("[reel] description IA échouée : %s", e)
-        text = f"Street photography — {display}. Look again. Slower this time."
 
     pg = (config.get("per_gallery") or {}).get(galerie) or {}
     tags = list(pg.get("hashtags") or (config.get("hashtags") or "").split())
@@ -883,7 +893,7 @@ def _reel_description(cover_url: str, galerie: str, display: str, config: dict) 
     bloc = text + "\n\n" + " ".join(tags)
     if mention:
         bloc += f"\n@{mention}"
-    return bloc
+    return bloc, fr
 
 
 # =============================================================================
