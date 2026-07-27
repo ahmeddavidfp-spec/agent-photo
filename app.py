@@ -822,20 +822,41 @@ def _reel_flow(chat_id: int, galerie: str, urls=None) -> None:
     except Exception:
         pass
 
-    # Description prête à coller (IG/TikTok) : texte + 5 hashtags + 1 mention
-    desc = _reel_description(urls[0], galerie, display, config)
-    if desc:
-        send_message(chat_id, desc)
+    # Description prête à coller (IG/TikTok) : texte + 5 hashtags + 1 mention,
+    # avec bouton(s) de copie directe (copy_text Telegram).
+    bloc = _reel_description(urls[0], galerie, display, config)
+    if bloc:
+        msg = ("📋 *Description prête (Instagram / TikTok)* :\n"
+               f"```\n{bloc}\n```")
+        send_message(chat_id, msg, reply_markup=_copy_keyboard(bloc))
     logger.info("[reel] ✅ envoyé galerie=%s (%d photos %s)", galerie, len(urls), kind)
 
 
-def _reel_description(cover_url: str, galerie: str, display: str, config: dict) -> str:
-    """Compose la description à coller sur IG/TikTok avec le Reel.
+def _copy_keyboard(bloc: str):
+    """Bouton(s) 'copy_text' Telegram pour copier la description en un tap.
 
-    Texte court (bloc EN de la caption IA générée depuis la couverture) +
-    5 hashtags de la galerie + 1 @mention. Envoyée en bloc code Telegram
-    (un appui = tout copier). NB : la @mention vient des comptes Instagram —
-    à adapter sur TikTok si le compte n'y existe pas.
+    copy_text est limité à 256 caractères → si la description dépasse, on
+    la scinde en 'Texte' + 'Hashtags + @' (sur la ligne vide). Si même une
+    partie dépasse, on renvoie None (le bloc code reste copiable au tap)."""
+    if len(bloc) <= 256:
+        return {"inline_keyboard": [[
+            {"text": "📋 Copier la description", "copy_text": {"text": bloc}}]]}
+    parts = bloc.split("\n\n", 1)
+    text_part = parts[0].strip()
+    tags_part = (parts[1].strip() if len(parts) > 1 else "")
+    row = []
+    if 0 < len(text_part) <= 256:
+        row.append({"text": "📋 Texte", "copy_text": {"text": text_part}})
+    if 0 < len(tags_part) <= 256:
+        row.append({"text": "🏷 # + @", "copy_text": {"text": tags_part}})
+    return {"inline_keyboard": [row]} if row else None
+
+
+def _reel_description(cover_url: str, galerie: str, display: str, config: dict) -> str:
+    """Compose le BLOC brut de description (texte EN + 5 hashtags + 1 @mention).
+
+    Le texte vient du bloc EN de la caption IA (couverture). Le formatage
+    Telegram + le(s) bouton(s) de copie sont gérés par l'appelant.
     """
     import random as _random
 
@@ -862,10 +883,7 @@ def _reel_description(cover_url: str, galerie: str, display: str, config: dict) 
     bloc = text + "\n\n" + " ".join(tags)
     if mention:
         bloc += f"\n@{mention}"
-    return (
-        "📋 *Description prête (Instagram / TikTok)* — appuie pour copier :\n"
-        f"```\n{bloc}\n```"
-    )
+    return bloc
 
 
 # =============================================================================
