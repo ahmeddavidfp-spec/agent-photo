@@ -158,9 +158,42 @@ def _normalize(src_path: str, dst_path: str,
     bg.close()
 
 
+_FFMPEG_PATH: Optional[str] = None
+_XFADE_OK: Optional[bool] = None
+
+
 def _ffmpeg_exe() -> str:
+    """Chemin ffmpeg. Préfère un build COMPLET (static-ffmpeg, a le filtre
+    xfade pour les transitions) ; repli sur imageio-ffmpeg (embarqué, fiable,
+    mais minimal → pas de xfade). Résultat mis en cache."""
+    global _FFMPEG_PATH
+    if _FFMPEG_PATH:
+        return _FFMPEG_PATH
+    try:
+        from static_ffmpeg import run as _sf
+        _FFMPEG_PATH = _sf.get_or_fetch_platform_executables_else_raise()[0]
+        logger.info("ffmpeg : build complet (static-ffmpeg)")
+        return _FFMPEG_PATH
+    except Exception as e:
+        logger.warning("static-ffmpeg indisponible (%s) → imageio-ffmpeg", e)
     import imageio_ffmpeg
-    return imageio_ffmpeg.get_ffmpeg_exe()
+    _FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
+    return _FFMPEG_PATH
+
+
+def _supports_xfade() -> bool:
+    """Le ffmpeg courant a-t-il le filtre xfade ? (détecté une fois, caché)."""
+    global _XFADE_OK
+    if _XFADE_OK is None:
+        try:
+            out = subprocess.run([_ffmpeg_exe(), "-hide_banner", "-filters"],
+                                 capture_output=True, text=True, timeout=20).stdout
+            _XFADE_OK = " xfade " in out
+        except Exception as e:
+            logger.warning("Détection xfade KO : %s", e)
+            _XFADE_OK = False
+        logger.info("ffmpeg : xfade %s", "disponible ✅" if _XFADE_OK else "absent (coupures)")
+    return _XFADE_OK
 
 
 # =========================================================================
@@ -281,7 +314,7 @@ def _assemble_motion(frame_paths: list[str], overlay_png: str, out_path: str,
             f":s={w}x{h}:fps={FPS},format=yuv420p[v{k}]"
         )
 
-    if transitions and n >= 2:
+    if transitions and n >= 2 and _supports_xfade():
         # Chaîne de xfade : offset_i = i*(sec - XFADE)
         prev = "[v0]"
         for i in range(1, n):
@@ -292,6 +325,8 @@ def _assemble_motion(frame_paths: list[str], overlay_png: str, out_path: str,
             prev = tag
         total = n * sec - (n - 1) * XFADE
     else:
+        if transitions and n >= 2:
+            logger.warning("Transitions demandées mais xfade indisponible → coupures franches")
         concat_in = "".join(f"[v{k}]" for k in range(n))
         parts.append(f"{concat_in}concat=n={n}:v=1:a=0[cat]")
         total = n * sec
