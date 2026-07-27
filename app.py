@@ -737,8 +737,8 @@ def _send_suggestion(chat_id: int, galerie: str) -> None:
             send_message(chat_id, "Galerie vide ou toutes les photos déjà envoyées.")
             return
 
-        cover = urls[0]  # la couverture génère la légende + sert de preview
-        full_content = generate_caption(cover, galerie)
+        cover = urls[0]  # couverture (preview) ; la légende couvre TOUTE la sélection
+        full_content = generate_caption(cover, galerie, series_urls=urls)
     logger.info("[suggest] caption generated %d chars (+%dms)",
                 len(full_content or ""), int((time.time() - t0) * 1000))
 
@@ -827,7 +827,7 @@ def _reel_flow(chat_id: int, galerie: str, urls=None) -> None:
 
     # Description prête à coller (IG/TikTok) : texte + 5 hashtags + 1 mention,
     # avec bouton(s) de copie directe (copy_text Telegram).
-    bloc, fr = _reel_description(urls[0], galerie, display, config)
+    bloc, fr = _reel_description(urls, galerie, display, config)
     if bloc:
         msg = ("📋 *Description prête (Instagram / TikTok)* :\n"
                f"```\n{bloc}\n```")
@@ -858,8 +858,8 @@ def _copy_keyboard(bloc: str):
     return {"inline_keyboard": [row]} if row else None
 
 
-def _reel_description(cover_url: str, galerie: str, display: str, config: dict):
-    """Compose la description Reel. Retourne (bloc, traduction_fr).
+def _reel_description(reel_urls, galerie: str, display: str, config: dict):
+    """Compose la description Reel (couvre TOUTE la sélection). Retourne (bloc, fr).
 
     - bloc : texte EN (à coller sur IG/TikTok) + 5 hashtags + 1 @mention.
     - traduction_fr : le bloc FR de la caption bilingue, pour l'info perso
@@ -870,7 +870,7 @@ def _reel_description(cover_url: str, galerie: str, display: str, config: dict):
     text = f"Street photography — {display}. Look again. Slower this time."
     fr = ""
     try:
-        full = generate_caption(cover_url, galerie)
+        full = generate_caption(reel_urls[0], galerie, series_urls=reel_urls)
         visible, _alt = split_content(full)
         # Caption bilingue : paragraphes séparés par une ligne vide.
         # [0] = bloc EN · [1] = bloc FR · suivants = "Série complète"/hashtags.
@@ -998,7 +998,7 @@ def _auto_publish_flow(chat_id: int, galerie: str) -> None:
             send_message(chat_id, f"⚠️ *{display}* est épuisée — toutes les photos ont déjà été envoyées.")
             return
         cover = urls[0]
-        full_content = generate_caption(cover, galerie)
+        full_content = generate_caption(cover, galerie, series_urls=urls)
 
     visible_caption, _alt = split_content(full_content)
     logger.info("[autopub] caption %d chars (+%dms)", len(full_content), int((time.time()-t0)*1000))

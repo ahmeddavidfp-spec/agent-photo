@@ -200,6 +200,51 @@ def _describe_image(image_url: str, display_name: str) -> Optional[str]:
     return None
 
 
+def _describe_series(image_urls, display_name: str, max_imgs: int = 4) -> Optional[str]:
+    """Décrit le FIL COMMUN d'une sélection (multi-images, 1 appel GPT-4o).
+
+    Envoie jusqu'à `max_imgs` photos et demande le thème de la SÉRIE (pas
+    chaque image). Détail 'low' pour borner le coût sur plusieurs images.
+    Retombe sur la description mono-image (couverture) en cas d'échec."""
+    urls = [u for u in (image_urls or []) if u][:max_imgs]
+    if len(urls) < 2:
+        return _describe_image(urls[0], display_name) if urls else None
+    if not OPENAI_API_KEY:
+        return None
+    try:
+        prompt = _load_prompt("describe_series.txt").format(galerie=display_name)
+    except FileNotFoundError:
+        return _describe_image(urls[0], display_name)
+
+    content = [{"type": "text", "text": prompt}]
+    for u in urls:
+        content.append({"type": "image_url",
+                        "image_url": {"url": u, "detail": "low"}})
+    client = OpenAI(api_key=OPENAI_API_KEY, timeout=90.0)
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            response = client.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=[{"role": "user", "content": content}],
+                max_tokens=350, temperature=0.3,
+            )
+            desc = (response.choices[0].message.content or "").replace("```", "").strip()
+            if desc:
+                logger.info("Pass 1 (série, %d imgs) OK : %d chars", len(urls), len(desc))
+                return desc
+        except (APIConnectionError, APITimeoutError, RateLimitError) as e:
+            wait = BACKOFF_BASE ** attempt
+            logger.warning("Pass 1 série retry %d/%d dans %.1fs : %s",
+                           attempt, MAX_ATTEMPTS, wait, e)
+            if attempt < MAX_ATTEMPTS:
+                time.sleep(wait)
+        except Exception as e:
+            logger.error("Pass 1 série erreur : %s", e)
+            break
+    # Repli : description de la couverture seule
+    return _describe_image(urls[0], display_name)
+
+
 # =============================================================================
 # PASS 2 — CAPTION BILINGUE (Claude en priorité, fallback OpenAI)
 # =============================================================================
@@ -334,8 +379,13 @@ def _write_caption_with_openai(prompt: str) -> Optional[str]:
 # ORCHESTRATION
 # =============================================================================
 
-def generate_caption(image_url: str, galerie: str) -> str:
-    """Retourne `caption|||alt`. Fallback propre si tout casse."""
+def generate_caption(image_url: str, galerie: str, series_urls=None) -> str:
+    """Retourne `caption|||alt`. Fallback propre si tout casse.
+
+    `series_urls` : si fourni (≥2 URLs), la description (Pass 1) couvre TOUTE
+    la sélection (fil commun) au lieu de la seule couverture — la légende
+    reflète alors la série (carrousel / Reel), pas une photo isolée.
+    """
     config = load_yaml_config()
     base_url = (
         config.get("site_url", "davidmertens.com")
@@ -347,8 +397,12 @@ def generate_caption(image_url: str, galerie: str) -> str:
     display_link = f"{base_url}/{galerie}"
     display_name = _display_name(galerie, config)
 
-    # --- Pass 1 : description factuelle
-    description = _describe_image(image_url, display_name)
+    # --- Pass 1 : description factuelle (série si sélection multiple)
+    series = [u for u in (series_urls or []) if u]
+    if len(series) >= 2:
+        description = _describe_series(series, display_name)
+    else:
+        description = _describe_image(image_url, display_name)
     if not description:
         logger.warning("Pas de description, fallback caption.")
         return _fallback_caption(display_name, display_link)

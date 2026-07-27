@@ -223,9 +223,9 @@ def _silent_autopub(chat_id: int, galerie: str) -> None:
         )
         return
 
-    cover = urls[0]  # la couverture génère la légende
+    cover = urls[0]  # couverture ; la légende couvre TOUTE la sélection
     try:
-        full_content = generate_caption(cover, galerie)
+        full_content = generate_caption(cover, galerie, series_urls=urls)
     except Exception as e:
         logger.exception("[daily_autopub] generate_caption failed: %s", e)
         send_message(chat_id, f"⚠️ Auto-pub quotidien *{display}* : erreur de génération de légende.")
