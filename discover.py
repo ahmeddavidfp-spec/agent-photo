@@ -34,7 +34,7 @@ def scan_new_galleries() -> list:
              | known_discovered())
 
     try:
-        r = safe_get(site.rstrip("/") + "/sitemap.xml", timeout=25)
+        r = safe_get(site.rstrip("/") + "/sitemap.xml", timeout=(8, 25))
         r.raise_for_status()
     except Exception as e:
         logger.warning("Scan galeries : sitemap inaccessible : %s", e)
