@@ -308,8 +308,16 @@ def _handle_text(chat_id: int, text: str) -> None:
 
     if text == "/scan":
         send_message(chat_id, "🔍 Scan du site en cours…")
-        from discover import scan_new_galleries
-        found = scan_new_galleries()
+        from discover import SiteUnreachable, scan_new_galleries
+        try:
+            found = scan_new_galleries()
+        except SiteUnreachable:
+            send_message(
+                chat_id,
+                "🌐 Ton site est temporairement injoignable. Réessaie dans "
+                "quelques minutes — je retenterai aussi tout seul plus tard.",
+            )
+            return
         if found:
             alert_new_galleries(chat_id, found)
         else:

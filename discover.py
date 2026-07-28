@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 MIN_IMAGES = 15  # ≥15 photos CDN = galerie (calibré : non-galeries ≤ 3)
 
 
+class SiteUnreachable(Exception):
+    """Le site (sitemap) n'a pas pu être joint — distinct de « rien trouvé »."""
+
+
 def scan_new_galleries() -> list:
     """Retourne les nouvelles galeries détectées : [{slug, name, count}]."""
     from settings import (NON_GALLERY_SLUGS, auto_gallery_assets,
@@ -38,7 +42,7 @@ def scan_new_galleries() -> list:
         r.raise_for_status()
     except Exception as e:
         logger.warning("Scan galeries : sitemap inaccessible : %s", e)
-        return []
+        raise SiteUnreachable(str(e)) from e
 
     slugs = set()
     for loc in re.findall(r"<loc>([^<]+)</loc>", r.text):

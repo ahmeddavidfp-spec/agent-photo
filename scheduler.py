@@ -40,9 +40,11 @@ _last_alert_check_date: Optional[dt.date] = None
 _last_insights_run: float = 0.0
 _last_report_date: Optional[dt.date] = None
 _last_scan_date: Optional[dt.date] = None
+_last_scan_attempt: float = 0.0
 
 WEEKLY_REPORT_HOUR = 18  # dimanche à partir de 18h (heure locale)
 GALLERY_SCAN_HOUR = 10   # scan des nouvelles galeries 1×/jour à partir de 10h
+SCAN_RETRY_INTERVAL = 1800  # si site injoignable, re-tenter au plus toutes les 30 min
 
 
 def _run_weekly_report() -> None:
@@ -67,18 +69,31 @@ def _run_weekly_report() -> None:
 
 def _run_gallery_scan() -> None:
     """1×/jour (≥ GALLERY_SCAN_HOUR) : détecte les nouvelles galeries du site
-    et alerte l'utilisateur avec des boutons Ajouter / Ignorer."""
-    global _last_scan_date
+    et alerte l'utilisateur avec des boutons Ajouter / Ignorer.
+
+    Si le site est injoignable, on re-tente — mais espacé (SCAN_RETRY_INTERVAL)
+    pour ne PAS marteler Squarespace (ce qui rallongerait le blocage d'IP)."""
+    global _last_scan_date, _last_scan_attempt
     from settings import ALLOWED_CHAT_ID
     if not ALLOWED_CHAT_ID:
         return
     nowl = now_local()
     if nowl.hour < GALLERY_SCAN_HOUR or _last_scan_date == nowl.date():
         return
-    _last_scan_date = nowl.date()
+    now_ts = time.time()
+    if now_ts - _last_scan_attempt < SCAN_RETRY_INTERVAL:
+        return
+    _last_scan_attempt = now_ts
     try:
-        from discover import scan_new_galleries
-        found = scan_new_galleries()
+        from discover import SiteUnreachable, scan_new_galleries
+        try:
+            found = scan_new_galleries()
+        except SiteUnreachable:
+            # Site injoignable : on NE spamme PAS et on NE fige PAS _last_scan_date.
+            # Nouvelle tentative dans SCAN_RETRY_INTERVAL (pas avant).
+            logger.warning("Scan galeries reporté : site injoignable.")
+            return
+        _last_scan_date = nowl.date()  # scan réussi → plus rien avant demain
         if not found:
             return
         from app import alert_new_galleries

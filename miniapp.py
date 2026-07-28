@@ -504,7 +504,12 @@ _STUDIO_HTML = r"""<!doctype html>
     box.innerHTML = "";
     try {
       const d = await api("/api/scan", { method: "POST", headers: HJ(), body: "{}" });
-      renderScan(d.pending || []);
+      if (d.unreachable) {
+        box.innerHTML = "<p class='hint'>🌐 Site temporairement injoignable. "
+          + "Réessaie dans quelques minutes.</p>";
+      } else {
+        renderScan(d.pending || []);
+      }
     } catch (e) { box.innerHTML = "<p class='hint'>Erreur : " + e.message + "</p>"; }
     finally { btn.disabled = false; btn.textContent = label; }
   }
@@ -803,13 +808,15 @@ def register_miniapp(app, hooks) -> None:
     def api_scan():
         """Détecte les nouvelles galeries + renvoie toutes celles en attente."""
         _require_user()
-        from discover import scan_new_galleries
+        from discover import SiteUnreachable, scan_new_galleries
         from db import pending_galleries
         from settings import auto_gallery_assets
         from gallery import fetch_gallery_photos
         config = load_yaml_config()
         try:
             scan_new_galleries()  # enregistre les nouvelles (status='pending')
+        except SiteUnreachable:
+            return jsonify({"unreachable": True})
         except Exception as e:
             logger.warning("Scan MiniApp KO : %s", e)
         out = []
