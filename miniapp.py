@@ -130,7 +130,9 @@ _STUDIO_HTML = r"""<!doctype html>
     background: var(--tg-theme-bg-color, #111);
     color: var(--tg-theme-text-color, #eee);
     font: 15px/1.45 -apple-system, system-ui, sans-serif; }
-  #scroll { flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  /* min-height:0 OBLIGATOIRE : sans lui, un enfant flex ne rétrécit pas sous la
+     taille de son contenu → le défilement interne casse (bug flexbox classique). */
+  #scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   /* En-tête fixe de l'app (titre de marque), sous l'encoche iPhone. */
   .appbar { flex: 0 0 auto;
     padding: calc(env(safe-area-inset-top) + 11px) 14px 11px;
