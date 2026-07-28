@@ -1,14 +1,28 @@
 """Client HTTP partagé avec retry automatique et timeouts par défaut."""
 import logging
+import os
 import threading
 import time
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
+
+# --- Relais optionnel (contourne un blocage d'IP côté Squarespace) -----------
+# Si FETCH_PROXY est défini (URL d'un Worker Cloudflare relais), les requêtes
+# vers les hôtes listés (le site) passent par ce relais dont l'IP n'est pas
+# bloquée. Inactif si la variable n'existe pas → comportement direct habituel.
+_FETCH_PROXY = os.environ.get("FETCH_PROXY", "").strip().rstrip("/")
+_FETCH_PROXY_HOSTS = {
+    h.strip().lower()
+    for h in os.environ.get(
+        "FETCH_PROXY_HOSTS", "www.davidmertens.com,davidmertens.com"
+    ).split(",")
+    if h.strip()
+}
 
 # Timeout par défaut : (connect, read). Le connect court fait échouer VITE quand
 # l'hôte est injoignable (au lieu de bloquer 15-25 s et d'empiler les threads).
@@ -79,6 +93,15 @@ def _host(url: str) -> str:
         return ""
 
 
+def _apply_proxy(url: str) -> str:
+    """Route via le relais si configuré ET si l'hôte cible est bloqué."""
+    if not _FETCH_PROXY:
+        return url
+    if _host(url) in _FETCH_PROXY_HOSTS:
+        return f"{_FETCH_PROXY}/?url={quote(url, safe='')}"
+    return url
+
+
 def _cb_guard(host: str) -> None:
     if not host:
         return
@@ -117,7 +140,8 @@ def _cb_failure(host: str) -> None:
 
 def _request(method: str, url: str, **kwargs):
     kwargs.setdefault("timeout", DEFAULT_TIMEOUT)
-    host = _host(url)
+    url = _apply_proxy(url)          # relais si configuré
+    host = _host(url)                # disjoncteur suit l'hôte réellement contacté
     _cb_guard(host)  # lève HostCircuitOpen si le disjoncteur est ouvert
     try:
         r = SESSION.request(method, url, **kwargs)
@@ -152,6 +176,7 @@ def probe(url: str, timeout=(5, 10)) -> tuple:
     """Sonde RÉELLE (ignore l'état ouvert du disjoncteur) pour tester la reprise.
     Met quand même à jour le disjoncteur : un succès le referme. Retourne
     (ok: bool, info: dict) avec status/ms ou error/ms."""
+    url = _apply_proxy(url)          # teste le vrai chemin (relais inclus)
     host = _host(url)
     t0 = time.time()
     try:
