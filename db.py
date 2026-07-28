@@ -187,6 +187,14 @@ def added_galleries() -> List[str]:
             "SELECT slug FROM discovered_galleries WHERE status='added'")]
 
 
+def pending_galleries() -> List[str]:
+    """Galeries détectées en attente de décision (status='pending')."""
+    with connection() as conn:
+        return [r[0] for r in conn.execute(
+            "SELECT slug FROM discovered_galleries WHERE status='pending' "
+            "ORDER BY seen_at DESC")]
+
+
 def _final_backup() -> None:
     """Best effort à l'arrêt propre (deploy/SIGTERM) : sauvegarde synchrone.
 

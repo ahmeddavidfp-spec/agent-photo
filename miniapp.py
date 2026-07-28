@@ -218,6 +218,10 @@ _STUDIO_HTML = r"""<!doctype html>
 <section id="v-status" hidden>
   <h1>⚙️ État</h1>
   <div id="status-tokens"></div>
+  <h1 style="margin-top:18px">🆕 Détection de galeries</h1>
+  <p class="hint">Cherche sur ton site les nouvelles galeries à ajouter automatiquement.</p>
+  <button class="btn sec" id="scan-btn" onclick="scanGalleries()">🔍 Scanner les galeries</button>
+  <div id="scan-results"></div>
   <h1 style="margin-top:18px">🔄 Auto-pub quotidien</h1>
   <p class="hint">Une seule galerie active à la fois (publiée chaque jour à la meilleure heure).</p>
   <div id="status-daily" class="state">Chargement…</div>
@@ -494,6 +498,42 @@ _STUDIO_HTML = r"""<!doctype html>
       tg.openLink(d.url);  // autorisation dans le navigateur, callback → serveur
     } catch (e) { alert("Échec : " + e.message); }
   }
+  async function scanGalleries() {
+    const btn = $("scan-btn"), box = $("scan-results");
+    btn.disabled = true; const label = btn.textContent; btn.textContent = "⏳ Scan en cours…";
+    box.innerHTML = "";
+    try {
+      const d = await api("/api/scan", { method: "POST", headers: HJ(), body: "{}" });
+      renderScan(d.pending || []);
+    } catch (e) { box.innerHTML = "<p class='hint'>Erreur : " + e.message + "</p>"; }
+    finally { btn.disabled = false; btn.textContent = label; }
+  }
+  function renderScan(pending) {
+    const box = $("scan-results"); box.innerHTML = "";
+    if (!pending.length) {
+      box.innerHTML = "<p class='hint'>✅ Aucune nouvelle galerie à ajouter.</p>";
+      return;
+    }
+    pending.forEach(g => {
+      const row = document.createElement("div"); row.className = "row";
+      row.innerHTML = "<b>" + g.name + "</b><span class='cnt'>" + g.count + " photos</span>";
+      const add = document.createElement("button"); add.className = "back"; add.textContent = "➕ Ajouter";
+      const ign = document.createElement("button"); ign.className = "back"; ign.textContent = "🚫 Ignorer";
+      add.onclick = () => decideGallery(g.slug, "add", g.name);
+      ign.onclick = () => decideGallery(g.slug, "ignore", g.name);
+      row.appendChild(add); row.appendChild(ign); box.appendChild(row);
+    });
+  }
+  async function decideGallery(slug, action, name) {
+    try {
+      await api("/api/gallery/decide", { method: "POST", headers: HJ(),
+        body: JSON.stringify({ slug: slug, action: action }) });
+      haptic("success");
+      alert(action === "add" ? "✅ « " + name + " » ajoutée !" : "🚫 « " + name + " » ignorée.");
+      loadStatus();       // rafraîchit la liste auto-pub (nouvelle galerie dispo)
+      scanGalleries();    // rafraîchit la liste des détections
+    } catch (e) { alert("Échec : " + e.message); }
+  }
   async function renew(platform) {
     try {
       const d = await api("/api/renew", { method: "POST", headers: HJ(),
@@ -758,5 +798,41 @@ def register_miniapp(app, hooks) -> None:
         if ok:
             return jsonify({"ok": True, "days": res[1]})
         return jsonify({"ok": False, "error": str(res)[:200]})
+
+    @app.route("/api/scan", methods=["POST"])
+    def api_scan():
+        """Détecte les nouvelles galeries + renvoie toutes celles en attente."""
+        _require_user()
+        from discover import scan_new_galleries
+        from db import pending_galleries
+        from settings import auto_gallery_assets
+        from gallery import fetch_gallery_photos
+        config = load_yaml_config()
+        try:
+            scan_new_galleries()  # enregistre les nouvelles (status='pending')
+        except Exception as e:
+            logger.warning("Scan MiniApp KO : %s", e)
+        out = []
+        for slug in pending_galleries():
+            name, _ = auto_gallery_assets(slug)
+            try:
+                count = len(fetch_gallery_photos(config["site_url"], slug))  # caché
+            except Exception:
+                count = 0
+            out.append({"slug": slug, "name": name, "count": count})
+        return jsonify({"pending": out})
+
+    @app.route("/api/gallery/decide", methods=["POST"])
+    def api_gallery_decide():
+        """Approuve ('add') ou rejette ('ignore') une galerie détectée."""
+        _require_user()
+        from db import set_discovered_status
+        data = request.get_json(force=True, silent=True) or {}
+        slug = str(data.get("slug", "")).strip()
+        action = data.get("action")
+        if not slug or action not in ("add", "ignore"):
+            abort(400)
+        set_discovered_status(slug, "added" if action == "add" else "ignored")
+        return jsonify({"ok": True})
 
     logger.info("Mini App Studio enregistrée (/app + API complète)")
