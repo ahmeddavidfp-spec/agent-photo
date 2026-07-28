@@ -123,10 +123,17 @@ _STUDIO_HTML = r"""<!doctype html>
 <style>
   :root { color-scheme: light dark; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  body { margin: 0; padding: 0 0 66px;
+  body { margin: 0; padding: calc(env(safe-area-inset-top) + 46px) 0 66px;
     background: var(--tg-theme-bg-color, #111);
     color: var(--tg-theme-text-color, #eee);
     font: 15px/1.45 -apple-system, system-ui, sans-serif; }
+  /* En-tête fixe de l'app (titre de marque), sous l'encoche iPhone. */
+  .appbar { position: fixed; top: 0; left: 0; right: 0; z-index: 30;
+    padding: calc(env(safe-area-inset-top) + 11px) 14px 11px;
+    background: var(--tg-theme-secondary-bg-color, #1c1c1e);
+    border-bottom: 1px solid rgba(128,128,128,.25);
+    text-align: center; font-size: 16px; font-weight: 700; letter-spacing: .2px;
+    color: var(--tg-theme-text-color, #eee); }
   section { padding: 12px 12px 90px; }
   h1 { font-size: 17px; margin: 4px 2px 10px; display: flex; align-items: center; gap: 8px; }
   .hint { color: var(--tg-theme-hint-color, #999); font-size: 13px; margin: 0 2px 12px; }
@@ -201,6 +208,7 @@ _STUDIO_HTML = r"""<!doctype html>
   #tokgate button { padding: 13px 22px; border: 0; border-radius: 10px;
     background: #2ea6ff; color: #fff; font-size: 15px; font-weight: 600; }
 </style></head><body>
+<header class="appbar">APP Studio Agent</header>
 <button id="pwa-mainbtn" class="pwa-mainbtn" hidden></button>
 <div id="tokgate">
   <h1 style="justify-content:center">🔒 Studio</h1>
