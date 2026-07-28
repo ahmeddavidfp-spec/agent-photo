@@ -28,6 +28,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import threading
 import time
 from urllib.parse import parse_qsl
@@ -35,6 +36,11 @@ from urllib.parse import parse_qsl
 from flask import abort, jsonify, redirect, request
 
 from settings import ALLOWED_CHAT_ID, TELEGRAM_TOKEN, load_yaml_config
+
+# Jeton personnel pour ouvrir le Studio HORS Telegram (PWA écran d'accueil).
+# Défini via la variable d'env STUDIO_TOKEN. Vide → accès PWA désactivé
+# (seul le Mini App Telegram fonctionne, comportement historique).
+STUDIO_TOKEN = os.environ.get("STUDIO_TOKEN", "").strip()
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +77,17 @@ def _validate_init_data(init_data: str):
         return None
 
 
+def _validate_studio_token(token: str):
+    """Auth PWA hors Telegram : jeton personnel == STUDIO_TOKEN → le propriétaire."""
+    if STUDIO_TOKEN and token and hmac.compare_digest(token, STUDIO_TOKEN):
+        return {"id": ALLOWED_CHAT_ID}
+    return None
+
+
 def _require_user():
     user = _validate_init_data(request.headers.get("X-Telegram-Init-Data", ""))
+    if not user:
+        user = _validate_studio_token(request.headers.get("X-Studio-Token", ""))
     if not user:
         abort(403)
     return user
@@ -95,8 +110,15 @@ def _check_gallery(galerie: str, config: dict) -> None:
 _STUDIO_HTML = r"""<!doctype html>
 <html lang="fr"><head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Studio</title>
+<meta name="theme-color" content="#111111">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Studio">
+<link rel="manifest" href="/studio/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/static/pwa/icon-180.png">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   :root { color-scheme: light dark; }
@@ -162,7 +184,30 @@ _STUDIO_HTML = r"""<!doctype html>
   .pill { font-size: 12px; padding: 3px 9px; border-radius: 999px;
           background: var(--tg-theme-secondary-bg-color, #1c1c1e);
           color: var(--tg-theme-hint-color, #999); }
+  /* Bouton principal de remplacement quand on tourne en PWA (hors Telegram),
+     posé juste au-dessus de la barre d'onglets. Masqué dans Telegram. */
+  .pwa-mainbtn { position: fixed; left: 0; right: 0; z-index: 20; border: 0;
+    bottom: calc(56px + env(safe-area-inset-bottom));
+    padding: 15px; font-size: 16px; font-weight: 600;
+    background: #2ea6ff; color: #fff; }
+  .pwa-mainbtn:disabled { opacity: .55; }
+  /* Panneau de saisie du jeton (première ouverture PWA). */
+  #tokgate { position: fixed; inset: 0; z-index: 100; display: none;
+    background: #111; color: #eee; padding: 40px 24px; text-align: center; }
+  #tokgate.on { display: block; }
+  #tokgate input { width: 100%; max-width: 420px; margin: 16px auto; display: block;
+    padding: 13px; border-radius: 10px; border: 1px solid #333; background: #1c1c1e;
+    color: #eee; font-size: 15px; }
+  #tokgate button { padding: 13px 22px; border: 0; border-radius: 10px;
+    background: #2ea6ff; color: #fff; font-size: 15px; font-weight: 600; }
 </style></head><body>
+<button id="pwa-mainbtn" class="pwa-mainbtn" hidden></button>
+<div id="tokgate">
+  <h1 style="justify-content:center">🔒 Studio</h1>
+  <p class="hint">Colle ton code d'accès personnel pour ouvrir le Studio.</p>
+  <input id="tokgate-input" type="password" autocomplete="off" placeholder="Code d'accès">
+  <button onclick="saveToken()">Ouvrir</button>
+</div>
 
 <section id="v-gal">
   <h1>🎨 Studio</h1>
@@ -239,12 +284,46 @@ _STUDIO_HTML = r"""<!doctype html>
 </nav>
 
 <script>
-  const tg = window.Telegram.WebApp; tg.ready(); tg.expand();
-  const Main = tg.MainButton;
-  const H = () => ({ "X-Telegram-Init-Data": tg.initData });
-  const HJ = () => ({ "Content-Type": "application/json", "X-Telegram-Init-Data": tg.initData });
   const $ = id => document.getElementById(id);
+
+  // Telegram réel seulement si initData signé présent ; sinon PWA autonome.
+  const RealTG = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData)
+    ? window.Telegram.WebApp : null;
+  const STANDALONE = !RealTG;
+
+  // Jeton d'accès (PWA) : ?token=… → localStorage, puis on nettoie l'URL.
+  const tokGet = () => { try { return localStorage.getItem("studio_token") || ""; } catch(e){ return ""; } };
+  (function(){ try {
+    const u = new URL(location.href), t = u.searchParams.get("token");
+    if (t) { localStorage.setItem("studio_token", t);
+      u.searchParams.delete("token"); history.replaceState(null, "", u.pathname + u.search); }
+  } catch(e){} })();
+
+  let tg, Main;
+  if (RealTG) {
+    tg = RealTG; tg.ready(); tg.expand(); Main = tg.MainButton;
+  } else {
+    const b = $("pwa-mainbtn");
+    Main = {
+      setText(t){ b.textContent = t; }, show(){ b.hidden = false; }, hide(){ b.hidden = true; },
+      enable(){ b.disabled = false; }, showProgress(){ b.disabled = true; }, hideProgress(){ b.disabled = false; },
+      onClick(cb){ b.onclick = () => cb && cb(); },
+    };
+    tg = { initData: "", ready(){}, expand(){}, close(){}, MainButton: Main,
+      openLink(url){ window.open(url, "_blank"); },
+      HapticFeedback: { notificationOccurred(){ try { navigator.vibrate && navigator.vibrate(8); } catch(e){} } } };
+  }
+
+  const H = () => STANDALONE ? { "X-Studio-Token": tokGet() }
+                             : { "X-Telegram-Init-Data": tg.initData };
+  const HJ = () => STANDALONE ? { "Content-Type": "application/json", "X-Studio-Token": tokGet() }
+                              : { "Content-Type": "application/json", "X-Telegram-Init-Data": tg.initData };
   const haptic = k => tg.HapticFeedback && tg.HapticFeedback.notificationOccurred(k);
+
+  function saveToken(){
+    const v = ($("tokgate-input").value || "").trim();
+    if (v) { try { localStorage.setItem("studio_token", v); } catch(e){} location.reload(); }
+  }
 
   let galerie = "", galNom = "", mode = "pub", pubMode = "both";
   let photos = [], selected = [], alt = "";
@@ -261,6 +340,10 @@ _STUDIO_HTML = r"""<!doctype html>
   }
   async function api(url, opts) {
     const r = await fetch(url, opts);
+    if (r.status === 403 && STANDALONE) {   // jeton absent/incorrect → porte d'accès
+      $("tokgate").classList.add("on");
+      throw new Error("Code d'accès requis");
+    }
     if (!r.ok) throw new Error("HTTP " + r.status);
     return r.json();
   }
@@ -577,11 +660,20 @@ _STUDIO_HTML = r"""<!doctype html>
     } catch (e) { alert("Échec : " + e.message); }
   }
 
+  // ---- Service worker (PWA installable, coquille en cache) ----
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/sw.js").catch(function(){});
+  }
+
   // ---- Démarrage (deep-link compat : /app?galerie=X&mode=reel) ----
   const qs = new URLSearchParams(location.search);
-  loadGalleries();
-  if (qs.get("galerie")) openGallery(qs.get("galerie"), qs.get("nom") || qs.get("galerie"),
-                                     qs.get("mode") === "reel" ? "reel" : "pub");
+  if (STANDALONE && !tokGet()) {
+    $("tokgate").classList.add("on");     // 1re ouverture PWA : demander le code
+  } else {
+    loadGalleries();
+    if (qs.get("galerie")) openGallery(qs.get("galerie"), qs.get("nom") || qs.get("galerie"),
+                                       qs.get("mode") === "reel" ? "reel" : "pub");
+  }
 </script></body></html>"""
 
 
@@ -598,8 +690,51 @@ def register_miniapp(app, hooks) -> None:
     """
 
     @app.route("/app")
+    @app.route("/studio")           # entrée PWA (écran d'accueil, hors Telegram)
     def studio():
         return _STUDIO_HTML, 200, {"Content-Type": "text/html; charset=utf-8"}
+
+    @app.route("/studio/manifest.webmanifest")
+    def studio_manifest():
+        manifest = {
+            "name": "Agent Photo Studio",
+            "short_name": "Studio",
+            "start_url": "/studio",
+            "scope": "/",
+            "display": "standalone",
+            "background_color": "#111111",
+            "theme_color": "#111111",
+            "orientation": "portrait",
+            "icons": [
+                {"src": "/static/pwa/icon-192.png", "sizes": "192x192", "type": "image/png"},
+                {"src": "/static/pwa/icon-512.png", "sizes": "512x512", "type": "image/png"},
+                {"src": "/static/pwa/icon-maskable-512.png", "sizes": "512x512",
+                 "type": "image/png", "purpose": "maskable"},
+            ],
+        }
+        return jsonify(manifest), 200, {"Content-Type": "application/manifest+json"}
+
+    @app.route("/sw.js")            # servi à la racine → portée "/" (couvre /studio + /api)
+    def studio_sw():
+        sw = (
+            "const C='studio-v1';\n"
+            "self.addEventListener('install',e=>{self.skipWaiting();});\n"
+            "self.addEventListener('activate',e=>{e.waitUntil(self.clients.claim());});\n"
+            "self.addEventListener('fetch',e=>{\n"
+            "  const u=new URL(e.request.url);\n"
+            "  if(e.request.method!=='GET') return;\n"
+            "  if(u.pathname.startsWith('/api/')) return;         // API : toujours réseau\n"
+            "  if(u.pathname==='/studio'||u.pathname==='/app'){    // coquille : réseau puis cache\n"
+            "    e.respondWith(fetch(e.request).then(r=>{const c=r.clone();\n"
+            "      caches.open(C).then(x=>x.put(e.request,c));return r;})\n"
+            "      .catch(()=>caches.match(e.request)));return;}\n"
+            "  if(u.pathname.startsWith('/static/')){              // assets : cache puis réseau\n"
+            "    e.respondWith(caches.match(e.request).then(m=>m||fetch(e.request).then(r=>{\n"
+            "      const c=r.clone();caches.open(C).then(x=>x.put(e.request,c));return r;})));}\n"
+            "});\n"
+        )
+        return sw, 200, {"Content-Type": "application/javascript",
+                         "Service-Worker-Allowed": "/"}
 
     @app.route("/app/picker")
     def miniapp_picker():  # compat avec les anciens boutons
