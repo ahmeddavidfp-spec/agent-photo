@@ -122,6 +122,9 @@ _STUDIO_HTML = r"""<!doctype html>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   :root { color-scheme: light dark; }
+  /* Réserve en permanence la place de l'ascenseur → plus de décalage horizontal
+     quand on passe d'un onglet long (Galeries) à un onglet court (Programmés). */
+  html { overflow-y: scroll; scrollbar-gutter: stable; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { margin: 0; padding: calc(env(safe-area-inset-top) + 46px) 0 66px;
     background: var(--tg-theme-bg-color, #111);
