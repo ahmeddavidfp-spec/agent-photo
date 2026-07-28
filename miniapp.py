@@ -218,6 +218,10 @@ _STUDIO_HTML = r"""<!doctype html>
 <section id="v-status" hidden>
   <h1>⚙️ État</h1>
   <div id="status-tokens"></div>
+  <h1 style="margin-top:18px">🩺 Connexion au site</h1>
+  <p class="hint">Vérifie si le serveur arrive à joindre ton site (utile en cas de blocage).</p>
+  <button class="btn sec" id="diag-btn" onclick="runDiag()">🩺 Tester la connexion</button>
+  <div id="diag-results"></div>
   <h1 style="margin-top:18px">🆕 Détection de galeries</h1>
   <p class="hint">Cherche sur ton site les nouvelles galeries à ajouter automatiquement.</p>
   <button class="btn sec" id="scan-btn" onclick="scanGalleries()">🔍 Scanner les galeries</button>
@@ -497,6 +501,31 @@ _STUDIO_HTML = r"""<!doctype html>
       const d = await api("/api/pinterest/connect-url", { headers: H() });
       tg.openLink(d.url);  // autorisation dans le navigateur, callback → serveur
     } catch (e) { alert("Échec : " + e.message); }
+  }
+  async function runDiag() {
+    const btn = $("diag-btn"), box = $("diag-results");
+    btn.disabled = true; const label = btn.textContent; btn.textContent = "⏳ Test…";
+    box.innerHTML = "";
+    try {
+      const d = await api("/api/diag", { method: "POST", headers: HJ(), body: "{}" });
+      let h = d.ok
+        ? "<p class='hint'>✅ Site joignable — HTTP " + d.info.status + " en " + d.info.ms + " ms</p>"
+        : "<p class='hint'>❌ Site injoignable — " + d.info.error + " (" + d.info.ms + " ms)</p>";
+      const open = d.open || {};
+      const hosts = Object.keys(open);
+      if (hosts.length) {
+        hosts.forEach(hn => {
+          const m = Math.max(1, Math.floor(open[hn] / 60));
+          h += "<p class='hint'>🔌 Pause active sur " + hn + " — reprise dans ~" + m + " min</p>";
+        });
+      } else {
+        h += "<p class='hint'>🔌 Disjoncteur fermé (aucune pause).</p>";
+      }
+      if (!d.ok) h += "<p class='hint'>Blocage réseau côté hébergeur : il se lève seul. Réessaie dans quelques minutes.</p>";
+      box.innerHTML = h;
+      haptic(d.ok ? "success" : "warning");
+    } catch (e) { box.innerHTML = "<p class='hint'>Erreur : " + e.message + "</p>"; }
+    finally { btn.disabled = false; btn.textContent = label; }
   }
   async function scanGalleries() {
     const btn = $("scan-btn"), box = $("scan-results");
@@ -828,6 +857,17 @@ def register_miniapp(app, hooks) -> None:
                 count = 0
             out.append({"slug": slug, "name": name, "count": count})
         return jsonify({"pending": out})
+
+    @app.route("/api/diag", methods=["POST"])
+    def api_diag():
+        """Teste en direct la connexion serveur → site + état du disjoncteur."""
+        _require_user()
+        from http_client import circuit_state, probe
+        config = load_yaml_config()
+        site = config["site_url"].rstrip("/")
+        ok, info = probe(site + "/sitemap.xml")
+        st = circuit_state()
+        return jsonify({"ok": ok, "info": info, "open": st.get("open") or {}})
 
     @app.route("/api/gallery/decide", methods=["POST"])
     def api_gallery_decide():

@@ -306,6 +306,10 @@ def _handle_text(chat_id: int, text: str) -> None:
         send_message(chat_id, token_status())
         return
 
+    if text == "/diag":
+        send_message(chat_id, _diag_text())
+        return
+
     if text == "/scan":
         send_message(chat_id, "🔍 Scan du site en cours…")
         from discover import SiteUnreachable, scan_new_galleries
@@ -639,6 +643,31 @@ def _display_name_for(slug: str, config: dict) -> str:
     if slug in names and names[slug]:
         return str(names[slug])
     return slug.replace("-", " ").replace("_", " ").title()
+
+
+def _diag_text() -> str:
+    """Teste en direct si le serveur joint le site + état du disjoncteur."""
+    from http_client import circuit_state, probe
+    config = load_yaml_config()
+    site = config["site_url"].rstrip("/")
+    ok, info = probe(site + "/sitemap.xml")
+    st = circuit_state()
+    lines = ["🩺 *Diagnostic connexion*", ""]
+    if ok:
+        lines.append(f"✅ Site joignable — HTTP {info['status']} en {info['ms']} ms")
+    else:
+        lines.append(f"❌ Site injoignable — {info['error']} ({info['ms']} ms)")
+    open_hosts = st.get("open") or {}
+    if open_hosts:
+        for h, secs in open_hosts.items():
+            mins = max(1, secs // 60)
+            lines.append(f"🔌 Pause active sur `{h}` — reprise dans ~{mins} min")
+    else:
+        lines.append("🔌 Disjoncteur fermé (aucune pause en cours)")
+    if not ok:
+        lines += ["", "_Blocage réseau côté hébergeur du site : il se lève seul. "
+                  "Relance /diag dans quelques minutes._"]
+    return "\n".join(lines)
 
 
 def alert_new_galleries(chat_id: int, found: list) -> None:

@@ -94,7 +94,11 @@ def _cb_success(host: str) -> None:
     if not host:
         return
     with _CB_LOCK:
-        if _CB_FAILS.pop(host, None) or _CB_OPEN_UNTIL.pop(host, None):
+        # pop des DEUX (pas de `or` : il court-circuiterait et laisserait
+        # _CB_OPEN_UNTIL en place quand _CB_FAILS est non vide).
+        had_fails = _CB_FAILS.pop(host, None) is not None
+        was_open = _CB_OPEN_UNTIL.pop(host, None) is not None
+        if had_fails or was_open:
             logger.info("Disjoncteur %s refermé (connexion OK).", host)
 
 
@@ -132,3 +136,28 @@ def safe_get(url: str, **kwargs):
 def safe_post(url: str, **kwargs):
     """POST avec timeout par défaut + disjoncteur par hôte."""
     return _request("POST", url, **kwargs)
+
+
+def circuit_state() -> dict:
+    """État du disjoncteur : {open: {host: secondes_restantes}, fails: {host: n}}."""
+    now = time.time()
+    with _CB_LOCK:
+        return {
+            "open": {h: int(u - now) for h, u in _CB_OPEN_UNTIL.items() if u > now},
+            "fails": dict(_CB_FAILS),
+        }
+
+
+def probe(url: str, timeout=(5, 10)) -> tuple:
+    """Sonde RÉELLE (ignore l'état ouvert du disjoncteur) pour tester la reprise.
+    Met quand même à jour le disjoncteur : un succès le referme. Retourne
+    (ok: bool, info: dict) avec status/ms ou error/ms."""
+    host = _host(url)
+    t0 = time.time()
+    try:
+        r = SESSION.request("GET", url, timeout=timeout)
+        _cb_success(host)
+        return True, {"status": r.status_code, "ms": int((time.time() - t0) * 1000)}
+    except Exception as e:
+        _cb_failure(host)
+        return False, {"error": type(e).__name__, "ms": int((time.time() - t0) * 1000)}
