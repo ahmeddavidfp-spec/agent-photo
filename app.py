@@ -88,6 +88,10 @@ def health():
     except Exception as e:
         checks["db"] = f"error: {e}"
     checks["tokens"] = token_status().replace("\n", " | ")
+    # Diagnostic PWA : le code d'accès est-il vu par le serveur ? (jamais la valeur)
+    import os as _os2
+    _st = _os2.environ.get("STUDIO_TOKEN", "").strip()
+    checks["studio_token"] = {"set": bool(_st), "len": len(_st)}
     status_code = 200 if checks["db"] == "ok" else 503
     return jsonify(checks), status_code
 
