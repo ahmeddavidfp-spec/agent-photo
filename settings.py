@@ -83,9 +83,33 @@ else:
 # --- Fuseau horaire ---
 LOCAL_TZ = "Europe/Brussels"
 
+# Slugs de pages qui ne sont PAS des galeries (filtre de la détection auto).
+NON_GALLERY_SLUGS = {
+    "about", "contact", "home", "series", "search", "cart", "checkout",
+    "shop", "store", "blog", "news", "account", "login", "portfolio",
+    "prints", "mentions-lgales", "mentions-legales", "politique-de-confidentialite",
+    "politique-de-cookies", "privacy", "cookies", "cgv", "legal", "sitemap",
+}
+
+
+def auto_gallery_assets(slug: str):
+    """(display_name, per_gallery) auto-générés pour une galerie ajoutée par
+    la détection (pas dans config.yaml). Hashtags 2/4/2 basés sur le slug."""
+    name = slug.replace("-", " ").replace("_", " ").title()
+    s = slug.replace("-", "").replace("_", "")
+    per = {
+        "hashtags": [
+            "#streetphotography", "#streetphotographer",
+            f"#{s}", f"#igers{s}", f"#visit{s}", "#life_is_street",
+            f"#{s}street", "#bnw_streetphotography",
+        ],
+        "mentions": ["streetclassics", "streetphotographyinternational"],
+    }
+    return name, per
+
 
 def load_yaml_config(path: str = "config.yaml") -> dict:
-    """Charge config.yaml avec valeurs par défaut sûres."""
+    """Charge config.yaml + fusionne les galeries découvertes et approuvées."""
     default = {
         "site_url": "https://www.davidmertens.com",
         "galeries": [],
@@ -98,10 +122,29 @@ def load_yaml_config(path: str = "config.yaml") -> dict:
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
-        return {**default, **data}
+        data = {**default, **data}
     except FileNotFoundError:
         logger.warning("config.yaml absent, valeurs par défaut utilisées.")
-        return default
+        data = dict(default)
     except Exception as e:
         logger.error("Erreur chargement config.yaml : %s", e)
         return default
+
+    # Galeries auto-détectées et approuvées (import différé → pas de cycle)
+    try:
+        from db import added_galleries
+        gal = list(data.get("galeries") or [])
+        names = dict(data.get("gallery_names") or {})
+        per = dict(data.get("per_gallery") or {})
+        for slug in added_galleries():
+            if slug not in gal:
+                gal.append(slug)
+                nm, pg = auto_gallery_assets(slug)
+                names.setdefault(slug, nm)
+                per.setdefault(slug, pg)
+        data["galeries"] = sorted(set(gal))
+        data["gallery_names"] = names
+        data["per_gallery"] = per
+    except Exception as e:
+        logger.debug("Fusion galeries découvertes ignorée : %s", e)
+    return data

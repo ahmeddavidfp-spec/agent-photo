@@ -306,6 +306,16 @@ def _handle_text(chat_id: int, text: str) -> None:
         send_message(chat_id, token_status())
         return
 
+    if text == "/scan":
+        send_message(chat_id, "🔍 Scan du site en cours…")
+        from discover import scan_new_galleries
+        found = scan_new_galleries()
+        if found:
+            alert_new_galleries(chat_id, found)
+        else:
+            send_message(chat_id, "✅ Aucune nouvelle galerie détectée.")
+        return
+
     session = get_session(chat_id)
     if session and session[1].startswith("WAITING_SCHEDULE|"):
         _handle_schedule_input(chat_id, session, text)
@@ -421,6 +431,26 @@ def _handle_action(chat_id: int, action: str) -> None:
 
     if action == "autopub_menu":
         _send_autopub_menu(chat_id)
+        return
+
+    if action.startswith("addgal_"):
+        slug = action[len("addgal_"):]
+        from db import set_discovered_status
+        set_discovered_status(slug, "added")
+        config = load_yaml_config()  # recharge → la galerie est maintenant active
+        display = _display_name_for(slug, config)
+        send_message(
+            chat_id,
+            f"✅ Galerie *{display}* ajoutée !\n"
+            "_Elle est disponible dans le menu, les auto-pubs et les Reels._",
+        )
+        return
+
+    if action.startswith("ignoregal_"):
+        slug = action[len("ignoregal_"):]
+        from db import set_discovered_status
+        set_discovered_status(slug, "ignored")
+        send_message(chat_id, f"🚫 Galerie `{slug}` ignorée. Je ne la re-proposerai plus.")
         return
 
     if action == "autopub_cancel":
@@ -601,6 +631,26 @@ def _display_name_for(slug: str, config: dict) -> str:
     if slug in names and names[slug]:
         return str(names[slug])
     return slug.replace("-", " ").replace("_", " ").title()
+
+
+def alert_new_galleries(chat_id: int, found: list) -> None:
+    """Signale les nouvelles galeries détectées avec boutons Ajouter / Ignorer.
+    `found` = [{slug, name, count}] (voir discover.scan_new_galleries)."""
+    if not found:
+        return
+    n = len(found)
+    s = "s" if n > 1 else ""
+    send_message(chat_id, f"🆕 *{n} nouvelle{s} galerie{s} détectée{s}* sur ton site !")
+    for g in found:
+        kb = [[
+            {"text": "➕ Ajouter", "callback_data": f"addgal_{g['slug']}"},
+            {"text": "🚫 Ignorer", "callback_data": f"ignoregal_{g['slug']}"},
+        ]]
+        send_message(
+            chat_id,
+            f"📁 *{g['name']}*  ·  {g['count']} photos\n`{g['slug']}`",
+            reply_markup={"inline_keyboard": kb},
+        )
 
 
 def _compact_token_line() -> str:

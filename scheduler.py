@@ -39,8 +39,10 @@ DAILY_AUTOPUB_TRIGGER_HOUR = 8
 _last_alert_check_date: Optional[dt.date] = None
 _last_insights_run: float = 0.0
 _last_report_date: Optional[dt.date] = None
+_last_scan_date: Optional[dt.date] = None
 
 WEEKLY_REPORT_HOUR = 18  # dimanche à partir de 18h (heure locale)
+GALLERY_SCAN_HOUR = 10   # scan des nouvelles galeries 1×/jour à partir de 10h
 
 
 def _run_weekly_report() -> None:
@@ -61,6 +63,29 @@ def _run_weekly_report() -> None:
         logger.info("📬 Rapport hebdo envoyé.")
     except Exception as e:
         logger.exception("Rapport hebdo échoué : %s", e)
+
+
+def _run_gallery_scan() -> None:
+    """1×/jour (≥ GALLERY_SCAN_HOUR) : détecte les nouvelles galeries du site
+    et alerte l'utilisateur avec des boutons Ajouter / Ignorer."""
+    global _last_scan_date
+    from settings import ALLOWED_CHAT_ID
+    if not ALLOWED_CHAT_ID:
+        return
+    nowl = now_local()
+    if nowl.hour < GALLERY_SCAN_HOUR or _last_scan_date == nowl.date():
+        return
+    _last_scan_date = nowl.date()
+    try:
+        from discover import scan_new_galleries
+        found = scan_new_galleries()
+        if not found:
+            return
+        from app import alert_new_galleries
+        alert_new_galleries(int(ALLOWED_CHAT_ID), found)
+        logger.info("🆕 %d nouvelle(s) galerie(s) signalée(s).", len(found))
+    except Exception as e:
+        logger.exception("Scan galeries échoué : %s", e)
 
 
 def _collect_pending_insights() -> None:
@@ -281,6 +306,7 @@ def scheduler_loop() -> None:
             _collect_pending_insights()
             _run_daily_autopubs()
             _run_weekly_report()
+            _run_gallery_scan()
             # Sauvegarde DB locale → /data (rate-limitée 5 min, thread isolé,
             # seulement si la DB a changé — voir db.maybe_backup_db)
             from db import maybe_backup_db

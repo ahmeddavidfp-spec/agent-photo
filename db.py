@@ -158,6 +158,35 @@ def maybe_backup_db(force: bool = False) -> None:
     threading.Thread(target=_do_backup, daemon=True, name="db-backup").start()
 
 
+def record_discovered_gallery(slug: str) -> bool:
+    """Insère `slug` en 'pending' s'il est inconnu. True si nouvellement vu."""
+    with connection() as conn:
+        if conn.execute("SELECT 1 FROM discovered_galleries WHERE slug=?", (slug,)).fetchone():
+            return False
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute("INSERT INTO discovered_galleries (slug, status, seen_at) "
+                     "VALUES (?, 'pending', ?)", (slug, now))
+        return True
+
+
+def set_discovered_status(slug: str, status: str) -> None:
+    with connection() as conn:
+        conn.execute("UPDATE discovered_galleries SET status=? WHERE slug=?", (status, slug))
+
+
+def known_discovered() -> set:
+    """Tous les slugs déjà vus (pending/added/ignored) — à ne pas re-scanner."""
+    with connection() as conn:
+        return {r[0] for r in conn.execute("SELECT slug FROM discovered_galleries")}
+
+
+def added_galleries() -> List[str]:
+    """Galeries découvertes ET approuvées par l'utilisateur (status='added')."""
+    with connection() as conn:
+        return [r[0] for r in conn.execute(
+            "SELECT slug FROM discovered_galleries WHERE status='added'")]
+
+
 def _final_backup() -> None:
     """Best effort à l'arrêt propre (deploy/SIGTERM) : sauvegarde synchrone.
 
@@ -279,6 +308,10 @@ def init_db() -> None:
             "chat_id INTEGER, galerie TEXT, active INTEGER DEFAULT 1, "
             "last_run_date TEXT, created_at TEXT, "
             "PRIMARY KEY (chat_id, galerie))"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS discovered_galleries ("
+            "slug TEXT PRIMARY KEY, status TEXT, seen_at TEXT)"
         )
 
         # Migrations douces : ajout de colonnes si manquantes
