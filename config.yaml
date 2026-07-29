@@ -13,7 +13,7 @@ custom_hashtag: ""
 # est réduit automatiquement (et tombe sur un post simple s'il n'en reste qu'1).
 carousel:
   enabled: true
-  count: 5
+  count: 6
 
 # --- Reels (Chemin B) --------------------------------------------------------
 # Le bot MONTE un diaporama vidéo 9:16 (muet) et te l'envoie sur Telegram via
