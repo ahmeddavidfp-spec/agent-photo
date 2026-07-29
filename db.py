@@ -24,6 +24,7 @@ import shutil
 import sqlite3
 import threading
 import time
+import traceback
 from contextlib import contextmanager
 from typing import Any, Iterator, List, Optional, Tuple
 
@@ -61,6 +62,10 @@ logger = logging.getLogger(__name__)
 # Le verrou n'est tenu que quelques millisecondes (+ fsync du commit).
 _DB_LOCK = threading.RLock()
 _LOCK_TIMEOUT = 30  # filet de sécurité : échec clair plutôt que blocage infini
+_SLOW_HOLD_S = 5    # au-delà, on logge QUI a tenu le verrou si longtemps
+
+# Diagnostic : qui tient le verrou (pour nommer le coupable en cas de blocage).
+_lock_holder = None  # {"thread": str, "since": float, "where": str} ou None
 
 
 _CONN: Optional[sqlite3.Connection] = None
@@ -122,14 +127,23 @@ def _do_backup() -> None:
 
     L'upload NFS peut geler : ce thread est jetable, le flag inflight évite
     l'empilement. `os.replace` rend le remplacement du backup atomique."""
-    global _backup_state
+    global _backup_state, _lock_holder
     try:
         snap = DB_PATH + ".snap"
         with _DB_LOCK:
-            dst = sqlite3.connect(snap)
-            _get_conn().backup(dst)
-            dst.close()
-            commits_at_snap = _commit_count
+            _t = time.time()
+            _lock_holder = {"thread": threading.current_thread().name,
+                            "since": _t, "where": "_do_backup:snapshot"}
+            try:
+                dst = sqlite3.connect(snap)
+                _get_conn().backup(dst)
+                dst.close()
+                commits_at_snap = _commit_count
+            finally:
+                if time.time() - _t > _SLOW_HOLD_S:
+                    logger.warning("🐌 Snapshot backup a tenu le verrou %.1fs",
+                                   time.time() - _t)
+                _lock_holder = None
         tmp = BACKUP_DB_PATH + ".tmp"
         shutil.copyfile(snap, tmp)          # ← seul point qui peut geler (NFS)
         os.replace(tmp, BACKUP_DB_PATH)
@@ -235,14 +249,33 @@ def _get_conn() -> sqlite3.Connection:
     return _CONN
 
 
+def _caller_frame() -> str:
+    """Petite signature de l'appelant (2-3 frames applicatifs) pour les logs."""
+    try:
+        frames = traceback.extract_stack(limit=8)[:-2]  # retire connection()+_caller
+        app = [f for f in frames if "/db.py" not in f.filename][-3:]
+        return " → ".join(f"{f.name}:{f.lineno}" for f in app) or "?"
+    except Exception:
+        return "?"
+
+
 @contextmanager
 def connection() -> Iterator[sqlite3.Connection]:
-    global _CONN
+    global _CONN, _lock_holder
     if not _DB_LOCK.acquire(timeout=_LOCK_TIMEOUT):
+        h = _lock_holder
+        if h:
+            logger.error(
+                "🔒 Verrou DB tenu par [%s] depuis %.1fs — appelant: %s",
+                h["thread"], time.time() - h["since"], h["where"])
         raise sqlite3.OperationalError(
             f"DB serialization lock non obtenu en {_LOCK_TIMEOUT}s "
-            "(un bloc connection() fait-il quelque chose de lent ?)"
+            f"(tenu par {h['thread'] if h else '?'} @ {h['where'] if h else '?'})"
         )
+    prev_holder = _lock_holder  # gère la ré-entrance RLock (même thread)
+    t_acq = time.time()
+    _lock_holder = {"thread": threading.current_thread().name,
+                    "since": t_acq, "where": _caller_frame()}
     try:
         conn = _get_conn()
         try:
@@ -263,6 +296,11 @@ def connection() -> Iterator[sqlite3.Connection]:
                 _CONN = None
             raise
     finally:
+        held = time.time() - t_acq
+        if held > _SLOW_HOLD_S:
+            logger.warning("🐌 Verrou DB tenu %.1fs par %s (appelant: %s)",
+                           held, _lock_holder["thread"], _lock_holder["where"])
+        _lock_holder = prev_holder
         _DB_LOCK.release()
 
 
