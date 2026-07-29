@@ -13,9 +13,9 @@ from typing import Optional
 from alerts import send_token_alert_if_needed
 from db import (
     due_scheduled_posts, get_active_daily_autopubs, get_daily_autopub_last_run,
-    mark_photo_as_sent, posts_pending_metrics,
+    get_job_last_run, mark_photo_as_sent, posts_pending_metrics,
     record_published_post, save_metrics, schedule_post, set_daily_autopub_last_run,
-    set_scheduled_status,
+    set_job_last_run, set_scheduled_status,
 )
 from meta_api import (
     facebook_page_configured, fetch_ig_insights, fetch_th_insights,
@@ -35,11 +35,10 @@ INSIGHTS_COLLECT_INTERVAL = 3600  # 1×/h
 # Heure locale minimale pour déclencher l'auto-pub quotidien
 DAILY_AUTOPUB_TRIGGER_HOUR = 8
 
-# État du check quotidien (pas besoin de lock : un seul thread scheduler)
-_last_alert_check_date: Optional[dt.date] = None
+# État en mémoire (un seul thread scheduler). Les gardes-DATES (rapport hebdo,
+# check tokens, scan) sont désormais persistées en DB (job_state) → pas de
+# doublon après un redémarrage. Restent en mémoire les simples throttles.
 _last_insights_run: float = 0.0
-_last_report_date: Optional[dt.date] = None
-_last_scan_date: Optional[dt.date] = None
 _last_scan_attempt: float = 0.0
 
 WEEKLY_REPORT_HOUR = 18  # dimanche à partir de 18h (heure locale)
@@ -48,17 +47,20 @@ SCAN_RETRY_INTERVAL = 1800  # si site injoignable, re-tenter au plus toutes les 
 
 
 def _run_weekly_report() -> None:
-    """Envoie le rapport du Copilote le dimanche soir (1×/semaine)."""
-    global _last_report_date
+    """Envoie le rapport du Copilote le dimanche soir (1×/semaine).
+
+    Garde-date persistée en DB → pas de rapport en double si l'app redémarre
+    dimanche soir."""
     from settings import ALLOWED_CHAT_ID
     if not ALLOWED_CHAT_ID:
         return
     nowl = now_local()
     if nowl.weekday() != 6 or nowl.hour < WEEKLY_REPORT_HOUR:  # 6 = dimanche
         return
-    if _last_report_date == nowl.date():
+    today_str = nowl.strftime("%Y-%m-%d")
+    if get_job_last_run("weekly_report") == today_str:
         return
-    _last_report_date = nowl.date()
+    set_job_last_run("weekly_report", today_str)
     try:
         from analyzer import build_report
         send_message(int(ALLOWED_CHAT_ID), build_report())
@@ -73,12 +75,13 @@ def _run_gallery_scan() -> None:
 
     Si le site est injoignable, on re-tente — mais espacé (SCAN_RETRY_INTERVAL)
     pour ne PAS marteler Squarespace (ce qui rallongerait le blocage d'IP)."""
-    global _last_scan_date, _last_scan_attempt
+    global _last_scan_attempt
     from settings import ALLOWED_CHAT_ID
     if not ALLOWED_CHAT_ID:
         return
     nowl = now_local()
-    if nowl.hour < GALLERY_SCAN_HOUR or _last_scan_date == nowl.date():
+    today_str = nowl.strftime("%Y-%m-%d")
+    if nowl.hour < GALLERY_SCAN_HOUR or get_job_last_run("gallery_scan") == today_str:
         return
     now_ts = time.time()
     if now_ts - _last_scan_attempt < SCAN_RETRY_INTERVAL:
@@ -89,11 +92,11 @@ def _run_gallery_scan() -> None:
         try:
             found = scan_new_galleries()
         except SiteUnreachable:
-            # Site injoignable : on NE spamme PAS et on NE fige PAS _last_scan_date.
+            # Site injoignable : on NE spamme PAS et on NE fige PAS la date.
             # Nouvelle tentative dans SCAN_RETRY_INTERVAL (pas avant).
             logger.warning("Scan galeries reporté : site injoignable.")
             return
-        _last_scan_date = nowl.date()  # scan réussi → plus rien avant demain
+        set_job_last_run("gallery_scan", today_str)  # scan réussi → plus rien avant demain
         if not found:
             return
         from app import alert_new_galleries
@@ -137,15 +140,15 @@ def _collect_pending_insights() -> None:
 
 
 def _run_daily_token_check() -> None:
-    """1×/jour à partir de ALERT_HOUR_LOCAL, vérifie l'expiration des tokens."""
-    global _last_alert_check_date
+    """1×/jour à partir de ALERT_HOUR_LOCAL, vérifie l'expiration des tokens.
+    Garde-date persistée en DB (pas d'alerte en double après un redémarrage)."""
     nowl = now_local()
-    today = nowl.date()
-    if _last_alert_check_date == today:
-        return
+    today_str = nowl.strftime("%Y-%m-%d")
     if nowl.hour < ALERT_HOUR_LOCAL:
         return
-    _last_alert_check_date = today
+    if get_job_last_run("token_check") == today_str:
+        return
+    set_job_last_run("token_check", today_str)
     try:
         send_token_alert_if_needed()
     except Exception as e:

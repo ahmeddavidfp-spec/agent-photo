@@ -259,6 +259,13 @@ _STUDIO_HTML = r"""<!doctype html>
     color: #eee; font-size: 15px; }
   #tokgate button { padding: 13px 22px; border: 0; border-radius: 10px;
     background: #2ea6ff; color: #fff; font-size: 15px; font-weight: 600; }
+  /* Toast de confirmation (surtout en PWA, où l'app ne se ferme pas). */
+  #toast { position: fixed; left: 50%; z-index: 200; max-width: 88vw; text-align: center;
+    bottom: calc(74px + env(safe-area-inset-bottom)); transform: translate(-50%, 20px);
+    background: #0f1a2e; color: #fff; padding: 12px 18px; border-radius: 12px;
+    font-size: 14px; font-weight: 600; box-shadow: 0 10px 34px rgba(0,0,0,.45);
+    opacity: 0; pointer-events: none; transition: .28s ease; }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
 </style></head><body>
 <header class="appbar">APP Studio Agent</header>
 <button id="pwa-mainbtn" class="pwa-mainbtn" hidden></button>
@@ -510,13 +517,30 @@ _STUDIO_HTML = r"""<!doctype html>
     }
   });
 
+  // ---- Confirmation d'action (Telegram ferme l'app ; la PWA affiche un toast) ----
+  function toast(msg){
+    let t = $("toast");
+    if (!t) { t = document.createElement("div"); t.id = "toast"; document.body.appendChild(t); }
+    t.textContent = msg; t.classList.add("show");
+    clearTimeout(window.__toastT);
+    window.__toastT = setTimeout(function(){ t.classList.remove("show"); }, 3400);
+  }
+  function finishAction(msg){
+    if (RealTG) { tg.close(); return; }            // Telegram : le message arrive dans le chat
+    toast(msg || "✅ C'est fait !");               // PWA : confirmation + retour aux galeries
+    try { Main.hideProgress(); } catch(e){}
+    if ($("cap-pub")) $("cap-pub").disabled = false;
+    selected = [];
+    tab("v-gal");
+  }
+
   // ---- Reel ----
   function launchReel() {
     Main.showProgress();
     fetch("/api/reel", { method: "POST", headers: HJ(),
       body: JSON.stringify({ galerie: galerie, urls: selected }) })
       .then(r => { if (!r.ok) throw new Error("HTTP " + r.status);
-        haptic("success"); tg.close(); })
+        haptic("success"); finishAction("🎬 Reel en cours de montage — il arrivera dans Telegram."); })
       .catch(e => { Main.hideProgress(); alert("Échec : " + e.message); });
   }
 
@@ -551,7 +575,7 @@ _STUDIO_HTML = r"""<!doctype html>
       await api("/api/publish", { method: "POST", headers: HJ(),
         body: JSON.stringify({ galerie: galerie, urls: selected, mode: pubMode,
                                visible: $("cap-text").value, alt: alt }) });
-      haptic("success"); tg.close();
+      haptic("success"); finishAction("🚀 Publication lancée !");
     } catch (e) { alert("Échec : " + e.message); $("cap-pub").disabled = false; }
   }
   async function scheduleIt() {
@@ -561,7 +585,7 @@ _STUDIO_HTML = r"""<!doctype html>
         body: JSON.stringify({ galerie: galerie, urls: selected,
                                visible: $("cap-text").value, alt: alt,
                                when: $("cap-when").value }) });
-      haptic("success"); tg.close();
+      haptic("success"); finishAction("📅 Post programmé !");
     } catch (e) { alert("Échec : " + e.message); }
   }
 

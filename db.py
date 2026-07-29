@@ -363,6 +363,12 @@ def init_db() -> None:
             "CREATE TABLE IF NOT EXISTS discovered_galleries ("
             "slug TEXT PRIMARY KEY, status TEXT, seen_at TEXT)"
         )
+        # Dernière exécution des tâches périodiques (survit aux redémarrages →
+        # pas de rapport hebdo / alerte token en double après un redéploiement).
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS job_state ("
+            "job TEXT PRIMARY KEY, last_run TEXT)"
+        )
 
         # Migrations douces : ajout de colonnes si manquantes
         cols = {row[1] for row in conn.execute("PRAGMA table_info(sent_photos)")}
@@ -748,3 +754,16 @@ def set_daily_autopub_last_run(chat_id: int, galerie: str, date_str: str) -> Non
             "UPDATE daily_autopub SET last_run_date = ? WHERE chat_id = ? AND galerie = ?",
             (date_str, chat_id, galerie),
         )
+
+
+def get_job_last_run(job: str) -> Optional[str]:
+    """Dernière valeur enregistrée pour une tâche périodique (persistée en DB)."""
+    with connection() as conn:
+        row = conn.execute("SELECT last_run FROM job_state WHERE job = ?", (job,)).fetchone()
+    return row[0] if row else None
+
+
+def set_job_last_run(job: str, value: str) -> None:
+    with connection() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO job_state (job, last_run) VALUES (?, ?)", (job, value))
