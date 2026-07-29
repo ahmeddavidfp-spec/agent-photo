@@ -104,6 +104,58 @@ def _check_gallery(galerie: str, config: dict) -> None:
 
 
 # =========================================================================
+# COMPTEURS DE GALERIES (publiées/total) — calculés EN TÂCHE DE FOND
+# -------------------------------------------------------------------------
+# Le scraping des ~20 galeries ne doit JAMAIS se faire dans une requête (ça
+# saturait les threads + le verrou DB → gel de l'app). On le fait dans un
+# thread démon single-flight, sans tenir aucun verrou DB pendant le scraping,
+# et l'endpoint lit juste le cache.
+# =========================================================================
+_COUNTS = {"data": {}, "ts": 0.0}
+_COUNTS_TTL = 1800.0            # recalcul au plus toutes les 30 min
+_counts_lock = threading.Lock()
+_counts_running = False
+
+
+def _refresh_counts() -> None:
+    """Recalcule les compteurs (scraping) en arrière-plan. Single-flight.
+    AUCUN verrou DB tenu pendant le scraping (sent lu une seule fois avant)."""
+    global _counts_running
+    with _counts_lock:
+        if _counts_running:
+            return
+        _counts_running = True
+    try:
+        from db import already_sent_urls
+        from gallery import counts_for_gallery
+        config = load_yaml_config()
+        galeries = config.get("galeries") or []
+        sent = already_sent_urls()           # 1 seul accès DB, hors scraping
+        data = {}
+        for g in galeries:                   # séquentiel = doux pour le GIL
+            try:
+                done, total = counts_for_gallery(config["site_url"], g, sent)
+                if total:
+                    data[g] = (done, total)
+            except Exception as e:
+                logger.debug("compteur %s KO : %s", g, e)
+        _COUNTS["data"] = data
+        _COUNTS["ts"] = time.time()
+        logger.info("Compteurs galeries recalculés (%d).", len(data))
+    except Exception as e:
+        logger.warning("Refresh compteurs KO : %s", e)
+    finally:
+        _counts_running = False
+
+
+def _maybe_refresh_counts() -> None:
+    """Déclenche un recalcul en tâche de fond si le cache est périmé (non bloquant)."""
+    if not _counts_running and (time.time() - _COUNTS["ts"]) > _COUNTS_TTL:
+        threading.Thread(target=_refresh_counts, daemon=True,
+                         name="counts-refresh").start()
+
+
+# =========================================================================
 # PAGE HTML DU STUDIO
 # =========================================================================
 
@@ -372,10 +424,23 @@ _STUDIO_HTML = r"""<!doctype html>
         list.appendChild(row);
       });
       $("gal-state").hidden = true;
-      // NB : le calcul des compteurs (scraping de 20 galeries) est désactivé au
-      // chargement — il saturait les threads/verrou DB. À réintroduire en
-      // tâche de fond côté serveur.
+      loadCounts(0);   // compteurs via cache serveur (calcul en tâche de fond)
     } catch (e) { $("gal-state").textContent = "Erreur : " + e.message; }
+  }
+  // Compteurs « X/Y publiées » : lit le cache serveur, re-sonde jusqu'à prêt.
+  async function loadCounts(tries) {
+    try {
+      const dc = await api("/api/galleries?counts=1", { headers: H() });
+      let missing = 0;
+      (dc.galleries || []).forEach(g => {
+        const row = $("gal-" + g.slug);
+        if (!row) return;
+        const cnt = row.querySelector(".cnt");
+        if (typeof g.done === "number") cnt.textContent = g.done + "/" + g.total + " publiées";
+        else missing++;
+      });
+      if ((dc.warming || missing) && tries < 8) setTimeout(() => loadCounts(tries + 1), 5000);
+    } catch (e) {}
   }
 
   // ---- Photos d'une galerie ----
@@ -757,29 +822,23 @@ def register_miniapp(app, hooks) -> None:
 
     @app.route("/api/galleries")
     def api_galleries():
-        """Sans param : liste INSTANTANÉE (noms seuls, zéro scraping).
-        Avec ?counts=1 : ajoute les compteurs publiées/total (scraping, lent à
-        froid) — appelé en arrière-plan par le Studio."""
+        """Sans param : liste instantanée. Avec ?counts=1 : ajoute les
+        compteurs publiées/total depuis le CACHE (calculé en tâche de fond ;
+        JAMAIS de scraping dans la requête). `warming: true` tant que le cache
+        n'est pas prêt → le Studio re-sonde."""
         _require_user()
         config = load_yaml_config()
         galeries = config.get("galeries") or []
+        base = [{"slug": g, "nom": _display_name(g, config)} for g in galeries]
         if request.args.get("counts") != "1":
-            return jsonify({"galleries": [
-                {"slug": g, "nom": _display_name(g, config)} for g in galeries
-            ]})
-        from concurrent.futures import ThreadPoolExecutor
-        from db import already_sent_urls
-        from gallery import counts_for_gallery
-        sent = already_sent_urls()
-        with ThreadPoolExecutor(max_workers=3) as pool:
-            results = list(pool.map(
-                lambda g: (g, counts_for_gallery(config["site_url"], g, sent)),
-                galeries,
-            ))
-        return jsonify({"galleries": [
-            {"slug": g, "nom": _display_name(g, config), "done": d, "total": t}
-            for g, (d, t) in results
-        ]})
+            return jsonify({"galleries": base})
+        _maybe_refresh_counts()              # non bloquant
+        data = _COUNTS["data"]
+        for item in base:
+            c = data.get(item["slug"])
+            if c:
+                item["done"], item["total"] = c[0], c[1]
+        return jsonify({"galleries": base, "warming": not data})
 
     @app.route("/api/photos")
     def api_photos():
