@@ -317,9 +317,12 @@ _STUDIO_HTML = r"""<!doctype html>
       enable(){ b.disabled = false; }, showProgress(){ b.disabled = true; }, hideProgress(){ b.disabled = false; },
       onClick(cb){ b.onclick = () => cb && cb(); },
     };
+    const buzz = () => { try { navigator.vibrate && navigator.vibrate(8); } catch(e){} };
     tg = { initData: "", ready(){}, expand(){}, close(){}, MainButton: Main,
       openLink(url){ window.open(url, "_blank"); },
-      HapticFeedback: { notificationOccurred(){ try { navigator.vibrate && navigator.vibrate(8); } catch(e){} } } };
+      // Shim complet de l'API haptique Telegram (sinon toggle() plante en PWA).
+      HapticFeedback: { notificationOccurred: buzz, selectionChanged: buzz,
+                        impactOccurred: buzz } };
   }
 
   const H = () => STANDALONE ? { "X-Studio-Token": tokGet() }
