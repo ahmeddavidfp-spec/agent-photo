@@ -10,3 +10,6 @@ photos_live.db
 /tmp/
 "Dernier Token Insta"
 DOCUMENTATION.md
+
+# Dossier technique privé (contient des secrets) — jamais sur GitHub
+JOURNAL.html
