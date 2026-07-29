@@ -308,7 +308,15 @@ def _silent_autopub(chat_id: int, galerie: str) -> None:
 
 
 def _run_daily_autopubs() -> None:
-    """Lance une fois par jour (après DAILY_AUTOPUB_TRIGGER_HOUR) les auto-pubs actifs."""
+    """DÉSACTIVÉ (choix produit du 29/07/2026).
+
+    L'auto-pub quotidien — un post complet publié automatiquement chaque jour —
+    est retiré au profit de la cadence *carrousels tous les 3 jours + reels
+    quotidiens*. Il restait une charge lourde (scrape + API Meta) tournant tôt
+    au boot et a été impliqué dans un blocage du verrou DB. On sort tout de
+    suite : plus aucune publication quotidienne automatique n'est déclenchée.
+    Pour réactiver un jour : retirer ce `return`."""
+    return
     nowl = now_local()
     if nowl.hour < DAILY_AUTOPUB_TRIGGER_HOUR:
         return

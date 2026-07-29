@@ -338,19 +338,23 @@ def connection() -> Iterator[sqlite3.Connection]:
             f"DB serialization lock non obtenu en {_LOCK_TIMEOUT}s "
             f"(tenu par {h['thread'] if h else '?'} @ {h['where'] if h else '?'})"
         )
-    prev_holder = _lock_holder  # gère la ré-entrance RLock (même thread)
+    # BLINDAGE : dès le verrou acquis, on entre IMMÉDIATEMENT dans le try/finally.
+    # Toute exception qui suit — y compris une MemoryError en allouant le dict
+    # _lock_holder sous pression mémoire — passe donc par le finally, donc le
+    # verrou est TOUJOURS relâché. Sans ça, un échec entre acquire() et le try
+    # laissait le verrou pris à jamais et tuait le thread (incident vécu :
+    # scheduler mort en tenant le verrou 1200 s+ → tout le bot figé).
+    prev_holder = _lock_holder  # ré-entrance RLock (même thread) — simple ref, sûr
     t_acq = time.time()
-    _lock_holder = {"thread": threading.current_thread().name,
-                    "since": t_acq, "where": _caller_frame()}
     try:
+        _lock_holder = {"thread": threading.current_thread().name,
+                        "since": t_acq, "where": _caller_frame()}
         conn = _get_conn()
         try:
             yield conn
             # Ne marquer "dirty" (→ déclenche une sauvegarde) QUE si une écriture
             # réelle a eu lieu. Un SELECT ne démarre pas de transaction →
             # in_transaction False → pas de commit inutile ni de backup pour rien.
-            # (Avant : chaque lecture marquait dirty → backup toutes les 5 min en
-            # boucle dès qu'il y avait du trafic, même sans changement de données.)
             if conn.in_transaction:
                 conn.commit()
                 global _commit_count
@@ -370,8 +374,9 @@ def connection() -> Iterator[sqlite3.Connection]:
     finally:
         held = time.time() - t_acq
         if held > _SLOW_HOLD_S:
-            logger.warning("🐌 Verrou DB tenu %.1fs par %s (appelant: %s)",
-                           held, _lock_holder["thread"], _lock_holder["where"])
+            h = _lock_holder
+            logger.warning("🐌 Verrou DB tenu %.1fs par %s (appelant: %s)", held,
+                           h["thread"] if h else "?", h["where"] if h else "?")
         _lock_holder = prev_holder
         _DB_LOCK.release()
 
