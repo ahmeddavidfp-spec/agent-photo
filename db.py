@@ -249,6 +249,17 @@ def _get_conn() -> sqlite3.Connection:
     return _CONN
 
 
+def lock_state() -> dict:
+    """État courant du verrou SANS l'acquérir (diagnostic temps réel, ne bloque
+    jamais même si la base est gelée)."""
+    h = _lock_holder
+    if not h:
+        return {"held": False}
+    return {"held": True, "thread": h.get("thread"),
+            "held_for_s": round(time.time() - h.get("since", 0), 1),
+            "where": h.get("where")}
+
+
 def _caller_frame() -> str:
     """Petite signature de l'appelant (2-3 frames applicatifs) pour les logs."""
     try:

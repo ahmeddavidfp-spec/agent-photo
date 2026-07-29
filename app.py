@@ -78,6 +78,13 @@ def home():
     return "Agent Photo is Alive", 200
 
 
+@app.route("/lockstat")
+def lockstat():
+    """Diagnostic verrou DB — NE touche PAS la base (répond même si gelée)."""
+    from db import lock_state
+    return jsonify(lock_state())
+
+
 @app.route("/health")
 def health():
     """Health-check détaillé pour UptimeRobot."""
