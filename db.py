@@ -122,9 +122,12 @@ def _do_backup() -> None:
             _lock_holder = {"thread": threading.current_thread().name,
                             "since": _t, "where": "_do_backup:snapshot"}
             try:
-                dst = sqlite3.connect(snap)
-                _get_conn().backup(dst)
-                dst.close()
+                # Copie FICHIER directe (quelques ms) au lieu de
+                # _get_conn().backup() qui tenait le verrou 70 s+ (copie page à
+                # page sur la connexion partagée). journal_mode=MEMORY → aucun
+                # fichier -wal/-journal ; le .db seul est un instantané complet
+                # et cohérent (on est sous _DB_LOCK → aucune écriture en cours).
+                shutil.copyfile(DB_PATH, snap)
                 commits_at_snap = _commit_count
             finally:
                 if time.time() - _t > _SLOW_HOLD_S:
