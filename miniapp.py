@@ -637,19 +637,49 @@ _STUDIO_HTML = r"""<!doctype html>
       if (!d.posts.length) { $("sched-state").hidden = false;
         $("sched-state").textContent = "Aucun post programmé."; return; }
       d.posts.forEach(p => {
-        const row = document.createElement("div"); row.className = "row";
-        row.innerHTML = "<div style='display:flex;align-items:center;gap:10px'>" +
+        const card = document.createElement("div"); card.className = "row";
+        card.style.flexDirection = "column"; card.style.alignItems = "stretch";
+
+        // En-tête : vignette + date + type + chevron (cliquable pour déplier)
+        const head = document.createElement("div");
+        head.style.cssText = "display:flex;align-items:center;gap:10px;cursor:pointer";
+        head.innerHTML =
           "<img src='" + p.thumb + "' style='width:44px;height:44px;border-radius:8px;object-fit:cover'>" +
-          "<div><b>" + p.when_local + "</b><br><span class='cnt'>" +
-          (p.count > 1 ? "carrousel ×" + p.count : "post simple") + "</span></div></div>";
-        const b = document.createElement("button"); b.className = "back"; b.textContent = "Annuler";
+          "<div style='flex:1'><b>" + p.when_local + "</b><br><span class='cnt'>" +
+          (p.count > 1 ? "carrousel ×" + p.count : "post simple") + "</span></div>" +
+          "<span class='chev' style='opacity:.6;font-size:13px'>Voir ▾</span>";
+
+        // Corps : grille des photos + légende + bouton Annuler (replié par défaut)
+        const body = document.createElement("div");
+        body.hidden = true; body.style.marginTop = "12px";
+        const grid = document.createElement("div");
+        grid.style.cssText = "display:grid;grid-template-columns:repeat(3,1fr);gap:6px";
+        (p.thumbs || []).forEach(u => {
+          const im = document.createElement("img"); im.src = u; im.loading = "lazy";
+          im.style.cssText = "width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px";
+          grid.appendChild(im);
+        });
+        const cap = document.createElement("div");
+        cap.style.cssText = "margin-top:12px;white-space:pre-wrap;font-size:13px;line-height:1.45";
+        cap.textContent = p.caption || "(pas de légende)";
+        const b = document.createElement("button"); b.className = "back"; b.textContent = "Annuler ce post";
+        b.style.marginTop = "12px";
         b.onclick = async () => {
           if (!confirm("Annuler ce post ?")) return;
           await api("/api/scheduled/cancel", { method: "POST", headers: HJ(),
             body: JSON.stringify({ id: p.id }) });
           loadSched();
         };
-        row.appendChild(b); $("sched-list").appendChild(row);
+        body.appendChild(grid); body.appendChild(cap); body.appendChild(b);
+
+        head.onclick = () => {
+          body.hidden = !body.hidden;
+          head.querySelector(".chev").textContent = body.hidden ? "Voir ▾" : "Masquer ▴";
+          if (tg.HapticFeedback) tg.HapticFeedback.selectionChanged();
+        };
+
+        card.appendChild(head); card.appendChild(body);
+        $("sched-list").appendChild(card);
       });
     } catch (e) { $("sched-state").textContent = "Erreur : " + e.message; }
   }
@@ -1025,6 +1055,8 @@ def register_miniapp(app, hooks) -> None:
             posts.append({
                 "id": p["id"], "when_local": when, "count": len(urls),
                 "thumb": (urls[0].split("?")[0] + "?format=300w") if urls else "",
+                "thumbs": [u.split("?")[0] + "?format=400w" for u in urls],
+                "caption": p["caption"] or "",
             })
         return jsonify({"posts": posts})
 

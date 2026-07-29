@@ -730,12 +730,18 @@ def _display_name_for(slug: str, config: dict) -> str:
 
 def _diag_text() -> str:
     """Teste en direct si le serveur joint le site + état du disjoncteur."""
-    from http_client import circuit_state, probe
+    from http_client import circuit_state, probe, proxy_state
     config = load_yaml_config()
     site = config["site_url"].rstrip("/")
     ok, info = probe(site + "/sitemap.xml")
     st = circuit_state()
+    px = proxy_state()
     lines = ["🩺 *Diagnostic connexion*", ""]
+    if px["enabled"]:
+        lines.append("🛰️ Relais Cloudflare *ACTIF*")
+    else:
+        lines.append("🛰️ Relais *INACTIF* — `FETCH_PROXY` non définie sur Render "
+                     "(→ fetch direct, risque de blocage Squarespace)")
     if ok:
         lines.append(f"✅ Site joignable — HTTP {info['status']} en {info['ms']} ms")
     else:

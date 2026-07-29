@@ -178,6 +178,15 @@ def circuit_state() -> dict:
         }
 
 
+def proxy_state() -> dict:
+    """État du relais : {enabled, url, hosts}. Sert au diagnostic (/diag)."""
+    return {
+        "enabled": bool(_FETCH_PROXY),
+        "url": _FETCH_PROXY,
+        "hosts": sorted(_FETCH_PROXY_HOSTS),
+    }
+
+
 def probe(url: str, timeout=(5, 10)) -> tuple:
     """Sonde RÉELLE (ignore l'état ouvert du disjoncteur) pour tester la reprise.
     Met quand même à jour le disjoncteur : un succès le referme. Retourne
