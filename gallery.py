@@ -12,6 +12,15 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
+# lxml est un parseur C : ~5-10× plus rapide que html.parser et il libère le GIL
+# pendant le parse → beaucoup moins d'affamage des autres threads (dont celui qui
+# tient le verrou DB). Repli sur html.parser si lxml n'est pas installé.
+try:
+    import lxml  # noqa: F401
+    _PARSER = "lxml"
+except Exception:  # pragma: no cover
+    _PARSER = "html.parser"
+
 from db import already_sent_urls, galerie_last_use
 from http_client import safe_get
 from timezones import now_local
@@ -49,7 +58,7 @@ def _fetch_live(site_url: str, galerie: str) -> list[str]:
             logger.error("Scraping %s échoué : %s", url, e)
             return []
 
-    soup = BeautifulSoup(r.text, "html.parser")
+    soup = BeautifulSoup(r.text, _PARSER)
     # dict {canonical_url -> full_url} préserve l'ordre et dédup.
     seen: dict[str, str] = {}
     for img in soup.find_all("img"):
