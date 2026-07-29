@@ -123,24 +123,18 @@ _STUDIO_HTML = r"""<!doctype html>
 <style>
   :root { color-scheme: light dark; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  /* Coquille d'app : en-tête + footer FIGÉS, seule la zone du milieu défile.
-     → le footer ne bouge jamais en changeant d'onglet (long ou court). */
-  html, body { height: 100%; }
-  body { margin: 0; height: 100dvh; display: flex; flex-direction: column; overflow: hidden;
+  body { margin: 0; padding: calc(env(safe-area-inset-top) + 46px) 0 66px;
     background: var(--tg-theme-bg-color, #111);
     color: var(--tg-theme-text-color, #eee);
     font: 15px/1.45 -apple-system, system-ui, sans-serif; }
-  /* min-height:0 OBLIGATOIRE : sans lui, un enfant flex ne rétrécit pas sous la
-     taille de son contenu → le défilement interne casse (bug flexbox classique). */
-  #scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   /* En-tête fixe de l'app (titre de marque), sous l'encoche iPhone. */
-  .appbar { flex: 0 0 auto;
+  .appbar { position: fixed; top: 0; left: 0; right: 0; z-index: 30;
     padding: calc(env(safe-area-inset-top) + 11px) 14px 11px;
     background: var(--tg-theme-secondary-bg-color, #1c1c1e);
     border-bottom: 1px solid rgba(128,128,128,.25);
     text-align: center; font-size: 16px; font-weight: 700; letter-spacing: .2px;
     color: var(--tg-theme-text-color, #eee); }
-  section { padding: 12px 12px 16px; }
+  section { padding: 12px 12px 90px; }
   h1 { font-size: 17px; margin: 4px 2px 10px; display: flex; align-items: center; gap: 8px; }
   .hint { color: var(--tg-theme-hint-color, #999); font-size: 13px; margin: 0 2px 12px; }
   .back { border: 0; background: none; color: var(--tg-theme-link-color, #2ea6ff);
@@ -185,8 +179,8 @@ _STUDIO_HTML = r"""<!doctype html>
     color: var(--tg-theme-text-color, #eee); font-size: 15px; }
   .cover { width: 92px; height: 92px; border-radius: 10px; object-fit: cover; }
   .state { text-align: center; color: var(--tg-theme-hint-color, #999); padding: 36px 10px; }
-  iframe { width: 100%; height: calc(100dvh - 160px); border: 0; border-radius: 12px; }
-  nav { flex: 0 0 auto; display: flex;
+  iframe { width: 100%; height: calc(100vh - 90px); border: 0; border-radius: 12px; }
+  nav { position: fixed; left: 0; right: 0; bottom: 0; display: flex; z-index: 5;
     background: var(--tg-theme-secondary-bg-color, #1c1c1e);
     border-top: 1px solid rgba(128,128,128,.25);
     padding-bottom: env(safe-area-inset-bottom); }
@@ -223,7 +217,6 @@ _STUDIO_HTML = r"""<!doctype html>
   <button onclick="saveToken()">Ouvrir</button>
 </div>
 
-<main id="scroll">
 <section id="v-gal">
   <h1>🎨 Studio</h1>
   <p class="hint">Choisis une galerie pour publier ou composer un Reel.</p>
@@ -290,7 +283,6 @@ _STUDIO_HTML = r"""<!doctype html>
   <p class="hint">Une seule galerie active à la fois (publiée chaque jour à la meilleure heure).</p>
   <div id="status-daily" class="state">Chargement…</div>
 </section>
-</main>
 
 <nav>
   <button id="t-gal" class="on" onclick="tab('v-gal')"><span class="ico">🖼</span>Galeries</button>
@@ -346,7 +338,7 @@ _STUDIO_HTML = r"""<!doctype html>
 
   function show(id) {
     ["v-gal","v-photos","v-caption","v-sched","v-stats","v-status"].forEach(v => $(v).hidden = v !== id);
-    const _sc = $("scroll"); if (_sc) _sc.scrollTo(0, 0); else window.scrollTo(0, 0);
+    window.scrollTo(0, 0);
   }
   function tab(id) {
     show(id); Main.hide();
