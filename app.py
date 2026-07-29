@@ -452,7 +452,9 @@ def _handle_action(chat_id: int, action: str) -> None:
     if action.startswith("addgal_"):
         slug = action[len("addgal_"):]
         from db import set_discovered_status
+        from settings import invalidate_config_cache
         set_discovered_status(slug, "added")
+        invalidate_config_cache()    # la galerie doit apparaître tout de suite
         config = load_yaml_config()  # recharge → la galerie est maintenant active
         display = _display_name_for(slug, config)
         send_message(

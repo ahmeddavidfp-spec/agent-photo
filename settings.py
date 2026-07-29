@@ -1,11 +1,25 @@
 """Centralisation de la configuration et des variables d'environnement."""
 import logging
 import os
+import time
 from pathlib import Path
 
 import yaml
 
 logger = logging.getLogger(__name__)
+
+# Cache de load_yaml_config : cette fonction est appelée sur le CHEMIN CHAUD
+# (chaque requête + le scheduler) et touche la base (added_galleries). Sans
+# cache, ça sature le verrou DB sous la rafale de requêtes du Studio → blocage.
+# TTL court : une galerie ajoutée apparaît en <60s (ou tout de suite via
+# invalidate_config_cache()).
+_CONFIG_CACHE = {"data": None, "exp": 0.0}
+_CONFIG_TTL = 60.0
+
+
+def invalidate_config_cache() -> None:
+    """Force le prochain load_yaml_config à tout recharger (ex. après ajout galerie)."""
+    _CONFIG_CACHE["exp"] = 0.0
 
 # --- Secrets / IDs (toujours via variables d'environnement) ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
@@ -109,7 +123,14 @@ def auto_gallery_assets(slug: str):
 
 
 def load_yaml_config(path: str = "config.yaml") -> dict:
-    """Charge config.yaml + fusionne les galeries découvertes et approuvées."""
+    """Charge config.yaml + fusionne les galeries découvertes et approuvées.
+
+    Résultat mis en cache (TTL 60s) pour NE PAS toucher la base à chaque appel
+    (chemin chaud). Voir invalidate_config_cache()."""
+    if path == "config.yaml":
+        c = _CONFIG_CACHE
+        if c["data"] is not None and time.time() < c["exp"]:
+            return c["data"]
     default = {
         "site_url": "https://www.davidmertens.com",
         "galeries": [],
@@ -147,4 +168,7 @@ def load_yaml_config(path: str = "config.yaml") -> dict:
         data["per_gallery"] = per
     except Exception as e:
         logger.debug("Fusion galeries découvertes ignorée : %s", e)
+    if path == "config.yaml":
+        _CONFIG_CACHE["data"] = data
+        _CONFIG_CACHE["exp"] = time.time() + _CONFIG_TTL
     return data

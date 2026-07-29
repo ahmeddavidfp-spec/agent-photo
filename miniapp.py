@@ -1023,6 +1023,9 @@ def register_miniapp(app, hooks) -> None:
         if not slug or action not in ("add", "ignore"):
             abort(400)
         set_discovered_status(slug, "added" if action == "add" else "ignored")
+        if action == "add":
+            from settings import invalidate_config_cache
+            invalidate_config_cache()  # la galerie doit apparaître tout de suite
         return jsonify({"ok": True})
 
     logger.info("Mini App Studio enregistrée (/app + API complète)")
