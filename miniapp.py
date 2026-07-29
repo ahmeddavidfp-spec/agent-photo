@@ -364,18 +364,14 @@ _STUDIO_HTML = r"""<!doctype html>
       d.galleries.forEach(g => {
         const row = document.createElement("div");
         row.className = "row"; row.id = "gal-" + g.slug;
-        row.innerHTML = "<b>" + g.nom + "</b><span class='cnt'>…</span>";
+        row.innerHTML = "<b>" + g.nom + "</b><span class='cnt'></span>";
         row.onclick = () => openGallery(g.slug, g.nom);
         list.appendChild(row);
       });
       $("gal-state").hidden = true;
-      // Compteurs en arrière-plan (peut prendre 10-30 s à froid)
-      api("/api/galleries?counts=1", { headers: H() }).then(dc => {
-        dc.galleries.forEach(g => {
-          const row = $("gal-" + g.slug);
-          if (row) row.querySelector(".cnt").textContent = g.done + "/" + g.total + " publiées";
-        });
-      }).catch(() => {});
+      // NB : le calcul des compteurs (scraping de 20 galeries) est désactivé au
+      // chargement — il saturait les threads/verrou DB. À réintroduire en
+      // tâche de fond côté serveur.
     } catch (e) { $("gal-state").textContent = "Erreur : " + e.message; }
   }
 

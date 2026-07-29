@@ -87,7 +87,11 @@ def health():
         checks["db"] = "ok"
     except Exception as e:
         checks["db"] = f"error: {e}"
-    checks["tokens"] = token_status().replace("\n", " | ")
+    # NB : PAS d'appel à token_status() ici — il fait 3 appels réseau vers
+    # l'API Graph et /health est sondé en boucle (UptimeRobot). Le détail des
+    # tokens est disponible via /health?tokens=1 à la demande.
+    if request.args.get("tokens") == "1":
+        checks["tokens"] = token_status().replace("\n", " | ")
     # Diagnostic PWA : le code d'accès est-il vu par le serveur ? (jamais la valeur)
     import os as _os2
     _st = _os2.environ.get("STUDIO_TOKEN", "").strip()
