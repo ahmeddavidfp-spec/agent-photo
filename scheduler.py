@@ -43,6 +43,7 @@ _last_scan_attempt: float = 0.0
 
 WEEKLY_REPORT_HOUR = 18  # dimanche à partir de 18h (heure locale)
 GALLERY_SCAN_HOUR = 10   # scan des nouvelles galeries 1×/jour à partir de 10h
+DAILY_REEL_HOUR = 9      # heure locale du reel quotidien (si activé)
 SCAN_RETRY_INTERVAL = 1800  # si site injoignable, re-tenter au plus toutes les 30 min
 
 
@@ -327,6 +328,41 @@ def _run_daily_autopubs() -> None:
         ).start()
 
 
+def _run_daily_reel() -> None:
+    """Reel quotidien (opt-in) : monte un Reel (galerie en rotation, 6 photos
+    homogènes) et l'envoie sur Telegram pour publication manuelle (IG/TikTok/FB).
+    Activé/désactivé via /reel_auto (flag persistant en DB)."""
+    from settings import ALLOWED_CHAT_ID
+    if not ALLOWED_CHAT_ID or get_job_last_run("daily_reel_enabled") != "1":
+        return
+    nowl = now_local()
+    if nowl.hour < DAILY_REEL_HOUR:
+        return
+    today_str = nowl.strftime("%Y-%m-%d")
+    if get_job_last_run("daily_reel") == today_str:
+        return
+    set_job_last_run("daily_reel", today_str)
+    from settings import load_yaml_config
+    galeries = load_yaml_config().get("galeries") or []
+    if not galeries:
+        return
+    try:
+        cur = int(get_job_last_run("daily_reel_cursor") or 0)
+    except (TypeError, ValueError):
+        cur = 0
+    galerie = galeries[cur % len(galeries)]          # rotation : galerie différente/jour
+    set_job_last_run("daily_reel_cursor", str((cur + 1) % len(galeries)))
+
+    def _build():
+        try:
+            from app import _reel_flow
+            _reel_flow(int(ALLOWED_CHAT_ID), galerie)
+        except Exception as e:
+            logger.exception("[daily_reel] crashed galerie=%s: %s", galerie, e)
+
+    threading.Thread(target=_build, daemon=True, name=f"daily-reel-{galerie}").start()
+
+
 _due_posts_running = False
 
 
@@ -354,6 +390,7 @@ def scheduler_loop() -> None:
             _run_daily_token_check()
             _collect_pending_insights()
             _run_daily_autopubs()
+            _run_daily_reel()
             _run_weekly_report()
             _run_gallery_scan()
             # Sauvegarde DB locale → /data (rate-limitée 5 min, thread isolé,

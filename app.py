@@ -327,6 +327,20 @@ def _handle_text(chat_id: int, text: str) -> None:
         send_message(chat_id, plan["text"], reply_markup={"inline_keyboard": kb})
         return
 
+    if text == "/reel_auto":
+        from db import get_job_last_run, set_job_last_run
+        on = get_job_last_run("daily_reel_enabled") == "1"
+        set_job_last_run("daily_reel_enabled", "0" if on else "1")
+        if on:
+            send_message(chat_id, "⏸ *Reel quotidien désactivé.*")
+        else:
+            from scheduler import DAILY_REEL_HOUR
+            send_message(chat_id, f"🎬 *Reel quotidien activé !*\nChaque jour vers "
+                         f"{DAILY_REEL_HOUR}h, je monte un Reel (galerie différente, "
+                         "6 photos homogènes) et je te l'envoie ici — tu le postes sur "
+                         "IG/TikTok/FB avec un son tendance. Renvoie /reel_auto pour arrêter.")
+        return
+
     if text == "/health":
         send_message(chat_id, token_status())
         return
