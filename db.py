@@ -133,61 +133,48 @@ def _ensure_restored() -> None:
 
 
 def _do_backup() -> None:
-    """Snapshot cohérent (local, sous verrou, ms) puis upload vers /data.
+    """Snapshot best-effort qui n'acquiert JAMAIS _DB_LOCK.
 
-    L'upload NFS peut geler : ce thread est jetable, le flag inflight évite
-    l'empilement. `os.replace` rend le remplacement du backup atomique."""
-    global _backup_state, _lock_holder
+    Leçon des incidents du 29/07 : à CHAQUE fois que le backup prenait le verrou,
+    il finissait par le figer (copie locale gelée 32 min ; puis, en version
+    « bornée par un sous-thread », le thread db-backup MOURAIT sous pression en
+    tenant le verrou → bot figé 200 s+). Conclusion : le backup ne doit jamais
+    toucher le verrou de sérialisation.
+
+    Ici : copie du .db HORS verrou (avec journal_mode=MEMORY, le fichier n'est
+    modifié que pendant un commit, très bref), puis VALIDATION du snapshot
+    (`PRAGMA quick_check`). Un snapshot pris pile pendant une écriture (rare et
+    sans gravité) est détecté incohérent et simplement ignoré — jamais poussé
+    par-dessus le bon backup. Même si ce thread meurt, il ne tient AUCUN verrou."""
+    global _backup_state
+    snap = DB_PATH + ".snap"
     try:
-        snap = DB_PATH + ".snap"
-        # La copie du snapshot est LOCALE (/tmp) → normalement quelques ms. Mais
-        # un disque local coincé (pression mémoire, I/O gelée) l'a déjà fait
-        # PENDRE 32 min EN TENANT _DB_LOCK → bot entièrement figé (incident vécu).
-        # On la BORNE : copie dans un thread, verrou relâché au bout de 10s quoi
-        # qu'il arrive. Un snapshot lent est ABANDONNÉ, jamais un gel du bot.
-        # (journal_mode=MEMORY → le .db seul est un instantané complet et
-        # cohérent ; on est sous _DB_LOCK → aucune écriture pendant la copie.)
-        snap_res: dict = {}
-
-        def _snap() -> None:
-            try:
-                shutil.copyfile(DB_PATH, snap)
-                snap_res["ok"] = True
-            except Exception as e:            # noqa: BLE001
-                snap_res["err"] = e
-
-        with _DB_LOCK:
-            _t = time.time()
-            _prev_holder = _lock_holder   # ré-entrance RLock : ne pas écraser
-            _lock_holder = {"thread": threading.current_thread().name,
-                            "since": _t, "where": "_do_backup:snapshot"}
-            try:
-                st = threading.Thread(target=_snap, daemon=True, name="db-snap")
-                st.start()
-                st.join(timeout=10)
-                if not snap_res.get("ok"):
-                    raise RuntimeError(
-                        "copie snapshot locale gelée/KO (>10s) — backup abandonné "
-                        "(verrou relâché, le bot ne gèle pas)")
-                commits_at_snap = _commit_count
-            finally:
-                held = time.time() - _t
-                if held > _SLOW_HOLD_S:
-                    logger.warning("🐌 Snapshot backup a tenu le verrou %.1fs", held)
-                # Restaure le détenteur précédent (au lieu d'écraser à None, ce
-                # qui corrompait le diagnostic quand un connection() externe du
-                # même thread tenait déjà le verrou → « tenu par ? @ ? »).
-                _lock_holder = _prev_holder
+        commits_at_snap = _commit_count      # lu hors verrou (best-effort, ±1 sans gravité)
+        shutil.copyfile(DB_PATH, snap)       # HORS verrou : ne peut plus figer le bot
+        # Validation : le snapshot est-il un SQLite sain ? (détecte une copie
+        # attrapée en plein commit → fichier torn)
+        chk = sqlite3.connect(snap)
+        try:
+            row = chk.execute("PRAGMA quick_check").fetchone()
+        finally:
+            chk.close()
+        if not row or row[0] != "ok":
+            logger.warning("Backup : snapshot incohérent (copié pendant une écriture ?), ignoré.")
+            return
         tmp = BACKUP_DB_PATH + ".tmp"
-        shutil.copyfile(snap, tmp)          # ← seul point qui peut geler (NFS)
-        os.replace(tmp, BACKUP_DB_PATH)
-        os.remove(snap)
+        shutil.copyfile(snap, tmp)           # upload NFS (peut être lent, mais HORS verrou)
+        os.replace(tmp, BACKUP_DB_PATH)      # remplacement atomique
         _backup_state["last_ts"] = time.time()
         _backup_state["last_commit"] = commits_at_snap
         logger.info("💾 Backup DB → %s (commit #%d)", BACKUP_DB_PATH, commits_at_snap)
     except Exception as e:
         logger.warning("Backup DB échoué : %s", e)
     finally:
+        try:
+            if os.path.exists(snap):
+                os.remove(snap)
+        except Exception:
+            pass
         _backup_state["inflight"] = False
 
 
