@@ -57,6 +57,13 @@ _lock_holder = None  # {"thread": str, "since": float, "where": str} ou None
 
 _CONN: Optional[sqlite3.Connection] = None
 
+# Restauration au boot : exécutée UNE seule fois, HORS _DB_LOCK. L'accès NFS
+# (/data) peut durer jusqu'à 60s ; s'il se faisait sous le verrou de
+# sérialisation, toute lecture DB concurrente échouerait en « lock non obtenu
+# en 30s ». Les requêtes concurrentes attendent ici, pas sur _DB_LOCK.
+_restore_done = False
+_restore_lock = threading.Lock()
+
 
 # --- Sauvegarde/restauration vers le disque persistant (/data, NFS fragile) --
 # La DB vive est LOCALE (DB_PATH). Tout accès à /data (qui peut GELER au
@@ -66,6 +73,7 @@ _BACKUPS_ENABLED = True
 _BACKUP_MIN_INTERVAL = 300          # 5 min entre sauvegardes
 _commit_count = 0                   # incrémenté à chaque commit (détection "dirty")
 _backup_state = {"inflight": False, "last_ts": 0.0, "last_commit": -1}
+_backup_gate = threading.Lock()     # rend la garde inflight atomique (fini les doublons)
 
 
 def _restore_at_boot() -> None:
@@ -109,6 +117,21 @@ def _restore_at_boot() -> None:
         logger.info("Aucun backup sur /data — nouvelle DB locale (première installation)")
 
 
+def _ensure_restored() -> None:
+    """Lance _restore_at_boot() exactement une fois, SANS tenir _DB_LOCK.
+    Appelé en tête de connection() : les premières requêtes concurrentes
+    attendent ici (sur _restore_lock), jamais sur le verrou de sérialisation —
+    ce qui évite les « lock non obtenu en 30s » pendant la restauration NFS."""
+    global _restore_done
+    if _restore_done:
+        return
+    with _restore_lock:
+        if _restore_done:
+            return
+        _restore_at_boot()
+        _restore_done = True
+
+
 def _do_backup() -> None:
     """Snapshot cohérent (local, sous verrou, ms) puis upload vers /data.
 
@@ -117,23 +140,44 @@ def _do_backup() -> None:
     global _backup_state, _lock_holder
     try:
         snap = DB_PATH + ".snap"
+        # La copie du snapshot est LOCALE (/tmp) → normalement quelques ms. Mais
+        # un disque local coincé (pression mémoire, I/O gelée) l'a déjà fait
+        # PENDRE 32 min EN TENANT _DB_LOCK → bot entièrement figé (incident vécu).
+        # On la BORNE : copie dans un thread, verrou relâché au bout de 10s quoi
+        # qu'il arrive. Un snapshot lent est ABANDONNÉ, jamais un gel du bot.
+        # (journal_mode=MEMORY → le .db seul est un instantané complet et
+        # cohérent ; on est sous _DB_LOCK → aucune écriture pendant la copie.)
+        snap_res: dict = {}
+
+        def _snap() -> None:
+            try:
+                shutil.copyfile(DB_PATH, snap)
+                snap_res["ok"] = True
+            except Exception as e:            # noqa: BLE001
+                snap_res["err"] = e
+
         with _DB_LOCK:
             _t = time.time()
+            _prev_holder = _lock_holder   # ré-entrance RLock : ne pas écraser
             _lock_holder = {"thread": threading.current_thread().name,
                             "since": _t, "where": "_do_backup:snapshot"}
             try:
-                # Copie FICHIER directe (quelques ms) au lieu de
-                # _get_conn().backup() qui tenait le verrou 70 s+ (copie page à
-                # page sur la connexion partagée). journal_mode=MEMORY → aucun
-                # fichier -wal/-journal ; le .db seul est un instantané complet
-                # et cohérent (on est sous _DB_LOCK → aucune écriture en cours).
-                shutil.copyfile(DB_PATH, snap)
+                st = threading.Thread(target=_snap, daemon=True, name="db-snap")
+                st.start()
+                st.join(timeout=10)
+                if not snap_res.get("ok"):
+                    raise RuntimeError(
+                        "copie snapshot locale gelée/KO (>10s) — backup abandonné "
+                        "(verrou relâché, le bot ne gèle pas)")
                 commits_at_snap = _commit_count
             finally:
-                if time.time() - _t > _SLOW_HOLD_S:
-                    logger.warning("🐌 Snapshot backup a tenu le verrou %.1fs",
-                                   time.time() - _t)
-                _lock_holder = None
+                held = time.time() - _t
+                if held > _SLOW_HOLD_S:
+                    logger.warning("🐌 Snapshot backup a tenu le verrou %.1fs", held)
+                # Restaure le détenteur précédent (au lieu d'écraser à None, ce
+                # qui corrompait le diagnostic quand un connection() externe du
+                # même thread tenait déjà le verrou → « tenu par ? @ ? »).
+                _lock_holder = _prev_holder
         tmp = BACKUP_DB_PATH + ".tmp"
         shutil.copyfile(snap, tmp)          # ← seul point qui peut geler (NFS)
         os.replace(tmp, BACKUP_DB_PATH)
@@ -152,13 +196,18 @@ def maybe_backup_db(force: bool = False) -> None:
 
     Conditions : activé + pas déjà en cours + ≥5 min depuis la dernière +
     au moins un commit depuis. `force=True` ignore l'intervalle (shutdown)."""
-    if not (BACKUP_DB_PATH and _BACKUPS_ENABLED) or _backup_state["inflight"]:
+    if not (BACKUP_DB_PATH and _BACKUPS_ENABLED):
         return
     if not force and time.time() - _backup_state["last_ts"] < _BACKUP_MIN_INTERVAL:
         return
     if _commit_count == _backup_state["last_commit"]:
         return  # rien de nouveau à sauver
-    _backup_state["inflight"] = True
+    # Check-and-set ATOMIQUE : deux appels concurrents (scheduler + shutdown)
+    # passaient tous les deux → deux _do_backup en parallèle (doublons vus).
+    with _backup_gate:
+        if _backup_state["inflight"]:
+            return
+        _backup_state["inflight"] = True
     threading.Thread(target=_do_backup, daemon=True, name="db-backup").start()
 
 
@@ -230,7 +279,8 @@ def _get_conn() -> sqlite3.Connection:
     """
     global _CONN
     if _CONN is None:
-        _restore_at_boot()
+        # NB : la restauration NFS se fait AVANT (via _ensure_restored, hors
+        # verrou) — ici on ne fait que la connexion locale (/tmp, rapide).
         conn = sqlite3.connect(DB_PATH, timeout=3.0, check_same_thread=False)
         conn.execute("PRAGMA busy_timeout=3000")
         conn.execute("PRAGMA synchronous=NORMAL")
@@ -263,12 +313,27 @@ def _caller_frame() -> str:
 @contextmanager
 def connection() -> Iterator[sqlite3.Connection]:
     global _CONN, _lock_holder
+    _ensure_restored()   # restauration NFS bornée, HORS verrou (voir plus haut)
     if not _DB_LOCK.acquire(timeout=_LOCK_TIMEOUT):
         h = _lock_holder
         if h:
             logger.error(
                 "🔒 Verrou DB tenu par [%s] depuis %.1fs — appelant: %s",
                 h["thread"], time.time() - h["since"], h["where"])
+        # Diagnostic ultime : pile de TOUS les threads → montre qui tient
+        # réellement le verrou, même quand _lock_holder est vide (« ? »).
+        try:
+            import sys as _sys
+            frames = _sys._current_frames()
+            for th in threading.enumerate():
+                st = frames.get(th.ident)
+                if st is None:
+                    continue
+                top = traceback.extract_stack(st)[-4:]
+                sig = " → ".join(f"{f.name}:{f.lineno}" for f in top)
+                logger.error("🧵 verrou-diag [%s] %s", th.name, sig)
+        except Exception:
+            pass
         raise sqlite3.OperationalError(
             f"DB serialization lock non obtenu en {_LOCK_TIMEOUT}s "
             f"(tenu par {h['thread'] if h else '?'} @ {h['where'] if h else '?'})"
