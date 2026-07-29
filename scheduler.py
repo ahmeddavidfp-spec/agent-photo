@@ -321,10 +321,30 @@ def _run_daily_autopubs() -> None:
         ).start()
 
 
+_due_posts_running = False
+
+
+def _run_due_posts_bg() -> None:
+    """Publie les posts programmés dans un thread séparé → la boucle du scheduler
+    reste réactive (un lot de posts peut prendre plusieurs minutes : polling IG,
+    Threads, FB, Pinterest). Single-flight : pas de lot chevauchant."""
+    global _due_posts_running
+    try:
+        _process_due_posts()
+    except Exception as e:
+        logger.exception("_process_due_posts crashed: %s", e)
+    finally:
+        _due_posts_running = False
+
+
 def scheduler_loop() -> None:
+    global _due_posts_running
     while True:
         try:
-            _process_due_posts()
+            if not _due_posts_running:
+                _due_posts_running = True   # posé ici (thread scheduler) → pas de course
+                threading.Thread(target=_run_due_posts_bg, daemon=True,
+                                 name="due-posts").start()
             _run_daily_token_check()
             _collect_pending_insights()
             _run_daily_autopubs()

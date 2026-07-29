@@ -493,22 +493,22 @@ def _derive_page_token(user_token: str) -> Optional[str]:
     méthode) : on rend le token utilisateur long-lived, puis /me/accounts
     renvoie le token de Page correspondant à FB_PAGE_ID (long-lived, publie).
 
-    Retourne le token de Page, ou None si `user_token` n'est pas un token
-    utilisateur exploitable (ex. c'est déjà un token de Page)."""
-    try:
-        r = safe_get(f"{FB_API}oauth/access_token", params={
-            "grant_type": "fb_exchange_token",
-            "client_id": IG_APP_ID, "client_secret": IG_CLIENT_SECRET,
-            "fb_exchange_token": user_token,
-        }, timeout=15)
-        long_user = (r.json() or {}).get("access_token") or user_token
-        r = safe_get(f"{FB_API}me/accounts",
-                     params={"access_token": long_user}, timeout=15)
-        for pg in (r.json() or {}).get("data", []):
-            if str(pg.get("id")) == str(FB_PAGE_ID):
-                return pg.get("access_token")
-    except Exception as e:
-        logger.warning("Dérivation token de Page KO : %s", e)
+    Retourne le token de Page, ou None si l'API a répondu mais que la Page n'est
+    pas dans /me/accounts (→ ce n'est probablement pas un token utilisateur, ou
+    c'est déjà un token de Page). LÈVE une exception sur échec RÉSEAU : l'appelant
+    doit alors NE PAS écraser le token stocké (ne pas confondre panne et
+    « pas dérivable »)."""
+    r = safe_get(f"{FB_API}oauth/access_token", params={
+        "grant_type": "fb_exchange_token",
+        "client_id": IG_APP_ID, "client_secret": IG_CLIENT_SECRET,
+        "fb_exchange_token": user_token,
+    }, timeout=15)
+    long_user = (r.json() or {}).get("access_token") or user_token
+    r = safe_get(f"{FB_API}me/accounts",
+                 params={"access_token": long_user}, timeout=15)
+    for pg in (r.json() or {}).get("data", []):
+        if str(pg.get("id")) == str(FB_PAGE_ID):
+            return pg.get("access_token")
     return None
 
 
@@ -522,7 +522,14 @@ def ensure_fb_page_token() -> None:
     """
     if not (FB_PAGE_ACCESS_TOKEN and FB_PAGE_ID and IG_APP_ID and IG_CLIENT_SECRET):
         return
-    page_token = _derive_page_token(FB_PAGE_ACCESS_TOKEN)
+    try:
+        page_token = _derive_page_token(FB_PAGE_ACCESS_TOKEN)
+    except Exception as e:
+        # Échec RÉSEAU : ne PAS écraser le token DB existant avec le token env
+        # (qui peut être un token utilisateur inexploitable). On garde l'existant ;
+        # ça se réparera au prochain boot réussi.
+        logger.warning("FB Page token : dérivation impossible (%s) → token DB inchangé", e)
+        return
     if page_token:
         save_token(FB_PAGE_TOKEN_KEY, page_token)
         logger.info("✅ FB Page token dérivé via /me/accounts et stocké en DB")

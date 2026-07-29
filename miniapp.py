@@ -155,6 +155,35 @@ def _maybe_refresh_counts() -> None:
                          name="counts-refresh").start()
 
 
+# --- Scan de nouvelles galeries EN TÂCHE DE FOND (jamais dans la requête) -----
+_scan_state = {"running": False, "unreachable": False}
+_scan_lock = threading.Lock()
+
+
+def _run_scan() -> None:
+    """Scanne le sitemap (scraping) en arrière-plan. Single-flight."""
+    with _scan_lock:
+        if _scan_state["running"]:
+            return
+        _scan_state["running"] = True
+    try:
+        from discover import SiteUnreachable, scan_new_galleries
+        try:
+            scan_new_galleries()          # enregistre les nouvelles (status='pending')
+            _scan_state["unreachable"] = False
+        except SiteUnreachable:
+            _scan_state["unreachable"] = True
+        except Exception as e:
+            logger.warning("Scan galeries KO : %s", e)
+    finally:
+        _scan_state["running"] = False
+
+
+def _maybe_scan() -> None:
+    if not _scan_state["running"]:
+        threading.Thread(target=_run_scan, daemon=True, name="gallery-scan").start()
+
+
 # =========================================================================
 # PAGE HTML DU STUDIO
 # =========================================================================
@@ -706,20 +735,25 @@ _STUDIO_HTML = r"""<!doctype html>
     } catch (e) { box.innerHTML = "<p class='hint'>Erreur : " + e.message + "</p>"; }
     finally { btn.disabled = false; btn.textContent = label; }
   }
-  async function scanGalleries() {
+  async function scanGalleries(poll) {
     const btn = $("scan-btn"), box = $("scan-results");
-    btn.disabled = true; const label = btn.textContent; btn.textContent = "⏳ Scan en cours…";
-    box.innerHTML = "";
+    if (!poll) {
+      btn.disabled = true; btn.dataset.label = btn.dataset.label || btn.textContent;
+      btn.textContent = "⏳ Scan en cours…";
+      box.innerHTML = "<p class='hint'>⏳ Analyse du site en tâche de fond…</p>";
+    }
     try {
       const d = await api("/api/scan", { method: "POST", headers: HJ(), body: "{}" });
       if (d.unreachable) {
-        box.innerHTML = "<p class='hint'>🌐 Site temporairement injoignable. "
-          + "Réessaie dans quelques minutes.</p>";
+        box.innerHTML = "<p class='hint'>🌐 Site temporairement injoignable. Réessaie dans quelques minutes.</p>";
+      } else if (d.scanning) {
+        setTimeout(function(){ scanGalleries(true); }, 4000);   // encore en cours → re-sonde
+        return;
       } else {
         renderScan(d.pending || []);
       }
     } catch (e) { box.innerHTML = "<p class='hint'>Erreur : " + e.message + "</p>"; }
-    finally { btn.disabled = false; btn.textContent = label; }
+    btn.disabled = false; btn.textContent = btn.dataset.label || "🔍 Scanner les galeries";
   }
   function renderScan(pending) {
     const box = $("scan-results"); box.innerHTML = "";
@@ -1060,19 +1094,15 @@ def register_miniapp(app, hooks) -> None:
 
     @app.route("/api/scan", methods=["POST"])
     def api_scan():
-        """Détecte les nouvelles galeries + renvoie toutes celles en attente."""
+        """Lance le scan EN TÂCHE DE FOND (jamais de scraping dans la requête) et
+        renvoie les galeries en attente + l'état. Le Studio re-sonde tant que
+        `scanning` est vrai."""
         _require_user()
-        from discover import SiteUnreachable, scan_new_galleries
         from db import pending_galleries
         from settings import auto_gallery_assets
         from gallery import fetch_gallery_photos
         config = load_yaml_config()
-        try:
-            scan_new_galleries()  # enregistre les nouvelles (status='pending')
-        except SiteUnreachable:
-            return jsonify({"unreachable": True})
-        except Exception as e:
-            logger.warning("Scan MiniApp KO : %s", e)
+        _maybe_scan()   # non bloquant
         out = []
         for slug in pending_galleries():
             name, _ = auto_gallery_assets(slug)
@@ -1081,7 +1111,8 @@ def register_miniapp(app, hooks) -> None:
             except Exception:
                 count = 0
             out.append({"slug": slug, "name": name, "count": count})
-        return jsonify({"pending": out})
+        return jsonify({"pending": out, "scanning": _scan_state["running"],
+                        "unreachable": _scan_state["unreachable"]})
 
     @app.route("/api/diag", methods=["POST"])
     def api_diag():
