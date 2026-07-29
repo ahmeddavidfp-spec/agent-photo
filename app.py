@@ -887,7 +887,11 @@ def _send_suggestion(chat_id: int, galerie: str) -> None:
         [{"text": "🔄 Autre", "callback_data": f"select_{galerie}"},
          {"text": "⬅️ Menu", "callback_data": "menu"}],
     ]
-    send_photo(chat_id, cover, visible_caption, reply_markup={"inline_keyboard": kb})
+    # Légende Telegram limitée à 1024 car. sur une photo → on tronque l'APERÇU
+    # (la légende complète reste en session pour la publication réelle).
+    preview = visible_caption if len(visible_caption) <= 1000 \
+        else visible_caption[:1000].rstrip() + " […]"
+    send_photo(chat_id, cover, preview, reply_markup={"inline_keyboard": kb})
     logger.info("[suggest] ✅ send_photo done TOTAL %dms", int((time.time() - t0) * 1000))
 
 

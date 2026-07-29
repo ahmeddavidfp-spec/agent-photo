@@ -125,37 +125,46 @@ def _normalize(src_path: str, dst_path: str,
     - fond flou calculé en basse résolution (1/4) puis agrandi : le flou masque
       l'upscale, et l'opération de flou coûte ~1/16 de la mémoire.
     """
-    img = Image.open(src_path)
-    img.draft("RGB", (w, h * 2))   # décodage réduit AVANT chargement des pixels
-    img = img.convert("RGB")
+    img = bg = None
+    try:
+        img = Image.open(src_path)
+        img.draft("RGB", (w, h * 2))   # décodage réduit AVANT chargement des pixels
+        img = img.convert("RGB")
 
-    # Fond flou : calculé en petit (w/4 x h/4) puis agrandi
-    sw, sh = w // 4, h // 4
-    bg = img.copy()
-    scale = max(sw / bg.width, sh / bg.height)
-    bg = bg.resize((max(1, round(bg.width * scale)), max(1, round(bg.height * scale))),
-                   Image.BILINEAR)
-    left = (bg.width - sw) // 2
-    top = (bg.height - sh) // 2
-    bg = bg.crop((left, top, left + sw, top + sh))
-    bg = bg.filter(ImageFilter.GaussianBlur(10))
-    bg = ImageEnhance.Brightness(bg).enhance(0.5)
-    bg = bg.resize((w, h), Image.BILINEAR)  # agrandi (le flou masque l'upscale)
+        # Fond flou : calculé en petit (w/4 x h/4) puis agrandi
+        sw, sh = w // 4, h // 4
+        bg = img.copy()
+        scale = max(sw / bg.width, sh / bg.height)
+        bg = bg.resize((max(1, round(bg.width * scale)), max(1, round(bg.height * scale))),
+                       Image.BILINEAR)
+        left = (bg.width - sw) // 2
+        top = (bg.height - sh) // 2
+        bg = bg.crop((left, top, left + sw, top + sh))
+        bg = bg.filter(ImageFilter.GaussianBlur(10))
+        bg = ImageEnhance.Brightness(bg).enhance(0.5)
+        bg = bg.resize((w, h), Image.BILINEAR)  # agrandi (le flou masque l'upscale)
 
-    # Premier plan : ajuster DANS le cadre (sans crop), marge proportionnelle
-    m = round(_MARGIN * w / W)
-    img.thumbnail((w - 2 * m, h - 2 * m), Image.LANCZOS)
-    bg.paste(img, ((w - img.width) // 2, (h - img.height) // 2))
-    if overlay is not None:
-        base = Image.alpha_composite(bg.convert("RGBA"), overlay)
-        out = base.convert("RGB")
-        out.save(dst_path, "JPEG", quality=88)
-        out.close()
-        base.close()
-    else:
-        bg.save(dst_path, "JPEG", quality=88)
-    img.close()
-    bg.close()
+        # Premier plan : ajuster DANS le cadre (sans crop), marge proportionnelle
+        m = round(_MARGIN * w / W)
+        img.thumbnail((w - 2 * m, h - 2 * m), Image.LANCZOS)
+        bg.paste(img, ((w - img.width) // 2, (h - img.height) // 2))
+        if overlay is not None:
+            base = Image.alpha_composite(bg.convert("RGBA"), overlay)
+            out = base.convert("RGB")
+            out.save(dst_path, "JPEG", quality=88)
+            out.close()
+            base.close()
+        else:
+            bg.save(dst_path, "JPEG", quality=88)
+    finally:
+        # ferme TOUJOURS les handles (fichier ouvert par Image.open), même si une
+        # erreur survient au milieu → pas de fuite de descripteur sur les workers.
+        for _im in (img, bg):
+            try:
+                if _im is not None:
+                    _im.close()
+            except Exception:
+                pass
 
 
 _FFMPEG_PATH: Optional[str] = None
@@ -367,16 +376,26 @@ def build_reel_from_paths(image_paths: list[str], out_path: str,
             sh = (round(h * _MOTION_SRC)) & ~1
             for i, src in enumerate(image_paths):
                 dst = os.path.join(workdir, f"frame_{i:04d}.jpg")
-                _normalize(src, dst, overlay=None, w=sw, h=sh)
-                frames.append(dst)
+                try:
+                    _normalize(src, dst, overlay=None, w=sw, h=sh)
+                    frames.append(dst)
+                except Exception as e:
+                    logger.warning("Reel : photo %d illisible, ignorée (%s)", i, e)
+            if len(frames) < 2:
+                raise ValueError("Trop de photos illisibles pour monter le Reel")
             ov_png = os.path.join(workdir, "signature.png")
             (overlay or Image.new("RGBA", (w, h), (0, 0, 0, 0))).save(ov_png)
             _assemble_motion(frames, ov_png, out_path, sec, w, h, transitions)
         else:
             for i, src in enumerate(image_paths):
                 dst = os.path.join(workdir, f"frame_{i:04d}.jpg")
-                _normalize(src, dst, overlay=overlay, w=w, h=h)
-                frames.append(dst)
+                try:
+                    _normalize(src, dst, overlay=overlay, w=w, h=h)
+                    frames.append(dst)
+                except Exception as e:
+                    logger.warning("Reel : photo %d illisible, ignorée (%s)", i, e)
+            if len(frames) < 2:
+                raise ValueError("Trop de photos illisibles pour monter le Reel")
             _assemble(frames, out_path, sec)
         if overlay is not None:
             overlay.close()

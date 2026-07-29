@@ -123,9 +123,14 @@ def _collect_pending_insights() -> None:
                 metrics = fetch_th_insights(media_id)
             else:
                 continue
-            # Si Meta n'a rien renvoyé, on sauve quand même un dict vide pour
-            # éviter de re-tenter indéfiniment (expired token, post supprimé, etc.)
-            save_metrics(post_id, metrics or {})
+            # metrics is None = échec transitoire (réseau/rate-limit/token) → on
+            # laisse le post EN ATTENTE pour re-tenter à la prochaine passe, au
+            # lieu de figer ses metrics à vide définitivement. Un dict (même {})
+            # = collecte réussie → on sauve (arrête de re-tenter).
+            if metrics is None:
+                logger.info("Insights %s(%s) : échec, re-tentative plus tard", platform, post_id)
+                continue
+            save_metrics(post_id, metrics)
             logger.info("Insights %s(%s) : %s", platform, post_id, metrics)
         except Exception as e:
             logger.warning("Insights %s(%s) failed: %s", platform, post_id, e)

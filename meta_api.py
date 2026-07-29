@@ -706,7 +706,10 @@ def fetch_ig_insights(media_id: str) -> dict:
             if name and values:
                 out[name] = values[0].get("value", 0)
     except Exception as e:
+        # None = ÉCHEC (réseau, rate-limit, token) → à re-tenter plus tard. On
+        # NE renvoie PAS {} : ça figerait les metrics à vide définitivement.
         logger.warning("fetch_ig_insights(%s) failed: %s", media_id, e)
+        return None
     return out
 
 
@@ -735,4 +738,5 @@ def fetch_th_insights(media_id: str) -> dict:
                 out[name] = values[0].get("value", 0)
     except Exception as e:
         logger.warning("fetch_th_insights(%s) failed: %s", media_id, e)
+        return None   # échec → à re-tenter (ne pas figer à vide)
     return out

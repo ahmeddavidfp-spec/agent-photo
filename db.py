@@ -32,19 +32,6 @@ from settings import BACKUP_DB_PATH, DB_PATH, RESTORE_SOURCES
 
 logger = logging.getLogger(__name__)
 
-# Concurrence DB : on s'en remet à SQLite + busy_timeout.
-#
-# Historique : on avait ajouté un threading.RLock() pour sérialiser les
-# accès depuis Python, mais ça créait des deadlocks silencieux (un thread
-# qui tenait le lock pendant un appel réseau faisait timeout tous les
-# autres). SQLite gère très bien la concurrence avec busy_timeout + un
-# seul worker gunicorn : on laisse faire.
-#
-# Règle d'or appliquée partout : JAMAIS d'appel réseau / d'opération
-# lente à l'intérieur d'un `with connection()`. On ouvre, on lit/écrit,
-# on ferme — rien d'autre.
-
-
 # =========================================================================
 # SÉRIALISATION DES ACCÈS DB
 # =========================================================================
