@@ -291,9 +291,15 @@ def connection() -> Iterator[sqlite3.Connection]:
         conn = _get_conn()
         try:
             yield conn
-            conn.commit()
-            global _commit_count
-            _commit_count += 1  # marque la DB "dirty" pour la sauvegarde
+            # Ne marquer "dirty" (→ déclenche une sauvegarde) QUE si une écriture
+            # réelle a eu lieu. Un SELECT ne démarre pas de transaction →
+            # in_transaction False → pas de commit inutile ni de backup pour rien.
+            # (Avant : chaque lecture marquait dirty → backup toutes les 5 min en
+            # boucle dès qu'il y avait du trafic, même sans changement de données.)
+            if conn.in_transaction:
+                conn.commit()
+                global _commit_count
+                _commit_count += 1
         except Exception:
             # Laisse la connexion persistante propre ; si elle est morte
             # (erreur disque), on la jette — la prochaine opération ré-ouvre.
