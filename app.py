@@ -107,6 +107,29 @@ def health():
     return jsonify(checks), status_code
 
 
+@app.route("/netdiag")
+def netdiag():
+    """Diagnostic réseau du scraping (lecture seule) : état proxy + disjoncteur
+    + fetch LIVE depuis le serveur, pour voir POURQUOI les galeries ne chargent
+    pas (proxy inactif ? URL directe ? relais injoignable côté Render ?)."""
+    import time as _t
+    from http_client import proxy_state, circuit_state, safe_get, _apply_proxy
+    config = load_yaml_config()
+    site = config["site_url"].rstrip("/")
+    test_url = site + "/bruxelles"
+    out = {"proxy": proxy_state(), "circuit": circuit_state(),
+           "resolved_url": _apply_proxy(test_url)}
+    t0 = _t.time()
+    try:
+        r = safe_get(test_url, timeout=(8, 25))
+        out["fetch"] = {"status": r.status_code, "ms": int((_t.time() - t0) * 1000),
+                        "bytes": len(r.content)}
+    except Exception as e:
+        out["fetch"] = {"error": type(e).__name__, "detail": str(e)[:200],
+                        "ms": int((_t.time() - t0) * 1000)}
+    return jsonify(out)
+
+
 @app.route("/stats")
 def stats_page():
     """Dashboard HTML : reach / saves / engagement par galerie et post.
