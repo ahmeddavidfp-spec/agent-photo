@@ -604,12 +604,32 @@ def _handle_action(chat_id: int, action: str) -> None:
         if not session:
             send_message(chat_id, "⚠️ **Session expirée.**\nClique 'Menu' pour recommencer.")
             return
+        # Dédupe anti-double-tap : sans ça, 2 clics rapides sur "Publier" lancent
+        # 2 threads → même photo publiée 2× sur IG/TH/FB.
+        key = f"publish:{chat_id}"
+        if not _acquire_inflight(key):
+            logger.info("🚫 Dédupe publish: déjà en cours pour chat=%s", chat_id)
+            return
         send_message(chat_id, "⏳ **Traitement en cours...**")
+
+        def _run_publish(mode, packed, caption):
+            try:
+                _background_publish(chat_id, mode, packed, caption)
+            except Exception as e:   # thread démon : sinon mort silencieuse
+                logger.exception("[publish] crashed: %s", e)
+                try:
+                    send_message(chat_id, f"❌ Erreur publication : {str(e)[:180]}")
+                except Exception:
+                    pass
+            finally:
+                _release_inflight(key)
+
         threading.Thread(
-            target=_background_publish,
-            args=(chat_id, mode_map[action], session[0], session[1]),
-            daemon=True,
+            target=_run_publish,
+            args=(mode_map[action], session[0], session[1]),
+            daemon=True, name=f"publish-{chat_id}",
         ).start()
+        return
 
 
 # =============================================================================
@@ -1286,10 +1306,24 @@ def _launch_reel_from_miniapp(chat_id: int, galerie: str, urls: list) -> None:
 
 def _launch_publish_from_miniapp(chat_id: int, mode: str, packed: str, full: str) -> None:
     """Callback Studio : publication immédiate (réutilise _background_publish)."""
-    threading.Thread(
-        target=_background_publish, args=(chat_id, mode, packed, full),
-        daemon=True, name="miniapp-publish",
-    ).start()
+    key = f"publish:{chat_id}"   # même clé que le chemin Telegram → anti-doublon
+    if not _acquire_inflight(key):
+        send_message(chat_id, "⏳ Une publication est déjà en cours.")
+        return
+
+    def _run():
+        try:
+            _background_publish(chat_id, mode, packed, full)
+        except Exception as e:
+            logger.exception("[miniapp-publish] crashed: %s", e)
+            try:
+                send_message(chat_id, f"❌ Erreur publication : {str(e)[:180]}")
+            except Exception:
+                pass
+        finally:
+            _release_inflight(key)
+
+    threading.Thread(target=_run, daemon=True, name="miniapp-publish").start()
 
 
 def _setup_menu_button() -> None:

@@ -42,27 +42,32 @@ _DEFAULT_HEADERS = {
 }
 
 
-def build_session() -> requests.Session:
-    """Session requests avec retry exponentiel sur les erreurs serveur et réseau."""
+def build_session(retry: "Retry") -> requests.Session:
     session = requests.Session()
     session.headers.update(_DEFAULT_HEADERS)
-    retry = Retry(
-        total=3,
-        connect=1,           # hôte injoignable → 1 seul réessai (échec rapide)
-        read=2,
-        backoff_factor=0.5,  # 0s, 0.5s, 1s
-        status_forcelist=(500, 502, 503, 504, 520, 522, 524),
-        allowed_methods=("HEAD", "GET", "POST"),
-        raise_on_status=False,
-    )
     adapter = HTTPAdapter(max_retries=retry, pool_connections=10, pool_maxsize=10)
     session.mount("https://", adapter)
     session.mount("http://", adapter)
     return session
 
 
-# Session globale réutilisable
-SESSION = build_session()
+# GET/HEAD sont idempotents → on réessaie sur erreurs serveur ET réseau.
+SESSION = build_session(Retry(
+    total=3, connect=1, read=2, backoff_factor=0.5,
+    status_forcelist=(500, 502, 503, 504, 520, 522, 524),
+    allowed_methods=("HEAD", "GET"),
+    raise_on_status=False,
+))
+
+# POST est NON idempotent (publier = créer un post !). On ne réessaie QUE sur
+# échec de CONNEXION (la requête n'a jamais atteint le serveur → sûr de rejouer).
+# JAMAIS sur read-timeout ni 5xx : le serveur a pu traiter la requête et une
+# 2e tentative publierait en double (cas confirmé sur FB /photos, Telegram…).
+_SESSION_POST = build_session(Retry(
+    total=1, connect=1, read=0, status=0,
+    status_forcelist=(), allowed_methods=frozenset(["POST"]),
+    raise_on_status=False,
+))
 
 
 # =============================================================================
@@ -143,10 +148,11 @@ def _request(method: str, url: str, **kwargs):
     url = _apply_proxy(url)          # relais si configuré
     host = _host(url)                # disjoncteur suit l'hôte réellement contacté
     _cb_guard(host)  # lève HostCircuitOpen si le disjoncteur est ouvert
+    sess = _SESSION_POST if method.upper() == "POST" else SESSION
     try:
-        r = SESSION.request(method, url, **kwargs)
-    except requests.exceptions.ConnectionError:
-        _cb_failure(host)   # inclut ConnectTimeout (échec de connexion)
+        r = sess.request(method, url, **kwargs)
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+        _cb_failure(host)   # connexion refusée OU hôte qui accepte puis pend
         raise
     _cb_success(host)
     return r

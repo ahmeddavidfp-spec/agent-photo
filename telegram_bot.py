@@ -17,11 +17,32 @@ def send_message(chat_id: int, text: str, reply_markup: Optional[dict] = None,
     if not TELEGRAM_TOKEN:
         logger.error("TELEGRAM_TOKEN manquant")
         return
-    payload = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
-    if reply_markup:
-        payload["reply_markup"] = reply_markup
+
+    def _post(pm):
+        payload = {"chat_id": chat_id, "text": text}
+        if pm:
+            payload["parse_mode"] = pm
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        return safe_post(_url("sendMessage"), json=payload)
+
     try:
-        safe_post(_url("sendMessage"), json=payload)
+        r = _post(parse_mode)
+        if r.status_code == 200:
+            return
+        body = r.text[:250]
+        # Un 400 avec parse_mode = Markdown mal formé (souvent un _ * [ ` dans un
+        # message d'erreur ou un slug). On NE veut PAS perdre le message → on le
+        # renvoie en texte brut. Sinon le filet de sécurité "❌ Erreur interne"
+        # lui-même pouvait disparaître silencieusement.
+        if r.status_code == 400 and parse_mode:
+            logger.warning("send_message 400 (%s) → retry en texte brut", body)
+            r2 = _post(None)
+            if r2.status_code != 200:
+                logger.error("send_message échec définitif HTTP %s : %s",
+                             r2.status_code, r2.text[:200])
+            return
+        logger.error("send_message HTTP %s : %s", r.status_code, body)
     except Exception as e:
         logger.error("send_message failed: %s", e)
 
@@ -34,7 +55,9 @@ def send_photo(chat_id: int, photo_url: str, caption: str,
     if reply_markup:
         payload["reply_markup"] = reply_markup
     try:
-        safe_post(_url("sendPhoto"), json=payload)
+        r = safe_post(_url("sendPhoto"), json=payload)
+        if r.status_code != 200:   # ex. légende > 1024 car. → ne pas rester muet
+            logger.error("send_photo HTTP %s : %s", r.status_code, r.text[:250])
     except Exception as e:
         logger.error("send_photo failed: %s", e)
 
