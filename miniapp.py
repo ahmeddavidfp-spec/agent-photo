@@ -116,6 +116,11 @@ _COUNTS_TTL = 1800.0            # recalcul au plus toutes les 30 min
 _counts_lock = threading.Lock()
 _counts_running = False
 
+# Un SEUL parsing lourd (BeautifulSoup) à la fois en arrière-plan. Sinon deux
+# threads (scan + compteurs) saturent le GIL et affament le thread qui tient le
+# verrou DB → attentes de 30 s. Ce verrou sérialise le scraping des tâches de fond.
+_HEAVY_LOCK = threading.Lock()
+
 
 def _refresh_counts() -> None:
     """Recalcule les compteurs (scraping) en arrière-plan. Single-flight.
@@ -132,13 +137,14 @@ def _refresh_counts() -> None:
         galeries = config.get("galeries") or []
         sent = already_sent_urls()           # 1 seul accès DB, hors scraping
         data = {}
-        for g in galeries:                   # séquentiel = doux pour le GIL
-            try:
-                done, total = counts_for_gallery(config["site_url"], g, sent)
-                if total:
-                    data[g] = (done, total)
-            except Exception as e:
-                logger.debug("compteur %s KO : %s", g, e)
+        with _HEAVY_LOCK:                    # un seul parsing lourd à la fois
+            for g in galeries:               # séquentiel = doux pour le GIL
+                try:
+                    done, total = counts_for_gallery(config["site_url"], g, sent)
+                    if total:
+                        data[g] = (done, total)
+                except Exception as e:
+                    logger.debug("compteur %s KO : %s", g, e)
         _COUNTS["data"] = data
         _COUNTS["ts"] = time.time()
         logger.info("Compteurs galeries recalculés (%d).", len(data))
@@ -169,7 +175,8 @@ def _run_scan() -> None:
     try:
         from discover import SiteUnreachable, scan_new_galleries
         try:
-            scan_new_galleries()          # enregistre les nouvelles (status='pending')
+            with _HEAVY_LOCK:             # jamais en même temps que le calcul des compteurs
+                scan_new_galleries()      # enregistre les nouvelles (status='pending')
             _scan_state["unreachable"] = False
         except SiteUnreachable:
             _scan_state["unreachable"] = True
