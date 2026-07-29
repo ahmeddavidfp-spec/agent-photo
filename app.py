@@ -317,6 +317,16 @@ def _handle_text(chat_id: int, text: str) -> None:
         send_message(chat_id, build_report())
         return
 
+    if text == "/plan":
+        from planner import build_weekly_plan
+        plan = build_weekly_plan()
+        if not plan:
+            send_message(chat_id, "⚠️ Aucune galerie configurée.")
+            return
+        kb = [[{"text": "✅ Tout programmer", "callback_data": "plan_all"}]]
+        send_message(chat_id, plan["text"], reply_markup={"inline_keyboard": kb})
+        return
+
     if text == "/health":
         send_message(chat_id, token_status())
         return
@@ -458,6 +468,28 @@ def _handle_action(chat_id: int, action: str) -> None:
 
     if action == "autopub_menu":
         _send_autopub_menu(chat_id)
+        return
+
+    if action == "plan_all":
+        key = f"plan:{chat_id}"
+        if not _acquire_inflight(key):
+            send_message(chat_id, "⏳ Programmation du plan déjà en cours.")
+            return
+        send_message(chat_id, "⏳ Je programme le plan (sélection + légendes)…")
+
+        def _run_plan():
+            try:
+                _schedule_plan(chat_id)
+            except Exception as e:
+                logger.exception("[plan] crashed: %s", e)
+                try:
+                    send_message(chat_id, f"❌ Erreur plan : {str(e)[:180]}")
+                except Exception:
+                    pass
+            finally:
+                _release_inflight(key)
+
+        threading.Thread(target=_run_plan, daemon=True, name="plan-schedule").start()
         return
 
     if action.startswith("addgal_"):
@@ -1110,6 +1142,43 @@ def _send_autopub_menu(chat_id: int) -> None:
     )
 
 
+def _schedule_plan(chat_id: int) -> None:
+    """Copilote : programme les publications du plan hebdo (photos + légende IA +
+    créneau). Réutilise pick_unseen + generate_caption + schedule_post."""
+    from planner import build_weekly_plan, _FR_DAYS
+    plan = build_weekly_plan()
+    if not plan or not plan["items"]:
+        send_message(chat_id, "⚠️ Rien à programmer (aucune galerie).")
+        return
+    config = load_yaml_config()
+    car_enabled, car_count = carousel_settings(config)
+    done, skipped = [], []
+    for it in plan["items"]:
+        g, nom = it["galerie"], it["nom"]
+        n = car_count if (it["fmt"] == "carousel" and car_enabled) else 1
+        try:
+            urls = pick_unseen_photos(config["site_url"], g, n)
+        except Exception as e:
+            logger.warning("[plan] pick %s KO: %s", g, e); urls = []
+        if not urls:
+            skipped.append(nom); continue
+        try:
+            caption = generate_caption(urls[0], g, series_urls=urls)
+        except Exception as e:
+            logger.warning("[plan] caption %s KO: %s", g, e); skipped.append(nom); continue
+        run_at = to_utc(it["when"]).replace(tzinfo=None)
+        schedule_post(chat_id, pack_urls(urls), caption, run_at)
+        done.append((nom, it["when"]))
+    lines = ["✅ *Plan programmé !*"] if done else ["⚠️ *Rien n'a pu être programmé.*"]
+    for nom, when in done:
+        lines.append(f"• {nom} — {_FR_DAYS[when.weekday()].capitalize()} {when.day} à {when.hour}h")
+    if skipped:
+        lines.append("\n_Galeries épuisées (toutes les photos déjà publiées) : "
+                     + ", ".join(skipped) + "._")
+    lines.append("\n_Tu peux ajuster/annuler chaque post via « 📅 Programmés »._")
+    send_message(chat_id, "\n".join(lines))
+
+
 def _auto_publish_flow(chat_id: int, galerie: str) -> None:
     """Sélectionne une photo, génère la caption et propose un créneau à confirmer."""
     t0 = time.time()
@@ -1348,9 +1417,28 @@ def _setup_menu_button() -> None:
 
 
 from miniapp import register_miniapp  # noqa: E402  (après les définitions)
+def _launch_plan_from_miniapp(chat_id: int) -> None:
+    """Callback Studio : programme le plan hebdo (comme le bouton Telegram)."""
+    key = f"plan:{chat_id}"
+    if not _acquire_inflight(key):
+        send_message(chat_id, "⏳ Programmation du plan déjà en cours.")
+        return
+
+    def _run():
+        try:
+            _schedule_plan(chat_id)
+        except Exception as e:
+            logger.exception("[miniapp-plan] crashed: %s", e)
+        finally:
+            _release_inflight(key)
+
+    threading.Thread(target=_run, daemon=True, name="miniapp-plan").start()
+
+
 register_miniapp(app, {
     "reel": _launch_reel_from_miniapp,
     "publish": _launch_publish_from_miniapp,
+    "plan": _launch_plan_from_miniapp,
 })
 threading.Thread(target=_setup_menu_button, daemon=True).start()
 

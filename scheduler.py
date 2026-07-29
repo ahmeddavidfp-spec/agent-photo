@@ -65,8 +65,14 @@ def _run_weekly_report() -> None:
         from analyzer import build_report
         send_message(int(ALLOWED_CHAT_ID), build_report())
         logger.info("📬 Rapport hebdo envoyé.")
+        # Copilote : le PLAN de la semaine à venir, avec « Tout programmer ».
+        from planner import build_weekly_plan
+        plan = build_weekly_plan()
+        if plan:
+            kb = {"inline_keyboard": [[{"text": "✅ Tout programmer", "callback_data": "plan_all"}]]}
+            send_message(int(ALLOWED_CHAT_ID), plan["text"], reply_markup=kb)
     except Exception as e:
-        logger.exception("Rapport hebdo échoué : %s", e)
+        logger.exception("Rapport/plan hebdo échoué : %s", e)
 
 
 def _run_gallery_scan() -> None:

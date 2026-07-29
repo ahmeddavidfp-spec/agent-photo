@@ -359,6 +359,9 @@ _STUDIO_HTML = r"""<!doctype html>
   <h1>📊 Stats</h1>
   <button class="btn sec" onclick="loadReport()">📬 Rapport de la semaine</button>
   <div id="report-box" hidden style="white-space:pre-wrap;background:var(--tg-theme-secondary-bg-color,#1c1c1e);border-radius:12px;padding:14px;margin:8px 0;font-size:14px"></div>
+  <button class="btn sec" onclick="loadPlan()">📅 Plan de la semaine</button>
+  <div id="plan-box" hidden style="white-space:pre-wrap;background:var(--tg-theme-secondary-bg-color,#1c1c1e);border-radius:12px;padding:14px;margin:8px 0;font-size:14px"></div>
+  <button id="plan-go" class="btn" hidden onclick="schedulePlan()">✅ Tout programmer</button>
   <div id="stats-state" class="state">Chargement…</div>
   <iframe id="stats-frame" hidden></iframe>
 </section>
@@ -669,6 +672,23 @@ _STUDIO_HTML = r"""<!doctype html>
       // markdown léger → texte lisible
       box.textContent = d.report.replace(/\*/g, "").replace(/_/g, "");
     } catch (e) { box.textContent = "Erreur : " + e.message; }
+  }
+  async function loadPlan() {
+    const box = $("plan-box"); box.hidden = false; box.textContent = "Calcul du plan…";
+    $("plan-go").hidden = true;
+    try {
+      const d = await api("/api/plan", { headers: H() });
+      box.textContent = d.plan.replace(/\*/g, "").replace(/_/g, "");
+      $("plan-go").hidden = false;
+    } catch (e) { box.textContent = "Erreur : " + e.message; }
+  }
+  async function schedulePlan() {
+    const btn = $("plan-go"); btn.disabled = true; const l = btn.textContent; btn.textContent = "⏳ Programmation…";
+    try {
+      await api("/api/plan/schedule", { method: "POST", headers: HJ(), body: "{}" });
+      haptic("success"); toast("📅 Plan en cours de programmation !");
+      btn.textContent = "✅ Programmé";
+    } catch (e) { alert("Échec : " + e.message); btn.disabled = false; btn.textContent = l; }
   }
 
   // ---- État ----
@@ -1059,6 +1079,19 @@ def register_miniapp(app, hooks) -> None:
         _require_user()
         from analyzer import build_report
         return jsonify({"report": build_report()})
+
+    @app.route("/api/plan")
+    def api_plan():
+        _require_user()
+        from planner import build_weekly_plan
+        plan = build_weekly_plan()
+        return jsonify({"plan": plan["text"] if plan else "Aucune galerie configurée."})
+
+    @app.route("/api/plan/schedule", methods=["POST"])
+    def api_plan_schedule():
+        user = _require_user()
+        hooks["plan"](int(user["id"]))   # programme en tâche de fond
+        return jsonify({"ok": True})
 
     @app.route("/api/pinterest/connect-url")
     def api_pinterest_connect_url():
