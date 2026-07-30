@@ -1022,11 +1022,17 @@ def _reel_flow(chat_id: int, galerie: str, urls=None) -> None:
         "📲 Poste-le dans l'app Instagram/TikTok et *ajoute un son tendance* "
         "(c'est ce qui déclenche la portée). La vidéo est muette exprès."
     )
-    send_video(chat_id, path, caption)
+    sent = send_video(chat_id, path, caption)
     try:
         os.remove(path)
     except Exception:
         pass
+    if not sent:
+        # Honnête : le montage a réussi mais l'upload vidéo a échoué (Render →
+        # Telegram capricieux). On le DIT (au lieu de laisser croire que c'est ok).
+        send_message(chat_id, f"⚠️ *Reel {display}* monté, mais l'envoi de la "
+                     "vidéo a échoué (upload coupé). Relance-le depuis le Studio. "
+                     "La description reste prête ci-dessous.")
 
     # Description prête à coller (IG/TikTok) : texte + 5 hashtags + 1 mention,
     # avec bouton(s) de copie directe (copy_text Telegram).
@@ -1038,7 +1044,8 @@ def _reel_flow(chat_id: int, galerie: str, urls=None) -> None:
     if fr:
         # Traduction française — pour ton info perso, à ne pas coller.
         send_message(chat_id, f"🇫🇷 _Traduction (pour toi) :_\n{fr}")
-    logger.info("[reel] ✅ envoyé galerie=%s (%d photos %s)", galerie, len(urls), kind)
+    logger.info("[reel] %s galerie=%s (%d photos %s)",
+                "✅ envoyé" if sent else "⚠️ vidéo NON envoyée", galerie, len(urls), kind)
 
 
 def _copy_keyboard(bloc: str):

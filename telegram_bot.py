@@ -105,25 +105,51 @@ def send_document(chat_id: int, path: str) -> None:
         logger.error("send_document failed: %s", e)
 
 
-def send_video(chat_id: int, path: str, caption: str = "") -> None:
+def send_video(chat_id: int, path: str, caption: str = "") -> bool:
     """Envoie une vidéo (MP4) jouable dans Telegram (ex. un Reel généré).
 
-    On lit le fichier EN MÉMOIRE (bytes) et non comme handle ouvert : sinon les
-    retries urllib3 (connexion Telegram capricieuse depuis Render) ne peuvent pas
-    renvoyer un fichier déjà consommé. Timeout large car l'upload est plus lourd.
+    On lit le fichier EN MÉMOIRE (bytes) : sinon un retry ne peut pas renvoyer un
+    handle déjà consommé. L'upload depuis Render vers Telegram est capricieux
+    (déjà vu : « connection aborted / write timed out » sur un reel 1080p lourd),
+    donc on RÉESSAIE une fois. C'est sûr : un envoi échoué = Telegram n'a pas reçu
+    la vidéo → pas de post public, au pire un doublon dans TON chat privé.
+    Retourne True si la vidéo est partie. Timeout (connect court, write/read long).
     """
     if not TELEGRAM_TOKEN:
-        return
+        return False
     try:
         with open(path, "rb") as f:
             video_bytes = f.read()
-        r = safe_post(
-            _url("sendVideo"),
-            data={"chat_id": chat_id, "caption": caption, "parse_mode": "Markdown"},
-            files={"video": ("reel.mp4", video_bytes, "video/mp4")},
-            timeout=180,
-        )
-        if r.status_code != 200:
-            logger.warning("send_video HTTP %s : %s", r.status_code, r.text[:200])
     except Exception as e:
-        logger.error("send_video failed: %s", e)
+        logger.error("send_video : lecture fichier KO : %s", e)
+        return False
+    mb = len(video_bytes) / (1024 * 1024)
+    last = None
+    for attempt in range(3):          # 1 essai + 2 retries (upload flaky)
+        try:
+            r = safe_post(
+                _url("sendVideo"),
+                data={"chat_id": chat_id, "caption": caption, "parse_mode": "Markdown"},
+                files={"video": ("reel.mp4", video_bytes, "video/mp4")},
+                timeout=(15, 300),
+            )
+            if r.status_code == 200:
+                if attempt:
+                    logger.info("send_video OK à la tentative %d (%.1f Mo)", attempt + 1, mb)
+                return True
+            # 400 lié au Markdown de la légende → renvoie en texte brut
+            if r.status_code == 400 and "parse" in r.text.lower():
+                r = safe_post(
+                    _url("sendVideo"),
+                    data={"chat_id": chat_id, "caption": caption},
+                    files={"video": ("reel.mp4", video_bytes, "video/mp4")},
+                    timeout=(15, 300),
+                )
+                if r.status_code == 200:
+                    return True
+            last = f"HTTP {r.status_code} : {r.text[:150]}"
+        except Exception as e:
+            last = f"{type(e).__name__}: {str(e)[:150]}"
+        logger.warning("send_video tentative %d/3 KO (%.1f Mo) : %s", attempt + 1, mb, last)
+    logger.error("send_video ÉCHEC définitif (%.1f Mo) : %s", mb, last)
+    return False

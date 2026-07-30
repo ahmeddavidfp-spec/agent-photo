@@ -292,7 +292,8 @@ def _assemble(frame_paths: list[str], out_path: str, sec: float = SEC_PER_PHOTO)
         "-framerate", f"1/{sec}",
         "-i", os.path.join(workdir, "seq_%04d.jpg"),
         "-vf", vf,
-        "-c:v", "libx264", "-preset", "veryfast", "-threads", "1",
+        "-c:v", "libx264", "-preset", "veryfast",
+        "-crf", "26", "-maxrate", "4M", "-bufsize", "8M", "-threads", "1",
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         out_path,
     ]
@@ -346,7 +347,8 @@ def _assemble_motion(frame_paths: list[str], overlay_png: str, out_path: str,
         f"fade=t=out:st={total - FADE:.2f}:d={FADE},format=yuv420p[vout]"
     )
     cmd += ["-filter_complex", ";".join(parts), "-map", "[vout]",
-            "-c:v", "libx264", "-preset", "veryfast", "-threads", "1",
+            "-c:v", "libx264", "-preset", "veryfast",
+        "-crf", "26", "-maxrate", "4M", "-bufsize", "8M", "-threads", "1",
             "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_path]
     logger.info("Reel : ffmpeg motion %d segments (%dx%d, transitions=%s) → %s",
                 n, w, h, transitions, out_path)
