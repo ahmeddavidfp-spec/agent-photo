@@ -43,7 +43,7 @@ _last_scan_attempt: float = 0.0
 
 WEEKLY_REPORT_HOUR = 18  # dimanche à partir de 18h (heure locale)
 GALLERY_SCAN_HOUR = 10   # scan des nouvelles galeries 1×/jour à partir de 10h
-DAILY_REEL_HOUR = 9      # heure locale du reel quotidien (si activé)
+DAILY_REEL_HOUR = 18     # heure locale du reel quotidien (actif par défaut)
 SCAN_RETRY_INTERVAL = 1800  # si site injoignable, re-tenter au plus toutes les 30 min
 
 
@@ -341,7 +341,8 @@ def _run_daily_reel() -> None:
     homogènes) et l'envoie sur Telegram pour publication manuelle (IG/TikTok/FB).
     Activé/désactivé via /reel_auto (flag persistant en DB)."""
     from settings import ALLOWED_CHAT_ID
-    if not ALLOWED_CHAT_ID or get_job_last_run("daily_reel_enabled") != "1":
+    # ACTIF PAR DÉFAUT (opt-out) : tourne sauf si explicitement coupé via /reel_auto.
+    if not ALLOWED_CHAT_ID or get_job_last_run("daily_reel_enabled") == "0":
         return
     nowl = now_local()
     if nowl.hour < DAILY_REEL_HOUR:
