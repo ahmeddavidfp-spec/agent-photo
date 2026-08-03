@@ -896,6 +896,12 @@ _STUDIO_HTML = r"""<!doctype html>
   // ---- Service worker (PWA installable, coquille en cache) ----
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(function(){});
+    // Nouvelle version déployée → le nouveau SW prend le contrôle → on recharge
+    // UNE fois pour afficher tout de suite la version fraîche (fini le vieux cache).
+    var _swReloaded = false;
+    navigator.serviceWorker.addEventListener("controllerchange", function () {
+      if (_swReloaded) return; _swReloaded = true; location.reload();
+    });
   }
 
   // ---- Démarrage (deep-link compat : /app?galerie=X&mode=reel) ----
@@ -950,9 +956,13 @@ def register_miniapp(app, hooks) -> None:
     @app.route("/sw.js")            # servi à la racine → portée "/" (couvre /studio + /api)
     def studio_sw():
         sw = (
-            "const C='studio-v1';\n"
+            "const C='studio-v3';\n"
             "self.addEventListener('install',e=>{self.skipWaiting();});\n"
-            "self.addEventListener('activate',e=>{e.waitUntil(self.clients.claim());});\n"
+            "self.addEventListener('activate',e=>{e.waitUntil((async()=>{\n"
+            "  const ks=await caches.keys();\n"
+            "  await Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)));\n"
+            "  await self.clients.claim();\n"
+            "})());});\n"
             "self.addEventListener('fetch',e=>{\n"
             "  const u=new URL(e.request.url);\n"
             "  if(e.request.method!=='GET') return;\n"
