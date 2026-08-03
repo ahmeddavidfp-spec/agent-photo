@@ -26,7 +26,7 @@ _FETCH_PROXY_HOSTS = {
 
 # Timeout par défaut : (connect, read). Le connect court fait échouer VITE quand
 # l'hôte est injoignable (au lieu de bloquer 15-25 s et d'empiler les threads).
-DEFAULT_TIMEOUT = (8, 20)
+DEFAULT_TIMEOUT = (6, 8)
 
 # User-Agent d'un vrai navigateur. Squarespace filtre `python-requests` comme un
 # bot (→ blocage/timeout de l'IP). Une signature navigateur évite le flag.
@@ -51,9 +51,13 @@ def build_session(retry: "Retry") -> requests.Session:
     return session
 
 
-# GET/HEAD sont idempotents → on réessaie sur erreurs serveur ET réseau.
+# GET/HEAD sont idempotents → on réessaie sur erreurs serveur ET réseau. MAIS on
+# limite les retries : un fetch de scrape lent monopolisait un thread jusqu'à ~60s
+# (read 20s × 3 tentatives) et saturait le pool gthread → l'app entière ne
+# répondait plus (même /health). Bornes serrées : ~16s max par fetch, thread
+# libéré vite, la galerie s'affiche sans compteurs plutôt que de tout figer.
 SESSION = build_session(Retry(
-    total=3, connect=1, read=2, backoff_factor=0.5,
+    total=2, connect=1, read=1, backoff_factor=0.3,
     status_forcelist=(500, 502, 503, 504, 520, 522, 524),
     allowed_methods=("HEAD", "GET"),
     raise_on_status=False,
