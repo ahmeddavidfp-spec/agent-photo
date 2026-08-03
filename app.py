@@ -1070,6 +1070,23 @@ def _copy_keyboard(bloc: str):
     return {"inline_keyboard": [row]} if row else None
 
 
+def _looks_french(s: str) -> bool:
+    """Heuristique simple : ce paragraphe est-il en français ? (accents ou mots
+    outils fréquents). Sert à séparer le bloc EN du bloc FR d'une caption bilingue
+    même quand l'IA a inséré des lignes vides à l'intérieur d'un bloc."""
+    import re as _re
+    sl = s.lower()
+    if any(c in sl for c in "éèêàçùïîôâ"):     # accents → quasi-sûr français
+        return True
+    norm = " " + _re.sub(r"[^a-z]+", " ", sl) + " "   # ponctuation → espaces
+    hits = sum(f" {w} " in norm for w in (
+        "le", "la", "les", "un", "une", "des", "du", "et", "dans", "qui",
+        "que", "pour", "avec", "sur", "ce", "cette", "ville", "rue", "se",
+        "elle", "contre", "sans", "sous", "entre", "ou", "mais", "par",
+        "aux", "leur", "ici", "vers", "chez", "quand", "ne", "pas", "plus"))
+    return hits >= 2
+
+
 def _reel_description(reel_urls, galerie: str, display: str, config: dict):
     """Compose la description Reel (couvre TOUTE la sélection). Retourne (bloc, fr).
 
@@ -1084,18 +1101,21 @@ def _reel_description(reel_urls, galerie: str, display: str, config: dict):
     try:
         full = generate_caption(reel_urls[0], galerie, series_urls=reel_urls)
         visible, _alt = split_content(full)
-        # Caption bilingue : paragraphes séparés par une ligne vide.
-        # [0] = bloc EN · [1] = bloc FR · suivants = "Série complète"/hashtags.
-        paras = [p.strip() for p in visible.split("\n\n") if p.strip()]
-        if paras:
-            text = " ".join(paras[0].split("\n")).strip() or text
-        for cand in paras[1:]:
+        # Caption bilingue (bloc EN puis bloc FR), suivie de "Série complète"/
+        # lien/hashtags. On sépare EN et FR PAR LANGUE (pas par position) : l'IA
+        # insère parfois une ligne vide entre le hook et la story, ce qui cassait
+        # l'ancienne extraction (description tronquée + 'traduction' en anglais).
+        en_paras, fr_paras = [], []
+        for cand in [p.strip() for p in visible.split("\n\n") if p.strip()]:
             low = cand.lower()
-            if ("davidmertens" in low or cand.startswith("Série")
-                    or all(w.startswith("#") for w in cand.split())):
-                break  # on a atteint la partie lien/hashtags
-            fr = " ".join(cand.split("\n")).strip()
-            break
+            if (cand.startswith("Série") or "davidmertens" in low
+                    or all(w.startswith(("#", "@")) for w in cand.split())):
+                break  # partie lien/hashtags → on arrête
+            line = " ".join(cand.split("\n")).strip()
+            (fr_paras if _looks_french(cand) else en_paras).append(line)
+        if en_paras:
+            text = " ".join(en_paras).strip() or text
+        fr = " ".join(fr_paras).strip()
     except Exception as e:
         logger.warning("[reel] description IA échouée : %s", e)
 
