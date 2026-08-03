@@ -115,6 +115,30 @@ _COUNTS = {"data": {}, "ts": 0.0}
 _COUNTS_TTL = 1800.0            # recalcul au plus toutes les 30 min
 _counts_lock = threading.Lock()
 _counts_running = False
+_counts_loaded = False         # a-t-on déjà tenté de charger les compteurs persistés ?
+
+
+def _load_persisted_counts() -> None:
+    """Charge les derniers compteurs SAUVÉS EN BASE → `counts=1` répond tout de
+    suite après un redémarrage (fini le 'warming' à vide qui donne l'impression
+    que le Studio est bloqué). Un rafraîchissement de fond met ensuite à jour."""
+    global _counts_loaded
+    if _counts_loaded:
+        return
+    _counts_loaded = True
+    if _COUNTS["data"]:
+        return
+    try:
+        import json as _json
+        from db import get_job_last_run
+        raw = get_job_last_run("counts_cache")
+        if raw:
+            d = _json.loads(raw)
+            _COUNTS["data"] = {k: tuple(v) for k, v in d.items() if v}
+            # ts reste à 0 → un recalcul de fond se déclenchera pour rafraîchir.
+            logger.info("Compteurs persistés chargés (%d galeries).", len(_COUNTS["data"]))
+    except Exception as e:
+        logger.debug("counts_cache load KO : %s", e)
 
 # Un SEUL parsing lourd (BeautifulSoup) à la fois en arrière-plan. Sinon deux
 # threads (scan + compteurs) saturent le GIL et affament le thread qui tient le
@@ -154,6 +178,13 @@ def _refresh_counts() -> None:
                     logger.debug("compteur %s KO : %s", g, e)
         _COUNTS["data"] = data
         _COUNTS["ts"] = time.time()
+        # Persiste en base → survit aux redémarrages (chargé instantanément au boot).
+        try:
+            import json as _json
+            from db import set_job_last_run
+            set_job_last_run("counts_cache", _json.dumps({k: list(v) for k, v in data.items()}))
+        except Exception:
+            pass
         logger.info("Compteurs galeries recalculés (%d).", len(data))
     except Exception as e:
         logger.warning("Refresh compteurs KO : %s", e)
@@ -962,7 +993,8 @@ def register_miniapp(app, hooks) -> None:
         base = [{"slug": g, "nom": _display_name(g, config)} for g in galeries]
         if request.args.get("counts") != "1":
             return jsonify({"galleries": base})
-        _maybe_refresh_counts()              # non bloquant
+        _load_persisted_counts()             # affiche les dernières valeurs connues au boot
+        _maybe_refresh_counts()              # non bloquant (rafraîchit en fond)
         data = _COUNTS["data"]
         for item in base:
             c = data.get(item["slug"])
