@@ -30,6 +30,40 @@ BACKOFF_BASE = 2.0  # 2s, 4s, 8s
 SEPARATOR = "|||"
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 
+# --- Nettoyage du texte généré par l'IA -------------------------------------
+# Demande de David : AUCUN emoji/smiley/icône ni tiret long « — » dans les textes
+# générés. L'IA n'obéit pas toujours au prompt → on garantit en SORTIE (les 2
+# writers passent par _strip_decor). Le tiret-moins normal « - » est conservé
+# (mots composés, hashtags).
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F000-\U0001FAFF"   # emoji, pictogrammes, symboles suppl., drapeaux
+    "\U00002600-\U000027BF"   # symboles divers + dingbats (✅ ☀ ✈ ✂ …)
+    "\U00002B00-\U00002BFF"   # symboles & flèches divers (⭐ …)
+    "\U00002190-\U000021FF"   # flèches
+    "\U0000FE00-\U0000FE0F"   # sélecteurs de variante (présentation emoji)
+    "\U000020E3"              # keycap combinant
+    "\U00002122\U00002139"    # ™ ℹ
+    "]+",
+    flags=re.UNICODE,
+)
+
+
+def _strip_decor(text: Optional[str]) -> Optional[str]:
+    """Retire emojis/smileys/icônes et remplace les tirets longs (— – ― ‒) par une
+    virgule, puis nettoie les espaces/ponctuation en double."""
+    if not text:
+        return text
+    text = re.sub(r"\s*[‒–—―]\s*", ", ", text)  # tirets longs → virgule
+    text = _EMOJI_RE.sub("", text)                                   # emojis → supprimés
+    text = re.sub(r"[ \t]{2,}", " ", text)                           # espaces multiples
+    text = re.sub(r"\s+([,.;:!?…])", r"\1", text)                    # espace avant ponctuation
+    text = re.sub(r",(\s*[,.;:!?…])", r"\1", text)                   # virgule doublée d'une ponctuation
+    text = re.sub(r"(^|\n)[ \t]*,[ \t]*", r"\1", text)              # virgule en début de ligne
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = "\n".join(line.rstrip() for line in text.split("\n"))
+    return text.strip()
+
 # Fallback global si aucun safe_mentions dans config.yaml
 DEFAULT_SAFE_ACCOUNTS = [
     "archdaily", "architecture_hunter", "streetclassics", "urbanromantix",
@@ -326,7 +360,7 @@ def _write_caption_with_claude(prompt: str) -> Optional[str]:
                 getattr(b, "text", "") for b in (msg.content or [])
                 if getattr(b, "type", "") == "text"
             ]
-            out = "\n".join(p for p in parts if p).strip()
+            out = _strip_decor("\n".join(p for p in parts if p).strip())
             if out:
                 logger.info("Pass 2 (Claude) OK : %d chars", len(out))
                 return out
@@ -358,7 +392,7 @@ def _write_caption_with_openai(prompt: str) -> Optional[str]:
                 max_tokens=1500,
                 temperature=0.7,
             )
-            out = (response.choices[0].message.content or "").strip()
+            out = _strip_decor((response.choices[0].message.content or "").strip())
             if out:
                 logger.info("Pass 2 (OpenAI) OK : %d chars", len(out))
                 return out

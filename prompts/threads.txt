@@ -14,6 +14,6 @@ Write ONE Threads post in ENGLISH:
 1. 2 to 4 short sentences drawn from the source material — the observation, not a summary. Rephrase freely, NEVER invent facts (no street names, dates or events that are not in the source).
 2. End with ONE genuine question that invites a personal reply (an experience, an opinion, a memory). Not rhetorical, not generic.
 3. Then the link on its own line: {link}
-4. Total under 450 characters (hard limit). No hashtags. At most one 📍 emoji if natural.
+4. Total under 450 characters (hard limit). No hashtags. NO emojis, smileys, or icons (not even a location pin). NO em dashes or en dashes ("—", "–"): use commas, periods, or parentheses. Plain hyphens ("-") are allowed.
 
 OUTPUT: just the post text. No labels, no quotes, no markdown.

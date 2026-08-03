@@ -34,22 +34,23 @@ HARD RULES
 4. No invented technical specs.
 5. DO NOT copy sentences from the description verbatim. Use it as ground truth, not as text.
 6. End the caption block with the separator "{sep}" on its own line, then the ALT TEXT.
+7. NO emojis, emoticons, or icons ANYWHERE in the output — not even a location pin. NO em dashes or en dashes ("—", "–"): use commas, periods, or parentheses instead. Plain hyphens ("-") are allowed (compound words, hashtags).
 
 DISCOVERABILITY & ENGAGEMENT (this is how the post earns reach — take it seriously)
-- SEO: Instagram search reads the caption TEXT (not the hashtags). Somewhere in the English block, weave — inside a real sentence, NEVER as a keyword list — the genre and, when relevant, the treatment in plain words: "street photography", and "black and white" only if the TREATMENT in the description is B&W (French block: "photographie de rue", "noir et blanc"). The city already appears via 📍 {galerie}. Maximum 2-3 such terms total; if they cannot fit naturally, DROP them rather than force it. Keyword-stuffing that breaks David's voice is worse than no keywords.
+- SEO: Instagram search reads the caption TEXT (not the hashtags). Somewhere in the English block, weave — inside a real sentence, NEVER as a keyword list — the genre and, when relevant, the treatment in plain words: "street photography", and "black and white" only if the TREATMENT in the description is B&W (French block: "photographie de rue", "noir et blanc"). The city already appears by name ({galerie}). Maximum 2-3 such terms total; if they cannot fit naturally, DROP them rather than force it. Keyword-stuffing that breaks David's voice is worse than no keywords.
 - SHAREABILITY: Favor a hook or a closing observation relatable enough that a viewer would send the post to a friend or save it — a small universal truth, a quiet "that's exactly it" moment — over a purely descriptive line. Stay concrete and grounded in THIS image. Never generic, never motivational-poster ("life is a journey", "the soul of the city").
 
 STRUCTURE
 
 [HOOK EN] — 4 to 8 words. Journalistic, dry, or quietly emotional. No question mark. Avoid grand statements.
-[STORY EN] — 1 or 2 short sentences. Anchor the moment in the description. Include 📍 {galerie} somewhere natural.
+[STORY EN] — 1 or 2 short sentences. Anchor the moment in the description. Name the city ({galerie}) somewhere natural, in plain words (no pin, no emoji).
 [QUESTION EN] — OPTIONAL. One short open question that feels genuinely necessary. When you include it, make it invite a real personal reply — a memory, an experience, someone to tag — the kind of thing a viewer actually wants to answer. Skip entirely if it would feel forced or generic ("What stories do these streets hold?" is too generic — omit it).
 
 [HOOK FR] — same rule, natively French (not a word-for-word translation — find the French equivalent mood).
 [STORY FR] — 1 or 2 short sentences, native-sounding French.
 [QUESTION FR] — OPTIONAL. Same rule as English — skip if it would feel contrived.
 
-Série complète 👇
+Série complète :
 {display_link}
 (cc @mention1 @mention2)  ← pick 0 or 1 account from the safe list ONLY if they are genuinely relevant to this specific image. If none fit, omit this line entirely.
 [HASHTAGS] — copy 4 to 6 tags verbatim from the curated list above. Choose the most specific to THIS image. Put them all on one line at the very end.

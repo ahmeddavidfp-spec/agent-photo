@@ -15,6 +15,6 @@ TÂCHE
 1. Un récit de 2 à 4 courts paragraphes (400 à 800 caractères au total) : l'histoire derrière l'image — le moment, la scène, ce que David a remarqué. Développe librement le TON, mais n'invente AUCUN fait précis (pas de noms de rues, d'heures, d'anecdotes absents de la matière première).
 2. Termine par une question douce qui invite les gens à commenter (un souvenir, leur propre regard sur la ville).
 3. Puis le lien sur sa propre ligne : {link}
-4. AUCUN hashtag. Un seul émoji 📍 maximum, si naturel.
+4. AUCUN hashtag. AUCUN emoji, smiley ou icône (pas même un pin de localisation). AUCUN tiret long ("—", "–") : virgules, points ou parenthèses à la place. Le tiret-moins normal ("-") est permis.
 
 SORTIE : uniquement le texte de la publication. Pas d'étiquettes, pas de guillemets, pas de markdown.
