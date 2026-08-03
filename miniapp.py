@@ -174,14 +174,22 @@ def _run_scan() -> None:
         _scan_state["running"] = True
     try:
         from discover import SiteUnreachable, scan_new_galleries
+        # _HEAVY_LOCK évite un scan ET un calcul de compteurs LOURDS en même temps.
+        # Mais on ne l'ATTEND PAS indéfiniment : si les compteurs tournent (lents),
+        # le scan restait bloqué plusieurs minutes ('scanning' sans fin, bouton en
+        # erreur). On tente ~3 s ; sinon on scanne quand même (quelques pages =
+        # charge modérée), pour que le scan se termine TOUJOURS.
+        got = _HEAVY_LOCK.acquire(timeout=3)
         try:
-            with _HEAVY_LOCK:             # jamais en même temps que le calcul des compteurs
-                scan_new_galleries()      # enregistre les nouvelles (status='pending')
+            scan_new_galleries()          # enregistre les nouvelles (status='pending')
             _scan_state["unreachable"] = False
         except SiteUnreachable:
             _scan_state["unreachable"] = True
         except Exception as e:
             logger.warning("Scan galeries KO : %s", e)
+        finally:
+            if got:
+                _HEAVY_LOCK.release()
     finally:
         _scan_state["running"] = False
 

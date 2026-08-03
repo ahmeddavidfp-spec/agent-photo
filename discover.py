@@ -11,6 +11,7 @@ vraie galerie) ; l'utilisateur peut ensuite 'ignorer' une galerie proposée.
 """
 import logging
 import re
+import time
 from urllib.parse import urlparse
 
 from http_client import safe_get
@@ -55,7 +56,13 @@ def scan_new_galleries() -> list:
         logger.info("Scan galeries : %d candidate(s) à vérifier : %s",
                     len(candidates), candidates)
     found = []
-    for slug in candidates:
+    t0 = time.monotonic()
+    BUDGET_S = 45   # borne : le scan se termine TOUJOURS ; le reste passe au prochain
+    for i, slug in enumerate(candidates):
+        if time.monotonic() - t0 > BUDGET_S:
+            logger.info("Scan galeries : budget %ds atteint, %d candidate(s) reportée(s).",
+                        BUDGET_S, len(candidates) - i)
+            break
         try:
             n = len(fetch_gallery_photos(site, slug, force_refresh=True))
         except Exception:
