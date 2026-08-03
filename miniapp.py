@@ -143,6 +143,13 @@ def _refresh_counts() -> None:
                     done, total = counts_for_gallery(config["site_url"], g, sent)
                     if total:
                         data[g] = (done, total)
+                        # Publie AU FUR ET À MESURE : dès la 1re galerie comptée,
+                        # `warming` passe à false et les badges s'affichent
+                        # progressivement — au lieu de rester bloqués tant que les
+                        # 22 galeries ne sont pas TOUTES scrapées (plusieurs min si
+                        # le relais est lent). Le Studio n'apparaît plus figé.
+                        _COUNTS["data"] = dict(data)
+                        _COUNTS["ts"] = time.time()
                 except Exception as e:
                     logger.debug("compteur %s KO : %s", g, e)
         _COUNTS["data"] = data
