@@ -1242,20 +1242,21 @@ def register_miniapp(app, hooks) -> None:
             return jsonify({"ok": False, "msg": "Aucune photo sélectionnée."})
         if not _pin.connected():
             return jsonify({"ok": False, "msg": "Pinterest non connecté (onglet État)."})
-        # pin_photos déduit le tableau via le lien davidmertens.com de la légende.
+        # pin déduit le tableau via le lien davidmertens.com de la légende → on
+        # s'assure qu'il est présent (titre/description SEO générés depuis la légende).
         if "davidmertens.com" not in caption and galerie:
             caption = (caption + f"\nhttps://davidmertens.com/{galerie}").strip()
-        ok, total = _pin.pin_photos(urls, caption)
-        if ok > 0:
+        ok, total, env = _pin.pin_best_effort(urls, caption)
+        if ok > 0 and env == "production":
             return jsonify({"ok": True,
-                            "msg": f"✅ {ok}/{total} épingle(s) créée(s) sur ton Pinterest !"})
-        # Production refusée (Trial) → on tente le sandbox si connecté.
-        if _pin.sandbox_connected():
-            ok_sb, msg_sb = _pin.test_sandbox(urls[0])
-            return jsonify({"ok": ok_sb, "msg": "⚠️ Production bloquée (accès Trial). " + msg_sb})
+                            "msg": f"✅ {ok}/{total} épingle(s) créée(s) sur ton Pinterest (production) !"})
+        if ok > 0 and env == "sandbox":
+            return jsonify({"ok": True,
+                            "msg": f"✅ {ok}/{total} épingle(s) créée(s) — via SANDBOX (production "
+                                   "bloquée en Trial), avec le vrai titre et la vraie description."})
         return jsonify({"ok": False,
-                        "msg": "❌ Production refusée (le Trial ne permet pas d'épingler en réel). "
-                               "Connecte le SANDBOX (onglet État) pour tester, ou attends l'accès Standard."})
+                        "msg": "❌ Aucune épingle créée. Vérifie que Pinterest (et le Sandbox) est "
+                               "connecté dans l'onglet État, ou attends l'accès Standard."})
 
     @app.route("/api/pinterest/test", methods=["POST"])
     def api_pinterest_test():

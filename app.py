@@ -1379,9 +1379,9 @@ def _background_publish(chat_id: int, mode: str, image_url: str, caption: str) -
         # entière → on épingle dès qu'on publie des photos et que le compte est lié.
         try:
             import pinterest
-            if pinterest.connected():
-                ok_pin, tot_pin = pinterest.pin_photos(urls or [cover], visible_caption)
-                logger.info("Pinterest : %d/%d épingles (mode=%s)", ok_pin, tot_pin, mode)
+            ok_pin, tot_pin, env = pinterest.pin_best_effort(urls or [cover], visible_caption)
+            if tot_pin:
+                logger.info("Pinterest : %d/%d épingles (%s, mode=%s)", ok_pin, tot_pin, env, mode)
         except Exception as e:
             logger.warning("Pinterest KO : %s", e)
     except Exception as e:

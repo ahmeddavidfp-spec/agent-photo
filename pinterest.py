@@ -173,21 +173,24 @@ def exchange_code(code: str, redirect_uri: str, sandbox: bool = False) -> bool:
 # TABLEAUX & ÉPINGLES
 # =========================================================================
 
-def _get_or_create_board(display_name: str) -> Optional[str]:
-    """Retourne l'id du tableau 'Street <Ville>' (créé si absent)."""
-    name = f"Street {display_name}"
-    if name in _BOARDS_CACHE:
-        return _BOARDS_CACHE[name]
-    h = _headers()
+def _get_or_create_board(display_name: str, base: str = API,
+                         headers: Optional[dict] = None) -> Optional[str]:
+    """Retourne l'id du tableau 'Street <Ville>' (créé si absent). `base`/`headers`
+    permettent de viser la PRODUCTION ou le SANDBOX (cache indexé par base)."""
+    h = headers or _headers()
     if not h:
         return None
+    name = f"Street {display_name}"
+    ck = (base, name)
+    if ck in _BOARDS_CACHE:
+        return _BOARDS_CACHE[ck]
     try:
-        r = safe_get(f"{API}/boards", headers=h, params={"page_size": 100}, timeout=15)
+        r = safe_get(f"{base}/boards", headers=h, params={"page_size": 100}, timeout=15)
         for b in (r.json() or {}).get("items", []):
-            _BOARDS_CACHE[b.get("name", "")] = b.get("id")
-        if name in _BOARDS_CACHE:
-            return _BOARDS_CACHE[name]
-        r = safe_post(f"{API}/boards", headers=h, json={
+            _BOARDS_CACHE[(base, b.get("name", ""))] = b.get("id")
+        if ck in _BOARDS_CACHE:
+            return _BOARDS_CACHE[ck]
+        r = safe_post(f"{base}/boards", headers=h, json={
             "name": name,
             "description": f"Street photography in {display_name} by David Mertens "
                            f"— fine art prints at davidmertens.com",
@@ -195,7 +198,7 @@ def _get_or_create_board(display_name: str) -> Optional[str]:
         }, timeout=15)
         data = r.json() or {}
         if data.get("id"):
-            _BOARDS_CACHE[name] = data["id"]
+            _BOARDS_CACHE[ck] = data["id"]
             logger.info("Pinterest : tableau créé « %s »", name)
             return data["id"]
         logger.warning("Pinterest : création tableau KO : %s", str(data)[:150])
@@ -227,12 +230,20 @@ def _pin_meta(ig_caption: str, display_name: str, link: str) -> Tuple[str, str]:
     )
 
 
-def pin_photos(image_urls: List[str], ig_caption: str) -> Tuple[int, int]:
-    """Épingle jusqu'à 4 photos d'une publication. Retourne (ok, tentées).
-
-    La galerie est déduite du LIEN présent dans la légende (davidmertens.com/x)
-    — robuste, indépendant des URLs CDN. Sans lien → tableau générique."""
-    if not connected():
+def pin_photos(image_urls: List[str], ig_caption: str,
+               sandbox: bool = False) -> Tuple[int, int]:
+    """Épingle jusqu'à 4 photos avec le VRAI titre/description SEO (via _pin_meta)
+    et le tableau par ville. `sandbox=True` → vise api-sandbox avec le jeton
+    sandbox (production bloquée en Trial). La galerie est déduite du LIEN
+    davidmertens.com/x présent dans la légende. Retourne (ok, tentées)."""
+    base = API_SANDBOX if sandbox else API
+    if sandbox:
+        tok = _sandbox_token()
+        h = ({"Authorization": f"Bearer {tok}", "Content-Type": "application/json"}
+             if tok else None)
+    else:
+        h = _headers() if connected() else None
+    if not h:
         return 0, 0
     urls = [u for u in (image_urls or []) if u][:_MAX_PINS_PER_POST]
     if not urls:
@@ -243,17 +254,15 @@ def pin_photos(image_urls: List[str], ig_caption: str) -> Tuple[int, int]:
     names = (load_yaml_config().get("gallery_names") or {})
     display_name = names.get(slug) or (slug.replace("-", " ").title() if slug else "Photography")
     link = f"https://davidmertens.com/{slug}" if slug else "https://davidmertens.com"
-    board_id = _get_or_create_board(display_name)
+    board_id = _get_or_create_board(display_name, base=base, headers=h)
     if not board_id:
         return 0, len(urls)
     title, desc = _pin_meta(ig_caption, display_name, link)
-    h = _headers()
-    if not h:
-        return 0, len(urls)
+    tag = " SANDBOX" if sandbox else ""
     ok = 0
     for u in urls:
         try:
-            r = safe_post(f"{API}/pins", headers=h, json={
+            r = safe_post(f"{base}/pins", headers=h, json={
                 "board_id": board_id,
                 "title": title,
                 "description": desc,
@@ -264,11 +273,25 @@ def pin_photos(image_urls: List[str], ig_caption: str) -> Tuple[int, int]:
             if r.status_code in (200, 201) and (r.json() or {}).get("id"):
                 ok += 1
             else:
-                logger.warning("Pinterest : pin KO (%s) : %s", u[:60], r.text[:150])
+                logger.warning("Pinterest%s : pin KO (%s) : %s", tag, u[:60], r.text[:150])
         except Exception as e:
-            logger.warning("Pinterest : pin exception : %s", e)
-    logger.info("Pinterest : %d/%d épingles créées → « Street %s »", ok, len(urls), display_name)
+            logger.warning("Pinterest%s : pin exception : %s", tag, e)
+    logger.info("Pinterest%s : %d/%d épingles créées → « Street %s »", tag, ok, len(urls), display_name)
     return ok, len(urls)
+
+
+def pin_best_effort(image_urls: List[str], ig_caption: str) -> Tuple[int, int, str]:
+    """Épingle en PRODUCTION d'abord (marchera dès l'accès Standard obtenu) ; si le
+    Trial bloque (0 épingle), repli automatique sur le SANDBOX. Titre/description
+    SEO identiques dans les deux cas. Retourne (ok, tentées, environnement)."""
+    if connected():
+        ok, total = pin_photos(image_urls, ig_caption, sandbox=False)
+        if ok > 0:
+            return ok, total, "production"
+    if sandbox_connected():
+        ok, total = pin_photos(image_urls, ig_caption, sandbox=True)
+        return ok, total, "sandbox"
+    return 0, 0, "aucun"
 
 
 def diagnose(sample_url: str = "") -> str:

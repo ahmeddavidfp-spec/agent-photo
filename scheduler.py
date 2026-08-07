@@ -212,10 +212,10 @@ def _process_due_posts() -> None:
                 logger.warning("Publication Facebook KO : %s", e)
 
         # Épinglage Pinterest (SEO, tableau par ville) — best effort
+        # (production d'abord ; repli sandbox si le Trial bloque)
         try:
             import pinterest
-            if pinterest.connected():
-                pinterest.pin_photos(urls or [cover], visible_caption)
+            pinterest.pin_best_effort(urls or [cover], visible_caption)
         except Exception as e:
             logger.warning("Pinterest KO : %s", e)
 
