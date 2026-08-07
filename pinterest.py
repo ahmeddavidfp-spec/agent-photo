@@ -268,17 +268,9 @@ def diagnose(sample_url: str = "") -> str:
     if not h:
         return "pas de token Pinterest"
     parts = []
-    board_id = None
-    try:
-        r = safe_post(f"{API}/boards", headers=h,
-                      json={"name": "Street Test", "privacy": "PUBLIC"}, timeout=15)
-        parts.append(f"tableau: HTTP {r.status_code}")
-        if r.status_code in (200, 201):
-            board_id = (r.json() or {}).get("id")
-        else:
-            parts.append(str(r.text)[:180])
-    except Exception as e:
-        parts.append(f"tableau KO: {str(e)[:120]}")
+    # get-or-create : réutilise le tableau existant (gère le doublon "Street Test")
+    board_id = _get_or_create_board("Test")
+    parts.append("tableau: OK" if board_id else "tableau: ÉCHEC (création/lecture)")
     if board_id and sample_url:
         pin_url = sample_url.split("?")[0] + "?format=1500w"
         try:
