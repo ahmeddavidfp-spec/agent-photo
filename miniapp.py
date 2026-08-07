@@ -348,6 +348,40 @@ _STUDIO_HTML = r"""<!doctype html>
     font-size: 14px; font-weight: 600; box-shadow: 0 10px 34px rgba(0,0,0,.45);
     opacity: 0; pointer-events: none; transition: .28s ease; }
   #toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  /* ===== Paramètres : thème clair dédié, moderne, sans icônes ===== */
+  #v-status { background: #f4f5f7; color: #1c1d1f;
+    min-height: 100vh; padding: 18px 14px 96px; }
+  #v-status .s-h1 { font-size: 24px; font-weight: 700; letter-spacing: -.2px;
+    margin: 4px 2px 4px; color: #16171a; }
+  #v-status .s-sub { font-size: 13.5px; color: #6b6f76; margin: 0 2px 20px; }
+  #v-status .s-card { background: #fff; border: 1px solid #e7e9ee; border-radius: 18px;
+    padding: 18px 16px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(16,24,40,.05); }
+  #v-status .s-card h2 { font-size: 16px; font-weight: 700; margin: 0 0 3px; color: #16171a; }
+  #v-status .s-desc { font-size: 13px; color: #6b6f76; margin: 0 0 14px; line-height: 1.45; }
+  #v-status .s-line { display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 12px 0; border-top: 1px solid #f0f1f4; }
+  #v-status .s-line:first-child { border-top: 0; padding-top: 2px; }
+  #v-status .s-label { font-size: 14.5px; font-weight: 600; color: #22242a; }
+  #v-status .s-chip { font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 999px;
+    white-space: nowrap; letter-spacing: .1px; }
+  #v-status .s-chip.ok  { background: #e6f6ec; color: #0f7a3d; }
+  #v-status .s-chip.warn{ background: #fdf1e0; color: #a95e07; }
+  #v-status .s-chip.bad { background: #fdeae9; color: #bd352b; }
+  #v-status .s-chip.off { background: #eef0f3; color: #6b6f76; }
+  #v-status .s-btn { display: block; width: 100%; border: 0; border-radius: 13px; padding: 13px;
+    font-size: 15px; font-weight: 600; margin-top: 10px; cursor: pointer;
+    background: #2f6bff; color: #fff; }
+  #v-status .s-btn.ghost   { background: #fff; color: #2f6bff; border: 1.5px solid #cdd9ff; }
+  #v-status .s-btn.neutral { background: #f3f4f6; color: #22242a; border: 1px solid #e7e9ee; }
+  #v-status .s-btn:disabled { opacity: .5; }
+  #v-status .s-mini { border: 1.5px solid #d6dae1; background: #fff; color: #2f6bff;
+    font-size: 13px; font-weight: 700; padding: 7px 15px; border-radius: 10px; cursor: pointer; }
+  #v-status .s-mini.on { background: #2f6bff; color: #fff; border-color: #2f6bff; }
+  #v-status .s-actions { display: flex; gap: 8px; }
+  #v-status .s-note { font-size: 13px; color: #6b6f76; white-space: pre-wrap; line-height: 1.5;
+    margin: 8px 0 0; }
+  #v-status .hint { color: #6b6f76; }
 </style></head><body>
 <header class="appbar">APP Studio Agent</header>
 <button id="pwa-mainbtn" class="pwa-mainbtn" hidden></button>
@@ -414,26 +448,41 @@ _STUDIO_HTML = r"""<!doctype html>
 </section>
 
 <section id="v-status" hidden>
-  <h1>⚙️ État</h1>
-  <div id="status-tokens"></div>
-  <h1 style="margin-top:18px">🩺 Connexion au site</h1>
-  <p class="hint">Vérifie si le serveur arrive à joindre ton site (utile en cas de blocage).</p>
-  <button class="btn sec" id="diag-btn" onclick="runDiag()">🩺 Tester la connexion</button>
-  <div id="diag-results"></div>
-  <h1 style="margin-top:18px">🆕 Détection de galeries</h1>
-  <p class="hint">Cherche sur ton site les nouvelles galeries à ajouter automatiquement.</p>
-  <button class="btn sec" id="scan-btn" onclick="scanGalleries()">🔍 Scanner les galeries</button>
-  <div id="scan-results"></div>
-  <h1 style="margin-top:18px">🔄 Auto-pub quotidien</h1>
-  <p class="hint">Une seule galerie active à la fois (publiée chaque jour à la meilleure heure).</p>
-  <div id="status-daily" class="state">Chargement…</div>
+  <div class="s-h1">Paramètres</div>
+  <p class="s-sub">Comptes, connexion au site et publication automatique.</p>
+
+  <div class="s-card">
+    <h2>Comptes connectés</h2>
+    <p class="s-desc">Jetons d'accès aux réseaux et leur durée de validité.</p>
+    <div id="status-tokens"><div class="s-note">Chargement…</div></div>
+  </div>
+
+  <div class="s-card">
+    <h2>Connexion au site</h2>
+    <p class="s-desc">Vérifie si le serveur arrive à joindre ton site, utile en cas de blocage.</p>
+    <button class="s-btn neutral" id="diag-btn" onclick="runDiag()">Tester la connexion</button>
+    <div id="diag-results"></div>
+  </div>
+
+  <div class="s-card">
+    <h2>Détection de galeries</h2>
+    <p class="s-desc">Cherche sur ton site les nouvelles galeries à ajouter automatiquement.</p>
+    <button class="s-btn neutral" id="scan-btn" onclick="scanGalleries()">Scanner les galeries</button>
+    <div id="scan-results"></div>
+  </div>
+
+  <div class="s-card">
+    <h2>Publication quotidienne</h2>
+    <p class="s-desc">Une seule galerie active à la fois, publiée chaque jour à la meilleure heure.</p>
+    <div id="status-daily" class="s-note">Chargement…</div>
+  </div>
 </section>
 
 <nav>
   <button id="t-gal" class="on" onclick="tab('v-gal')"><span class="ico">🖼</span>Galeries</button>
   <button id="t-sched" onclick="tab('v-sched');loadSched()"><span class="ico">📅</span>Programmés</button>
   <button id="t-stats" onclick="tab('v-stats');loadStats()"><span class="ico">📊</span>Stats</button>
-  <button id="t-status" onclick="tab('v-status');loadStatus()"><span class="ico">⚙️</span>État</button>
+  <button id="t-status" onclick="tab('v-status');loadStatus()"><span class="ico">⚙︎</span>Paramètres</button>
 </nav>
 
 <script>
@@ -780,42 +829,52 @@ _STUDIO_HTML = r"""<!doctype html>
     } catch (e) { alert("Échec : " + e.message); btn.disabled = false; btn.textContent = l; }
   }
 
-  // ---- État ----
+  // ---- Paramètres ----
+  // Pastille d'état colorée pour un jeton d'accès (jours restants).
+  function tokChip(days, configured) {
+    if (configured === false) return "<span class='s-chip off'>non configuré</span>";
+    if (days === null || days === undefined) return "<span class='s-chip off'>inconnu</span>";
+    if (days >= 9999) return "<span class='s-chip ok'>illimité</span>";
+    const cls = days > 14 ? "ok" : days >= 5 ? "warn" : "bad";
+    return "<span class='s-chip " + cls + "'>" + days + " j</span>";
+  }
   async function loadStatus() {
     try {
       const d = await api("/api/status", { headers: H() });
-      let pinHtml = "";
+      let h = "";
+      h += "<div class='s-line'><span class='s-label'>Instagram</span>" + tokChip(d.ig_days) + "</div>";
+      h += "<div class='s-line'><span class='s-label'>Threads</span>" + tokChip(d.th_days) + "</div>";
+      h += "<div class='s-line'><span class='s-label'>Facebook</span>"
+         + tokChip(d.facebook ? d.fb_days : null, d.facebook ? undefined : false) + "</div>";
+
+      let pinChip, pinBtns = "";
       if (d.pinterest && d.pinterest.connected) {
-        pinHtml = "<div class='row'><b>📌 Pinterest</b><span class='cnt'>✅ connecté</span></div>"
-          + "<button class='btn sec' onclick='testPinterest(false)'>📌 Tester Pinterest seul (sans IG/FB)</button>"
+        pinChip = "<span class='s-chip ok'>connecté</span>";
+        pinBtns = "<button class='s-btn ghost' onclick='testPinterest(false)'>Tester Pinterest seul</button>"
           + (d.pinterest.sandbox
-              ? "<button class='btn sec' onclick='testPinterest(true)'>🎬 Tester en SANDBOX (pour la démo)</button>"
-              : "<button class='btn sec' onclick='connectPinterest(true)'>🎬 Connecter le SANDBOX (pour filmer la démo)</button>")
-          + "<div id='pin-test-result' class='hint' style='white-space:pre-wrap'></div>";
+              ? "<button class='s-btn ghost' onclick='testPinterest(true)'>Tester en sandbox (démo)</button>"
+              : "<button class='s-btn ghost' onclick='connectPinterest(true)'>Connecter le sandbox (démo)</button>")
+          + "<div id='pin-test-result' class='s-note'></div>";
       } else if (d.pinterest && d.pinterest.configured) {
-        pinHtml = "<button class='btn' onclick='connectPinterest()'>📌 Connecter Pinterest</button>";
+        pinChip = "<span class='s-chip off'>à connecter</span>";
+        pinBtns = "<button class='s-btn' onclick='connectPinterest()'>Connecter Pinterest</button>";
       } else {
-        pinHtml = "<div class='row'><b>📌 Pinterest</b><span class='cnt'>app non configurée</span></div>";
+        pinChip = "<span class='s-chip off'>non configuré</span>";
       }
-      $("status-tokens").innerHTML =
-        "<div class='row'><b>📸 Token Instagram</b><span class='cnt'>" +
-          (d.ig_days === null ? "?" : d.ig_days >= 9999 ? "∞ (sans expiration)" : d.ig_days + " jours") + "</span></div>" +
-        "<div class='row'><b>🧵 Token Threads</b><span class='cnt'>" +
-          (d.th_days === null ? "?" : d.th_days >= 9999 ? "∞ (sans expiration)" : d.th_days + " jours") + "</span></div>" +
-        "<div class='row'><b>📘 Token Facebook</b><span class='cnt'>" +
-          (!d.facebook ? "non configurée" :
-           d.fb_days === null ? "?" :
-           d.fb_days >= 9999 ? "∞ (sans expiration)" : d.fb_days + " jours") + "</span></div>" +
-        pinHtml +
-        "<button class='btn sec' onclick=\"renew('IG')\">🔄 Renouveler IG</button>" +
-        "<button class='btn sec' onclick=\"renew('TH')\">🔄 Renouveler Threads</button>" +
-        (d.facebook ? "<button class='btn sec' onclick=\"renew('FB')\">🔄 Renouveler FB</button>" : "");
-      const dl = $("status-daily"); dl.classList.remove("state"); dl.innerHTML = "";
+      h += "<div class='s-line'><span class='s-label'>Pinterest</span>" + pinChip + "</div>";
+      h += pinBtns;
+      h += "<button class='s-btn neutral' onclick=\"renew('IG')\">Renouveler Instagram</button>";
+      h += "<button class='s-btn neutral' onclick=\"renew('TH')\">Renouveler Threads</button>";
+      if (d.facebook) h += "<button class='s-btn neutral' onclick=\"renew('FB')\">Renouveler Facebook</button>";
+      $("status-tokens").innerHTML = h;
+
+      const dl = $("status-daily"); dl.classList.remove("s-note"); dl.innerHTML = "";
       d.galleries.forEach(g => {
-        const row = document.createElement("div"); row.className = "row";
-        row.innerHTML = "<b>" + g.nom + "</b>";
-        const b = document.createElement("button"); b.className = "back";
-        b.textContent = g.daily ? "✅ Actif — désactiver" : "Activer";
+        const row = document.createElement("div"); row.className = "s-line";
+        row.innerHTML = "<span class='s-label'>" + g.nom + "</span>";
+        const b = document.createElement("button");
+        b.className = "s-mini" + (g.daily ? " on" : "");
+        b.textContent = g.daily ? "Actif" : "Activer";
         b.onclick = async () => {
           await api("/api/daily", { method: "POST", headers: HJ(),
             body: JSON.stringify({ galerie: g.slug, active: !g.daily }) });
@@ -835,8 +894,8 @@ _STUDIO_HTML = r"""<!doctype html>
   async function testPinterest(sandbox) {
     const box = $("pin-test-result");
     if (box) box.textContent = sandbox
-      ? "⏳ Création d'une épingle dans le SANDBOX (pour ta démo)…"
-      : "⏳ Épinglage de test sur Pinterest (sans toucher IG/FB)…";
+      ? "Création d'une épingle dans le sandbox (pour ta démo)…"
+      : "Épinglage de test sur Pinterest (sans toucher IG/FB)…";
     try {
       const d = await api("/api/pinterest/test", { method: "POST", headers: HJ(),
         body: JSON.stringify({ sandbox: !!sandbox }) });
@@ -846,63 +905,65 @@ _STUDIO_HTML = r"""<!doctype html>
   }
   async function runDiag() {
     const btn = $("diag-btn"), box = $("diag-results");
-    btn.disabled = true; const label = btn.textContent; btn.textContent = "⏳ Test…";
+    btn.disabled = true; const label = btn.textContent; btn.textContent = "Test en cours…";
     box.innerHTML = "";
     try {
       const d = await api("/api/diag", { method: "POST", headers: HJ(), body: "{}" });
       let h = d.ok
-        ? "<p class='hint'>✅ Site joignable — HTTP " + d.info.status + " en " + d.info.ms + " ms</p>"
-        : "<p class='hint'>❌ Site injoignable — " + d.info.error + " (" + d.info.ms + " ms)</p>";
+        ? "<p class='s-note'>Site joignable — HTTP " + d.info.status + " en " + d.info.ms + " ms</p>"
+        : "<p class='s-note'>Site injoignable — " + d.info.error + " (" + d.info.ms + " ms)</p>";
       const open = d.open || {};
       const hosts = Object.keys(open);
       if (hosts.length) {
         hosts.forEach(hn => {
           const m = Math.max(1, Math.floor(open[hn] / 60));
-          h += "<p class='hint'>🔌 Pause active sur " + hn + " — reprise dans ~" + m + " min</p>";
+          h += "<p class='s-note'>Pause active sur " + hn + " — reprise dans ~" + m + " min</p>";
         });
       } else {
-        h += "<p class='hint'>🔌 Disjoncteur fermé (aucune pause).</p>";
+        h += "<p class='s-note'>Aucune pause active.</p>";
       }
-      if (!d.ok) h += "<p class='hint'>Blocage réseau côté hébergeur : il se lève seul. Réessaie dans quelques minutes.</p>";
+      if (!d.ok) h += "<p class='s-note'>Blocage réseau côté hébergeur : il se lève seul. Réessaie dans quelques minutes.</p>";
       box.innerHTML = h;
       haptic(d.ok ? "success" : "warning");
-    } catch (e) { box.innerHTML = "<p class='hint'>Erreur : " + e.message + "</p>"; }
+    } catch (e) { box.innerHTML = "<p class='s-note'>Erreur : " + e.message + "</p>"; }
     finally { btn.disabled = false; btn.textContent = label; }
   }
   async function scanGalleries(poll) {
     const btn = $("scan-btn"), box = $("scan-results");
     if (!poll) {
       btn.disabled = true; btn.dataset.label = btn.dataset.label || btn.textContent;
-      btn.textContent = "⏳ Scan en cours…";
-      box.innerHTML = "<p class='hint'>⏳ Analyse du site en tâche de fond…</p>";
+      btn.textContent = "Scan en cours…";
+      box.innerHTML = "<p class='s-note'>Analyse du site en tâche de fond…</p>";
     }
     try {
       const d = await api("/api/scan", { method: "POST", headers: HJ(), body: "{}" });
       if (d.unreachable) {
-        box.innerHTML = "<p class='hint'>🌐 Site temporairement injoignable. Réessaie dans quelques minutes.</p>";
+        box.innerHTML = "<p class='s-note'>Site temporairement injoignable. Réessaie dans quelques minutes.</p>";
       } else if (d.scanning) {
         setTimeout(function(){ scanGalleries(true); }, 4000);   // encore en cours → re-sonde
         return;
       } else {
         renderScan(d.pending || []);
       }
-    } catch (e) { box.innerHTML = "<p class='hint'>Erreur : " + e.message + "</p>"; }
-    btn.disabled = false; btn.textContent = btn.dataset.label || "🔍 Scanner les galeries";
+    } catch (e) { box.innerHTML = "<p class='s-note'>Erreur : " + e.message + "</p>"; }
+    btn.disabled = false; btn.textContent = btn.dataset.label || "Scanner les galeries";
   }
   function renderScan(pending) {
     const box = $("scan-results"); box.innerHTML = "";
     if (!pending.length) {
-      box.innerHTML = "<p class='hint'>✅ Aucune nouvelle galerie à ajouter.</p>";
+      box.innerHTML = "<p class='s-note'>Aucune nouvelle galerie à ajouter.</p>";
       return;
     }
     pending.forEach(g => {
-      const row = document.createElement("div"); row.className = "row";
-      row.innerHTML = "<b>" + g.name + "</b><span class='cnt'>" + g.count + " photos</span>";
-      const add = document.createElement("button"); add.className = "back"; add.textContent = "➕ Ajouter";
-      const ign = document.createElement("button"); ign.className = "back"; ign.textContent = "🚫 Ignorer";
+      const row = document.createElement("div"); row.className = "s-line";
+      row.innerHTML = "<span class='s-label'>" + g.name + " · " + g.count + " photos</span>";
+      const acts = document.createElement("div"); acts.className = "s-actions";
+      const add = document.createElement("button"); add.className = "s-mini on"; add.textContent = "Ajouter";
+      const ign = document.createElement("button"); ign.className = "s-mini"; ign.textContent = "Ignorer";
       add.onclick = () => decideGallery(g.slug, "add", g.name);
       ign.onclick = () => decideGallery(g.slug, "ignore", g.name);
-      row.appendChild(add); row.appendChild(ign); box.appendChild(row);
+      acts.appendChild(add); acts.appendChild(ign);
+      row.appendChild(acts); box.appendChild(row);
     });
   }
   async function decideGallery(slug, action, name) {
@@ -910,7 +971,7 @@ _STUDIO_HTML = r"""<!doctype html>
       await api("/api/gallery/decide", { method: "POST", headers: HJ(),
         body: JSON.stringify({ slug: slug, action: action }) });
       haptic("success");
-      alert(action === "add" ? "✅ « " + name + " » ajoutée !" : "🚫 « " + name + " » ignorée.");
+      alert(action === "add" ? "« " + name + " » ajoutée." : "« " + name + " » ignorée.");
       loadStatus();       // rafraîchit la liste auto-pub (nouvelle galerie dispo)
       scanGalleries();    // rafraîchit la liste des détections
     } catch (e) { alert("Échec : " + e.message); }
@@ -919,7 +980,7 @@ _STUDIO_HTML = r"""<!doctype html>
     try {
       const d = await api("/api/renew", { method: "POST", headers: HJ(),
         body: JSON.stringify({ platform: platform }) });
-      alert(d.ok ? "✅ Token " + platform + " renouvelé (" + d.days + " j)" : "❌ " + d.error);
+      alert(d.ok ? "Token " + platform + " renouvelé (" + d.days + " j)" : d.error);
       loadStatus();
     } catch (e) { alert("Échec : " + e.message); }
   }
@@ -987,7 +1048,7 @@ def register_miniapp(app, hooks) -> None:
     @app.route("/sw.js")            # servi à la racine → portée "/" (couvre /studio + /api)
     def studio_sw():
         sw = (
-            "const C='studio-v3';\n"
+            "const C='studio-v4';\n"
             "self.addEventListener('install',e=>{self.skipWaiting();});\n"
             "self.addEventListener('activate',e=>{e.waitUntil((async()=>{\n"
             "  const ks=await caches.keys();\n"
