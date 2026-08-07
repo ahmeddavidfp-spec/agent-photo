@@ -773,7 +773,9 @@ _STUDIO_HTML = r"""<!doctype html>
       const d = await api("/api/status", { headers: H() });
       let pinHtml = "";
       if (d.pinterest && d.pinterest.connected) {
-        pinHtml = "<div class='row'><b>📌 Pinterest</b><span class='cnt'>✅ connecté</span></div>";
+        pinHtml = "<div class='row'><b>📌 Pinterest</b><span class='cnt'>✅ connecté</span></div>"
+          + "<button class='btn sec' onclick='testPinterest()'>📌 Tester Pinterest seul (2 épingles, sans IG/FB)</button>"
+          + "<div id='pin-test-result' class='hint' style='white-space:pre-wrap'></div>";
       } else if (d.pinterest && d.pinterest.configured) {
         pinHtml = "<button class='btn' onclick='connectPinterest()'>📌 Connecter Pinterest</button>";
       } else {
@@ -812,6 +814,15 @@ _STUDIO_HTML = r"""<!doctype html>
       const d = await api("/api/pinterest/connect-url", { headers: H() });
       tg.openLink(d.url);  // autorisation dans le navigateur, callback → serveur
     } catch (e) { alert("Échec : " + e.message); }
+  }
+  async function testPinterest() {
+    const box = $("pin-test-result");
+    if (box) box.textContent = "⏳ Épinglage de test sur Pinterest (sans toucher IG/FB)…";
+    try {
+      const d = await api("/api/pinterest/test", { method: "POST", headers: HJ(), body: "{}" });
+      if (box) box.textContent = d.msg || (d.ok ? "OK" : "Échec");
+      haptic(d.ok ? "success" : "warning");
+    } catch (e) { if (box) box.textContent = "Erreur : " + e.message; }
   }
   async function runDiag() {
     const btn = $("diag-btn"), box = $("diag-results");
@@ -1213,12 +1224,17 @@ def register_miniapp(app, hooks) -> None:
         except Exception as e:
             return jsonify({"ok": False, "error": f"scrape KO : {e}"}), 500
         if not photos:
-            return jsonify({"ok": False, "error": "aucune photo récupérée"}), 500
+            return jsonify({"ok": False, "msg": "Aucune photo récupérée pour cette galerie."})
         # Légende avec le lien → pin_photos déduit le tableau (ville) automatiquement.
         caption = f"Street photography — https://davidmertens.com/{galerie}"
         ok, total = _pin.pin_photos(photos, caption)
-        return jsonify({"ok": ok > 0, "pinned": ok, "attempted": total,
-                        "galerie": galerie})
+        if ok > 0:
+            return jsonify({"ok": True,
+                            "msg": f"✅ {ok}/{total} épingle(s) créée(s) sur Pinterest "
+                                   f"(galerie {galerie}). Va voir ton tableau « Street {galerie.title()} »."})
+        # Échec : on renvoie le diagnostic exact de Pinterest (lecture/écriture).
+        return jsonify({"ok": False,
+                        "msg": f"❌ 0/{total} épingle créée. Diagnostic Pinterest — {_pin.diagnose()}"})
 
     @app.route("/api/daily", methods=["POST"])
     def api_daily():

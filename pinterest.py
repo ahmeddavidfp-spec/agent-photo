@@ -260,6 +260,32 @@ def pin_photos(image_urls: List[str], ig_caption: str) -> Tuple[int, int]:
     return ok, len(urls)
 
 
+def diagnose() -> str:
+    """Teste lecture (user_account) + écriture (création tableau) et renvoie une
+    chaîne lisible avec les statuts/erreurs Pinterest. Sert à comprendre pourquoi
+    une épingle échoue (souvent : Trial en lecture seule → pas de pins:write)."""
+    h = _headers()
+    if not h:
+        return "pas de token Pinterest"
+    parts = []
+    try:
+        r = safe_get(f"{API}/user_account", headers=h, timeout=15)
+        parts.append(f"lecture compte: HTTP {r.status_code}")
+        if r.status_code != 200:
+            parts.append(str(r.text)[:160])
+    except Exception as e:
+        parts.append(f"lecture KO: {str(e)[:120]}")
+    try:
+        r = safe_post(f"{API}/boards", headers=h,
+                      json={"name": "Street Test", "privacy": "PUBLIC"}, timeout=15)
+        parts.append(f"écriture (tableau): HTTP {r.status_code}")
+        if r.status_code not in (200, 201):
+            parts.append(str(r.text)[:220])
+    except Exception as e:
+        parts.append(f"écriture KO: {str(e)[:120]}")
+    return " | ".join(parts)
+
+
 # =========================================================================
 # ROUTES FLASK (connexion OAuth)
 # =========================================================================
