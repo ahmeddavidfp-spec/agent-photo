@@ -1232,9 +1232,9 @@ def register_miniapp(app, hooks) -> None:
             return jsonify({"ok": True,
                             "msg": f"✅ {ok}/{total} épingle(s) créée(s) sur Pinterest "
                                    f"(galerie {galerie}). Va voir ton tableau « Street {galerie.title()} »."})
-        # Échec : on renvoie le diagnostic exact de Pinterest (lecture/écriture).
+        # Échec : diagnostic exact (tableau + épingle avec une vraie image).
         return jsonify({"ok": False,
-                        "msg": f"❌ 0/{total} épingle créée. Diagnostic Pinterest — {_pin.diagnose()}"})
+                        "msg": f"❌ 0/{total} épingle créée. Diagnostic — {_pin.diagnose(photos[0])}"})
 
     @app.route("/api/daily", methods=["POST"])
     def api_daily():
