@@ -1,5 +1,6 @@
 """Publication Instagram + Threads avec polling du statut au lieu de sleep fixes."""
 import logging
+import threading
 import time
 from typing import Optional, Tuple
 
@@ -134,20 +135,39 @@ def renew_instagram_token() -> Tuple[bool, object]:
 # restants" du menu). Les alertes quotidiennes passent le force_refresh=True.
 _TOKEN_DAYS_CACHE: dict = {}
 _TOKEN_DAYS_TTL = 600  # 10 min
+_TOKEN_DAYS_REFRESHING: set = set()   # single-flight des rafraîchissements de fond
 
 
-def token_days_left(platform: str, force_refresh: bool = False):
-    """Retourne le nombre de jours restants pour IG ou TH, ou None si indéterminé.
+def token_days_left(platform: str, force_refresh: bool = False,
+                    cached_only: bool = False):
+    """Retourne le nombre de jours restants pour IG/TH/FB, ou None si indéterminé.
 
     - Cache mémoire 10 min par défaut (évite le blocage menu Telegram).
     - `force_refresh=True` ignore le cache (utilisé par l'alerte quotidienne).
+    - `cached_only=True` : ne fait JAMAIS d'appel réseau (renvoie le cache, même
+      périmé, et rafraîchit en tâche de fond) → utilisé par /api/status pour que
+      l'onglet État s'affiche instantanément sans bloquer sur l'API Meta.
     - Timeout dur de 3s par appel + 1 seule retentative max.
     """
     import datetime as dt
     now_ts = time.time()
+    cached = _TOKEN_DAYS_CACHE.get(platform)
+
+    if cached_only:
+        stale = not (cached and now_ts - cached[0] < _TOKEN_DAYS_TTL)
+        if stale and platform not in _TOKEN_DAYS_REFRESHING:
+            _TOKEN_DAYS_REFRESHING.add(platform)
+
+            def _bg():
+                try:
+                    token_days_left(platform, force_refresh=True)
+                finally:
+                    _TOKEN_DAYS_REFRESHING.discard(platform)
+            threading.Thread(target=_bg, daemon=True,
+                             name=f"tokdays-{platform}").start()
+        return cached[1] if cached else None
 
     if not force_refresh:
-        cached = _TOKEN_DAYS_CACHE.get(platform)
         if cached and now_ts - cached[0] < _TOKEN_DAYS_TTL:
             return cached[1]
 

@@ -1151,10 +1151,12 @@ def register_miniapp(app, hooks) -> None:
         active = {g for cid, g in get_active_daily_autopubs()
                   if str(cid) == str(user["id"])}
         return jsonify({
-            "ig_days": token_days_left("IG"),
-            "th_days": token_days_left("TH"),
+            # cached_only=True : JAMAIS d'appel réseau Meta dans la requête → l'onglet
+            # État (et le bouton Connecter Pinterest) s'affiche instantanément.
+            "ig_days": token_days_left("IG", cached_only=True),
+            "th_days": token_days_left("TH", cached_only=True),
             "facebook": facebook_page_configured(),
-            "fb_days": token_days_left("FB") if facebook_page_configured() else None,
+            "fb_days": token_days_left("FB", cached_only=True) if facebook_page_configured() else None,
             "pinterest": {"configured": _pin.app_configured(),
                           "connected": _pin.connected()},
             "galleries": [
