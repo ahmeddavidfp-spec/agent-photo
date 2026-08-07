@@ -1,6 +1,6 @@
 """Telegram Mini App — « Studio » : toute l'app dans Telegram.
 
-Onglets : Galeries (photos → publier/programmer/Reel) · Programmés · Stats · État.
+Onglets : Galeries (photos → publier/programmer/Reel) · Programmés · Stats · Paramètres.
 Servie par le Flask existant, le bot classique reste intact à côté.
 
 Routes :
