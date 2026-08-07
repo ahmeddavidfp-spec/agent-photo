@@ -775,7 +775,9 @@ _STUDIO_HTML = r"""<!doctype html>
       if (d.pinterest && d.pinterest.connected) {
         pinHtml = "<div class='row'><b>📌 Pinterest</b><span class='cnt'>✅ connecté</span></div>"
           + "<button class='btn sec' onclick='testPinterest(false)'>📌 Tester Pinterest seul (sans IG/FB)</button>"
-          + "<button class='btn sec' onclick='testPinterest(true)'>🎬 Tester en SANDBOX (pour la démo accès Standard)</button>"
+          + (d.pinterest.sandbox
+              ? "<button class='btn sec' onclick='testPinterest(true)'>🎬 Tester en SANDBOX (pour la démo)</button>"
+              : "<button class='btn sec' onclick='connectPinterest(true)'>🎬 Connecter le SANDBOX (pour filmer la démo)</button>")
           + "<div id='pin-test-result' class='hint' style='white-space:pre-wrap'></div>";
       } else if (d.pinterest && d.pinterest.configured) {
         pinHtml = "<button class='btn' onclick='connectPinterest()'>📌 Connecter Pinterest</button>";
@@ -810,9 +812,10 @@ _STUDIO_HTML = r"""<!doctype html>
       });
     } catch (e) { $("status-daily").textContent = "Erreur : " + e.message; }
   }
-  async function connectPinterest() {
+  async function connectPinterest(sandbox) {
     try {
-      const d = await api("/api/pinterest/connect-url", { headers: H() });
+      const d = await api("/api/pinterest/connect-url" + (sandbox ? "?sandbox=1" : ""),
+                          { headers: H() });
       tg.openLink(d.url);  // autorisation dans le navigateur, callback → serveur
     } catch (e) { alert("Échec : " + e.message); }
   }
@@ -1173,7 +1176,8 @@ def register_miniapp(app, hooks) -> None:
             "facebook": facebook_page_configured(),
             "fb_days": token_days_left("FB", cached_only=True) if facebook_page_configured() else None,
             "pinterest": {"configured": _pin.app_configured(),
-                          "connected": _pin.connected()},
+                          "connected": _pin.connected(),
+                          "sandbox": _pin.sandbox_connected()},
             "galleries": [
                 {"slug": g, "nom": _display_name(g, config), "daily": g in active}
                 for g in (config.get("galeries") or [])
@@ -1206,7 +1210,9 @@ def register_miniapp(app, hooks) -> None:
         from settings import APP_BASE_URL
         if not _pin.app_configured():
             abort(400)
-        return jsonify({"url": _pin.authorize_url(f"{APP_BASE_URL}/pinterest/callback")})
+        sandbox = request.args.get("sandbox") == "1"
+        return jsonify({"url": _pin.authorize_url(f"{APP_BASE_URL}/pinterest/callback",
+                                                  sandbox=sandbox)})
 
     @app.route("/api/pinterest/test", methods=["POST"])
     def api_pinterest_test():

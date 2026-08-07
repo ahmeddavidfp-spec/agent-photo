@@ -34,6 +34,7 @@ OAUTH_URL = "https://www.pinterest.com/oauth/"
 SCOPES = "boards:read,boards:write,pins:read,pins:write"
 
 ACCESS_KEY = "pinterest_access_token"
+SANDBOX_ACCESS_KEY = "pinterest_sandbox_access_token"   # jeton OAuth échangé côté sandbox
 REFRESH_KEY = "pinterest_refresh_token"
 EXPIRY_KEY = "pinterest_token_expiry"   # timestamp unix (str)
 
@@ -128,21 +129,25 @@ def check_state(state: str) -> bool:
         return False
 
 
-def authorize_url(redirect_uri: str) -> str:
+def authorize_url(redirect_uri: str, sandbox: bool = False) -> str:
     from urllib.parse import urlencode
+    # sandbox marqué par un préfixe 'sb-' dans le state (renvoyé tel quel par
+    # Pinterest) → le callback échange alors le code contre le serveur sandbox.
+    state = ("sb-" + make_state()) if sandbox else make_state()
     return OAUTH_URL + "?" + urlencode({
         "client_id": PINTEREST_APP_ID,
         "redirect_uri": redirect_uri,
         "response_type": "code",
         "scope": SCOPES,
-        "state": make_state(),
+        "state": state,
     })
 
 
-def exchange_code(code: str, redirect_uri: str) -> bool:
+def exchange_code(code: str, redirect_uri: str, sandbox: bool = False) -> bool:
+    base = API_SANDBOX if sandbox else API
     try:
         r = safe_post(
-            f"{API}/oauth/token",
+            f"{base}/oauth/token",
             headers={"Authorization": _basic_auth(),
                      "Content-Type": "application/x-www-form-urlencoded"},
             data={"grant_type": "authorization_code", "code": code,
@@ -151,10 +156,14 @@ def exchange_code(code: str, redirect_uri: str) -> bool:
         )
         data = r.json() or {}
         if data.get("access_token"):
-            _save_tokens(data)
-            logger.info("✅ Pinterest connecté (tokens stockés en DB)")
+            if sandbox:
+                save_token(SANDBOX_ACCESS_KEY, data["access_token"])
+                logger.info("✅ Pinterest SANDBOX connecté (jeton stocké)")
+            else:
+                _save_tokens(data)
+                logger.info("✅ Pinterest connecté (tokens stockés en DB)")
             return True
-        logger.warning("Pinterest exchange refusé : %s", str(data)[:200])
+        logger.warning("Pinterest exchange refusé (sandbox=%s) : %s", sandbox, str(data)[:200])
     except Exception as e:
         logger.exception("Pinterest exchange KO : %s", e)
     return False
@@ -290,10 +299,15 @@ def diagnose(sample_url: str = "") -> str:
 
 
 def _sandbox_token() -> str:
-    """Jeton pour le SANDBOX : PINTEREST_SANDBOX_TOKEN si fourni, sinon on tente le
-    jeton OAuth déjà stocké (souvent accepté par le sandbox)."""
-    return (os.environ.get("PINTEREST_SANDBOX_TOKEN", "").strip()
-            or (get_stored_token(ACCESS_KEY) or ""))
+    """Jeton pour le SANDBOX : le jeton sandbox obtenu par OAuth (clé dédiée),
+    sinon PINTEREST_SANDBOX_TOKEN. PAS le jeton de production (rejeté : 401)."""
+    return (get_stored_token(SANDBOX_ACCESS_KEY)
+            or os.environ.get("PINTEREST_SANDBOX_TOKEN", "").strip() or "")
+
+
+def sandbox_connected() -> bool:
+    return bool(get_stored_token(SANDBOX_ACCESS_KEY)
+                or os.environ.get("PINTEREST_SANDBOX_TOKEN", "").strip())
 
 
 def test_sandbox(image_url: str) -> Tuple[bool, str]:
@@ -350,11 +364,13 @@ def register_pinterest(app, redirect_uri: str) -> None:
     def pinterest_callback():
         state = request.args.get("state", "")
         code = request.args.get("code", "")
-        if not check_state(state):
+        sandbox = state.startswith("sb-")       # marqueur posé par authorize_url
+        real_state = state[3:] if sandbox else state
+        if not check_state(real_state):
             return "State invalide ou expiré — relance la connexion depuis le Studio.", 403
         if not code:
             return "Autorisation refusée côté Pinterest.", 400
-        ok = exchange_code(code, redirect_uri)
+        ok = exchange_code(code, redirect_uri, sandbox=sandbox)
         if ok:
             return ("<div style='font:17px sans-serif;padding:40px;text-align:center'>"
                     "✅ <b>Pinterest connecté !</b><br>Tu peux fermer cette page — "
