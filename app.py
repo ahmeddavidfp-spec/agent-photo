@@ -87,13 +87,25 @@ def lockstat():
 
 @app.route("/health")
 def health():
-    """Health-check détaillé pour UptimeRobot."""
+    """Health-check LÉGER, sondé en boucle par Render/UptimeRobot.
+
+    NE PREND PLUS le verrou DB (avant : `already_sent_urls()` → chaque sonde se
+    battait pour le verrou, et quand une opération gelait, toutes les sondes
+    s'empilaient dessus → blocage total). Ici on LIT l'état du verrou sans
+    l'acquérir → /health ne peut JAMAIS participer à un blocage. Bonus : renvoie
+    503 si le verrou est tenu depuis >60s (opération DB gelée) → Render redémarre
+    l'instance tout seul (auto-guérison, plus besoin de restart manuel)."""
+    from db import lock_state
     checks = {}
-    try:
-        _ = already_sent_urls()
+    ls = lock_state()
+    held_s = ls.get("held_for_s", 0) if ls.get("held") else 0
+    wedged = held_s > 60
+    if not ls.get("held"):
         checks["db"] = "ok"
-    except Exception as e:
-        checks["db"] = f"error: {e}"
+    elif wedged:
+        checks["db"] = f"WEDGED {held_s}s @ {ls.get('where')}"
+    else:
+        checks["db"] = f"busy {held_s}s"
     # NB : PAS d'appel à token_status() ici — il fait 3 appels réseau vers
     # l'API Graph et /health est sondé en boucle (UptimeRobot). Le détail des
     # tokens est disponible via /health?tokens=1 à la demande.
@@ -103,8 +115,7 @@ def health():
     import os as _os2
     _st = _os2.environ.get("STUDIO_TOKEN", "").strip()
     checks["studio_token"] = {"set": bool(_st), "len": len(_st)}
-    status_code = 200 if checks["db"] == "ok" else 503
-    return jsonify(checks), status_code
+    return jsonify(checks), (503 if wedged else 200)
 
 
 @app.route("/netdiag")
@@ -1362,14 +1373,17 @@ def _background_publish(chat_id: int, mode: str, image_url: str, caption: str) -
             except Exception as e:
                 logger.warning("Publication Facebook KO : %s", e)
                 ok_fb, res_fb = False, str(e)[:120]
-        if mode == "both":
-            # Épinglage Pinterest (SEO, tableau par ville) — best effort
-            try:
-                import pinterest
-                if pinterest.connected():
-                    pinterest.pin_photos(urls or [cover], visible_caption)
-            except Exception as e:
-                logger.warning("Pinterest KO : %s", e)
+        # Épinglage Pinterest (SEO, tableau par ville) — best effort, QUEL QUE SOIT
+        # le réseau publié (IG seul, both, fb…). Avant : enfermé dans mode=='both',
+        # donc un post IG seul ne créait AUCUN pin. Pinterest est un canal à part
+        # entière → on épingle dès qu'on publie des photos et que le compte est lié.
+        try:
+            import pinterest
+            if pinterest.connected():
+                ok_pin, tot_pin = pinterest.pin_photos(urls or [cover], visible_caption)
+                logger.info("Pinterest : %d/%d épingles (mode=%s)", ok_pin, tot_pin, mode)
+        except Exception as e:
+            logger.warning("Pinterest KO : %s", e)
     except Exception as e:
         logger.exception("Erreur background_publish")
         send_message(chat_id, f"🔥 Erreur : {e}")
