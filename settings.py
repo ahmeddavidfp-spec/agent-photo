@@ -15,11 +15,35 @@ logger = logging.getLogger(__name__)
 # invalidate_config_cache()).
 _CONFIG_CACHE = {"data": None, "exp": 0.0}
 _CONFIG_TTL = 60.0
+# Cache SÉPARÉ des galeries découvertes-approuvées (une lecture DB). Elles ne
+# changent qu'à l'ajout d'une galerie → TTL long + invalidation → la base n'est
+# plus touchée sur le chemin chaud de load_yaml_config (cause de blocages en
+# cascade : plusieurs endpoints recalculaient la config en même temps → herd DB).
+_ADDED_CACHE = {"data": None, "exp": 0.0}
+_ADDED_TTL = 600.0
 
 
 def invalidate_config_cache() -> None:
     """Force le prochain load_yaml_config à tout recharger (ex. après ajout galerie)."""
     _CONFIG_CACHE["exp"] = 0.0
+    _ADDED_CACHE["exp"] = 0.0
+
+
+def _added_galleries_cached() -> list:
+    """`added_galleries()` mis en cache (TTL long) : évite une lecture DB à CHAQUE
+    recalcul de config (chemin chaud). Sur erreur/cold, renvoie la dernière valeur
+    connue ou []. Invalidé par invalidate_config_cache() (ajout de galerie)."""
+    now = time.time()
+    if _ADDED_CACHE["data"] is not None and now < _ADDED_CACHE["exp"]:
+        return _ADDED_CACHE["data"]
+    try:
+        from db import added_galleries
+        d = list(added_galleries())
+        _ADDED_CACHE["data"] = d
+        _ADDED_CACHE["exp"] = now + _ADDED_TTL
+        return d
+    except Exception:
+        return _ADDED_CACHE["data"] or []
 
 # --- Secrets / IDs (toujours via variables d'environnement) ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
@@ -151,13 +175,13 @@ def load_yaml_config(path: str = "config.yaml") -> dict:
         logger.error("Erreur chargement config.yaml : %s", e)
         return default
 
-    # Galeries auto-détectées et approuvées (import différé → pas de cycle)
+    # Galeries auto-détectées et approuvées (via CACHE → pas de lecture DB ici,
+    # sinon load_yaml_config touche la base sur chaque recalcul = chemin chaud).
     try:
-        from db import added_galleries
         gal = list(data.get("galeries") or [])
         names = dict(data.get("gallery_names") or {})
         per = dict(data.get("per_gallery") or {})
-        for slug in added_galleries():
+        for slug in _added_galleries_cached():
             if slug not in gal:
                 gal.append(slug)
                 nm, pg = auto_gallery_assets(slug)
