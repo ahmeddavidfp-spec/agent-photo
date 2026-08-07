@@ -1,6 +1,7 @@
 """Centralisation de la configuration et des variables d'environnement."""
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -29,21 +30,34 @@ def invalidate_config_cache() -> None:
     _ADDED_CACHE["exp"] = 0.0
 
 
+_added_refreshing = False   # single-flight du rafraîchissement de fond
+
+
 def _added_galleries_cached() -> list:
-    """`added_galleries()` mis en cache (TTL long) : évite une lecture DB à CHAQUE
-    recalcul de config (chemin chaud). Sur erreur/cold, renvoie la dernière valeur
-    connue ou []. Invalidé par invalidate_config_cache() (ajout de galerie)."""
+    """`added_galleries()` en cache, rafraîchi EN TÂCHE DE FOND → ne bloque JAMAIS
+    load_yaml_config sur la base. Cache froid/périmé : on renvoie tout de suite la
+    dernière valeur connue (ou []) et on lance UN rafraîchissement de fond. Même
+    si cette lecture DB gèle, le chemin chaud (config) reste fluide."""
+    global _added_refreshing
     now = time.time()
     if _ADDED_CACHE["data"] is not None and now < _ADDED_CACHE["exp"]:
         return _ADDED_CACHE["data"]
-    try:
-        from db import added_galleries
-        d = list(added_galleries())
-        _ADDED_CACHE["data"] = d
-        _ADDED_CACHE["exp"] = now + _ADDED_TTL
-        return d
-    except Exception:
-        return _ADDED_CACHE["data"] or []
+    if not _added_refreshing:
+        _added_refreshing = True
+
+        def _bg():
+            global _added_refreshing
+            try:
+                from db import added_galleries
+                d = list(added_galleries())
+                _ADDED_CACHE["data"] = d
+                _ADDED_CACHE["exp"] = time.time() + _ADDED_TTL
+            except Exception:
+                pass
+            finally:
+                _added_refreshing = False
+        threading.Thread(target=_bg, daemon=True, name="added-gal-refresh").start()
+    return _ADDED_CACHE["data"] or []
 
 # --- Secrets / IDs (toujours via variables d'environnement) ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
