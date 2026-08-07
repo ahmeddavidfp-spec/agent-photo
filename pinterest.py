@@ -17,6 +17,7 @@ import base64
 import hashlib
 import hmac
 import logging
+import os
 import re
 import time
 from typing import List, Optional, Tuple
@@ -28,6 +29,7 @@ from settings import PINTEREST_APP_ID, PINTEREST_APP_SECRET, TELEGRAM_TOKEN
 logger = logging.getLogger(__name__)
 
 API = "https://api.pinterest.com/v5"
+API_SANDBOX = "https://api-sandbox.pinterest.com/v5"   # Trial peut créer des pins ICI
 OAUTH_URL = "https://www.pinterest.com/oauth/"
 SCOPES = "boards:read,boards:write,pins:read,pins:write"
 
@@ -285,6 +287,56 @@ def diagnose(sample_url: str = "") -> str:
         except Exception as e:
             parts.append(f"épingle KO: {str(e)[:120]}")
     return " | ".join(parts)
+
+
+def _sandbox_token() -> str:
+    """Jeton pour le SANDBOX : PINTEREST_SANDBOX_TOKEN si fourni, sinon on tente le
+    jeton OAuth déjà stocké (souvent accepté par le sandbox)."""
+    return (os.environ.get("PINTEREST_SANDBOX_TOKEN", "").strip()
+            or (get_stored_token(ACCESS_KEY) or ""))
+
+
+def test_sandbox(image_url: str) -> Tuple[bool, str]:
+    """Crée un tableau + une VRAIE épingle dans le SANDBOX Pinterest (où le Trial
+    autorise l'écriture) → sert à filmer la démo pour l'accès Standard.
+    Retourne (ok, message lisible)."""
+    tok = _sandbox_token()
+    if not tok:
+        return False, ("Aucun jeton sandbox. Génère un « sandbox access token » dans "
+                       "ton dashboard Pinterest et mets-le dans Render sous "
+                       "PINTEREST_SANDBOX_TOKEN.")
+    h = {"Authorization": f"Bearer {tok}", "Content-Type": "application/json"}
+    name = "Street Test Sandbox"
+    board_id = None
+    try:
+        r = safe_get(f"{API_SANDBOX}/boards", headers=h, params={"page_size": 50}, timeout=15)
+        if r.status_code == 200:
+            for b in (r.json() or {}).get("items", []):
+                if b.get("name") == name:
+                    board_id = b.get("id")
+        if not board_id:
+            r = safe_post(f"{API_SANDBOX}/boards", headers=h,
+                          json={"name": name, "privacy": "PUBLIC"}, timeout=15)
+            if r.status_code in (200, 201):
+                board_id = (r.json() or {}).get("id")
+            else:
+                return False, f"Tableau sandbox refusé : HTTP {r.status_code} — {str(r.text)[:200]}"
+    except Exception as e:
+        return False, f"Tableau sandbox KO : {str(e)[:150]}"
+    if not board_id:
+        return False, "Tableau sandbox non créé."
+    try:
+        r = safe_post(f"{API_SANDBOX}/pins", headers=h, json={
+            "board_id": board_id, "title": "Street photography test",
+            "description": "Test — Agent Photo",
+            "media_source": {"source_type": "image_url",
+                             "url": image_url.split("?")[0] + "?format=1500w"},
+        }, timeout=25)
+        if r.status_code in (200, 201) and (r.json() or {}).get("id"):
+            return True, "✅ Épingle créée dans le SANDBOX ! Filme cet écran (+ le tableau) pour ta démo Pinterest."
+        return False, f"Épingle sandbox refusée : HTTP {r.status_code} — {str(r.text)[:220]}"
+    except Exception as e:
+        return False, f"Épingle sandbox KO : {str(e)[:150]}"
 
 
 # =========================================================================

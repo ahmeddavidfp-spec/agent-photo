@@ -774,7 +774,8 @@ _STUDIO_HTML = r"""<!doctype html>
       let pinHtml = "";
       if (d.pinterest && d.pinterest.connected) {
         pinHtml = "<div class='row'><b>📌 Pinterest</b><span class='cnt'>✅ connecté</span></div>"
-          + "<button class='btn sec' onclick='testPinterest()'>📌 Tester Pinterest seul (2 épingles, sans IG/FB)</button>"
+          + "<button class='btn sec' onclick='testPinterest(false)'>📌 Tester Pinterest seul (sans IG/FB)</button>"
+          + "<button class='btn sec' onclick='testPinterest(true)'>🎬 Tester en SANDBOX (pour la démo accès Standard)</button>"
           + "<div id='pin-test-result' class='hint' style='white-space:pre-wrap'></div>";
       } else if (d.pinterest && d.pinterest.configured) {
         pinHtml = "<button class='btn' onclick='connectPinterest()'>📌 Connecter Pinterest</button>";
@@ -815,11 +816,14 @@ _STUDIO_HTML = r"""<!doctype html>
       tg.openLink(d.url);  // autorisation dans le navigateur, callback → serveur
     } catch (e) { alert("Échec : " + e.message); }
   }
-  async function testPinterest() {
+  async function testPinterest(sandbox) {
     const box = $("pin-test-result");
-    if (box) box.textContent = "⏳ Épinglage de test sur Pinterest (sans toucher IG/FB)…";
+    if (box) box.textContent = sandbox
+      ? "⏳ Création d'une épingle dans le SANDBOX (pour ta démo)…"
+      : "⏳ Épinglage de test sur Pinterest (sans toucher IG/FB)…";
     try {
-      const d = await api("/api/pinterest/test", { method: "POST", headers: HJ(), body: "{}" });
+      const d = await api("/api/pinterest/test", { method: "POST", headers: HJ(),
+        body: JSON.stringify({ sandbox: !!sandbox }) });
       if (box) box.textContent = d.msg || (d.ok ? "OK" : "Échec");
       haptic(d.ok ? "success" : "warning");
     } catch (e) { if (box) box.textContent = "Erreur : " + e.message; }
@@ -1225,6 +1229,11 @@ def register_miniapp(app, hooks) -> None:
             return jsonify({"ok": False, "error": f"scrape KO : {e}"}), 500
         if not photos:
             return jsonify({"ok": False, "msg": "Aucune photo récupérée pour cette galerie."})
+        # Mode SANDBOX (pour filmer la démo d'accès Standard) : crée une vraie
+        # épingle dans le sandbox où le Trial autorise l'écriture.
+        if data.get("sandbox"):
+            ok_sb, msg_sb = _pin.test_sandbox(photos[0])
+            return jsonify({"ok": ok_sb, "msg": msg_sb, "galerie": galerie})
         # Légende avec le lien → pin_photos déduit le tableau (ville) automatiquement.
         caption = f"Street photography — https://davidmertens.com/{galerie}"
         ok, total = _pin.pin_photos(photos, caption)
