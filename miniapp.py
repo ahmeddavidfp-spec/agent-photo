@@ -391,6 +391,7 @@ _STUDIO_HTML = r"""<!doctype html>
     <button id="m-fb" onclick="setPubMode('fb')">Facebook</button>
   </div>
   <button class="btn" id="cap-pub" onclick="publishNow()">🚀 Publier maintenant</button>
+  <button class="btn sec" id="cap-pin" onclick="publishPinterest()">📌 Publier sur Pinterest (test)</button>
   <input type="datetime-local" id="cap-when">
   <button class="btn sec" onclick="scheduleIt()">📅 Programmer</button>
 </section>
@@ -662,6 +663,18 @@ _STUDIO_HTML = r"""<!doctype html>
                                visible: $("cap-text").value, alt: alt }) });
       haptic("success"); finishAction("🚀 Publication lancée !");
     } catch (e) { alert("Échec : " + e.message); $("cap-pub").disabled = false; }
+  }
+  async function publishPinterest() {
+    if (!$("cap-text").value.trim()) { alert("Génère ou écris une légende d'abord."); return; }
+    const btn = $("cap-pin"); btn.disabled = true; const lbl = btn.textContent;
+    btn.textContent = "📌 Épinglage…";
+    try {
+      const d = await api("/api/pinterest/publish", { method: "POST", headers: HJ(),
+        body: JSON.stringify({ galerie: galerie, urls: selected, visible: $("cap-text").value }) });
+      alert(d.msg || (d.ok ? "OK" : "Échec"));
+      haptic(d.ok ? "success" : "warning");
+    } catch (e) { alert("Échec : " + e.message); }
+    btn.disabled = false; btn.textContent = lbl;
   }
   async function scheduleIt() {
     if (!$("cap-text").value.trim()) { alert("Génère ou écris une légende d'abord."); return; }
@@ -1213,6 +1226,36 @@ def register_miniapp(app, hooks) -> None:
         sandbox = request.args.get("sandbox") == "1"
         return jsonify({"url": _pin.authorize_url(f"{APP_BASE_URL}/pinterest/callback",
                                                   sandbox=sandbox)})
+
+    @app.route("/api/pinterest/publish", methods=["POST"])
+    def api_pinterest_publish():
+        """Épingle SEULEMENT sur Pinterest les photos sélectionnées + la légende
+        (sans toucher IG/Threads/FB). Tente la production ; si le Trial la bloque
+        (code 29), bascule sur le SANDBOX pour que le test aboutisse quand même."""
+        _require_user()
+        import pinterest as _pin
+        data = request.get_json(force=True, silent=True) or {}
+        urls = [u for u in (data.get("urls") or []) if isinstance(u, str)][:4]
+        caption = str(data.get("visible") or "")
+        galerie = str(data.get("galerie") or "").strip()
+        if not urls:
+            return jsonify({"ok": False, "msg": "Aucune photo sélectionnée."})
+        if not _pin.connected():
+            return jsonify({"ok": False, "msg": "Pinterest non connecté (onglet État)."})
+        # pin_photos déduit le tableau via le lien davidmertens.com de la légende.
+        if "davidmertens.com" not in caption and galerie:
+            caption = (caption + f"\nhttps://davidmertens.com/{galerie}").strip()
+        ok, total = _pin.pin_photos(urls, caption)
+        if ok > 0:
+            return jsonify({"ok": True,
+                            "msg": f"✅ {ok}/{total} épingle(s) créée(s) sur ton Pinterest !"})
+        # Production refusée (Trial) → on tente le sandbox si connecté.
+        if _pin.sandbox_connected():
+            ok_sb, msg_sb = _pin.test_sandbox(urls[0])
+            return jsonify({"ok": ok_sb, "msg": "⚠️ Production bloquée (accès Trial). " + msg_sb})
+        return jsonify({"ok": False,
+                        "msg": "❌ Production refusée (le Trial ne permet pas d'épingler en réel). "
+                               "Connecte le SANDBOX (onglet État) pour tester, ou attends l'accès Standard."})
 
     @app.route("/api/pinterest/test", methods=["POST"])
     def api_pinterest_test():
