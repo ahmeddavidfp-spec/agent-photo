@@ -255,7 +255,19 @@ _STUDIO_HTML = r"""<!doctype html>
 <link rel="apple-touch-icon" href="/static/pwa/icon-180.png">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-  :root { color-scheme: light dark; }
+  /* App entièrement en thème CLAIR : on définit les variables Telegram avec des
+     valeurs claires → tous les composants (qui lisent ces variables) passent au clair. */
+  :root {
+    color-scheme: light;
+    --tg-theme-bg-color: #f4f5f7;
+    --tg-theme-secondary-bg-color: #ffffff;
+    --tg-theme-text-color: #16171a;
+    --tg-theme-hint-color: #6b6f76;
+    --tg-theme-link-color: #2f6bff;
+    --tg-theme-button-color: #2f6bff;
+    --tg-theme-button-text-color: #ffffff;
+    --line: #e7e9ee;
+  }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { margin: 0; padding: calc(env(safe-area-inset-top) + 46px) 0 66px;
     background: var(--tg-theme-bg-color, #111);
@@ -264,23 +276,25 @@ _STUDIO_HTML = r"""<!doctype html>
   /* En-tête fixe de l'app (titre de marque), sous l'encoche iPhone. */
   .appbar { position: fixed; top: 0; left: 0; right: 0; z-index: 30;
     padding: calc(env(safe-area-inset-top) + 11px) 14px 11px;
-    background: var(--tg-theme-secondary-bg-color, #1c1c1e);
-    border-bottom: 1px solid rgba(128,128,128,.25);
+    background: var(--tg-theme-secondary-bg-color, #fff);
+    border-bottom: 1px solid var(--line, #e7e9ee);
     text-align: center; font-size: 16px; font-weight: 700; letter-spacing: .2px;
-    color: var(--tg-theme-text-color, #eee); }
-  section { padding: 12px 12px 90px; }
-  h1 { font-size: 17px; margin: 4px 2px 10px; display: flex; align-items: center; gap: 8px; }
+    color: var(--tg-theme-text-color, #16171a); }
+  section { padding: 14px 14px 96px; }
+  h1 { font-size: 20px; font-weight: 700; letter-spacing: -.2px;
+       margin: 6px 2px 4px; display: flex; align-items: center; gap: 10px; }
   .hint { color: var(--tg-theme-hint-color, #999); font-size: 13px; margin: 0 2px 12px; }
   .back { border: 0; background: none; color: var(--tg-theme-link-color, #2ea6ff);
           font-size: 15px; padding: 4px 6px 4px 0; }
   .row { display: flex; align-items: center; justify-content: space-between; gap: 10px;
-         padding: 13px 14px; border-radius: 12px; margin-bottom: 8px;
-         background: var(--tg-theme-secondary-bg-color, #1c1c1e); }
+         padding: 14px 15px; border-radius: 14px; margin-bottom: 9px;
+         background: var(--tg-theme-secondary-bg-color, #fff);
+         border: 1px solid var(--line, #e7e9ee); }
   .row b { font-weight: 600; }
-  .row .cnt { color: var(--tg-theme-hint-color, #999); font-size: 13px; white-space: nowrap; }
+  .row .cnt { color: var(--tg-theme-hint-color, #6b6f76); font-size: 13px; white-space: nowrap; }
   .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-  .ph { position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden;
-        background: var(--tg-theme-secondary-bg-color, #222); }
+  .ph { position: relative; aspect-ratio: 1; border-radius: 12px; overflow: hidden;
+        background: #e9ebef; }
   .ph img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .ph .num { position: absolute; top: 6px; right: 6px; width: 24px; height: 24px;
     border-radius: 50%; background: var(--tg-theme-button-color, #2ea6ff);
@@ -290,57 +304,55 @@ _STUDIO_HTML = r"""<!doctype html>
   .ph.sel .num { display: flex; }
   .ph .pub { position: absolute; left: 6px; bottom: 6px; font-size: 10px; padding: 2px 6px;
              border-radius: 999px; background: rgba(0,0,0,.65); color: #fff; }
-  .seg { display: flex; background: var(--tg-theme-secondary-bg-color, #1c1c1e);
-         border-radius: 10px; padding: 3px; margin: 0 0 12px; }
-  .seg button { flex: 1; border: 0; border-radius: 8px; padding: 8px 4px; font-size: 14px;
-    background: none; color: var(--tg-theme-hint-color, #999); }
-  .seg button.on { background: var(--tg-theme-button-color, #2ea6ff);
-                   color: var(--tg-theme-button-text-color, #fff); }
-  .btn { display: block; width: 100%; border: 0; border-radius: 12px; padding: 13px;
-    font-size: 15px; font-weight: 600; margin: 8px 0;
-    background: var(--tg-theme-button-color, #2ea6ff);
-    color: var(--tg-theme-button-text-color, #fff); }
-  .btn.sec { background: var(--tg-theme-secondary-bg-color, #1c1c1e);
-             color: var(--tg-theme-text-color, #eee); }
-  .btn:disabled { opacity: .45; }
-  textarea { width: 100%; min-height: 170px; border-radius: 12px; padding: 12px;
-    border: 1px solid var(--tg-theme-hint-color, #444);
-    background: var(--tg-theme-secondary-bg-color, #1c1c1e);
-    color: var(--tg-theme-text-color, #eee); font: 14px/1.5 inherit; }
-  input[type="datetime-local"] { width: 100%; border-radius: 12px; padding: 11px;
-    border: 1px solid var(--tg-theme-hint-color, #444);
-    background: var(--tg-theme-secondary-bg-color, #1c1c1e);
-    color: var(--tg-theme-text-color, #eee); font-size: 15px; }
-  .cover { width: 92px; height: 92px; border-radius: 10px; object-fit: cover; }
-  .state { text-align: center; color: var(--tg-theme-hint-color, #999); padding: 36px 10px; }
+  .seg { display: flex; background: #eef0f3;
+         border-radius: 12px; padding: 4px; margin: 0 0 12px; }
+  .seg button { flex: 1; border: 0; border-radius: 9px; padding: 9px 4px; font-size: 14px;
+    font-weight: 600; background: none; color: var(--tg-theme-hint-color, #6b6f76); }
+  .seg button.on { background: #fff; color: #16171a;
+                   box-shadow: 0 1px 3px rgba(16,24,40,.12); }
+  .btn { display: block; width: 100%; border: 0; border-radius: 13px; padding: 14px;
+    font-size: 15px; font-weight: 600; margin: 9px 0;
+    background: var(--tg-theme-button-color, #2f6bff);
+    color: var(--tg-theme-button-text-color, #fff); cursor: pointer; }
+  .btn.sec { background: #fff; color: var(--tg-theme-button-color, #2f6bff);
+             border: 1.5px solid #cdd9ff; }
+  .btn:disabled { opacity: .5; }
+  textarea { width: 100%; min-height: 170px; border-radius: 13px; padding: 13px;
+    border: 1px solid #d7dae0;
+    background: var(--tg-theme-secondary-bg-color, #fff);
+    color: var(--tg-theme-text-color, #16171a); font: 14px/1.5 inherit; }
+  input[type="datetime-local"] { width: 100%; border-radius: 13px; padding: 12px;
+    border: 1px solid #d7dae0;
+    background: var(--tg-theme-secondary-bg-color, #fff);
+    color: var(--tg-theme-text-color, #16171a); font-size: 15px; }
+  .cover { width: 92px; height: 92px; border-radius: 12px; object-fit: cover; }
+  .state { text-align: center; color: var(--tg-theme-hint-color, #6b6f76); padding: 36px 10px; }
   iframe { width: 100%; height: calc(100vh - 90px); border: 0; border-radius: 12px; }
   nav { position: fixed; left: 0; right: 0; bottom: 0; display: flex; z-index: 5;
-    background: var(--tg-theme-secondary-bg-color, #1c1c1e);
-    border-top: 1px solid rgba(128,128,128,.25);
+    background: var(--tg-theme-secondary-bg-color, #fff);
+    border-top: 1px solid var(--line, #e7e9ee);
     padding-bottom: env(safe-area-inset-bottom); }
-  nav button { flex: 1; border: 0; background: none; padding: 9px 2px 7px;
-    color: var(--tg-theme-hint-color, #999); font-size: 11px; }
-  nav button.on { color: var(--tg-theme-button-color, #2ea6ff); }
-  nav button .ico { display: block; font-size: 20px; margin-bottom: 1px; }
-  .pill { font-size: 12px; padding: 3px 9px; border-radius: 999px;
-          background: var(--tg-theme-secondary-bg-color, #1c1c1e);
-          color: var(--tg-theme-hint-color, #999); }
+  nav button { flex: 1; border: 0; background: none; padding: 14px 2px 13px;
+    color: var(--tg-theme-hint-color, #6b6f76); font-size: 12.5px; font-weight: 600; }
+  nav button.on { color: var(--tg-theme-button-color, #2f6bff); font-weight: 700; }
+  .pill { font-size: 12px; padding: 3px 10px; border-radius: 999px;
+          background: #eef0f3; color: var(--tg-theme-hint-color, #6b6f76); }
   /* Bouton principal de remplacement quand on tourne en PWA (hors Telegram),
      posé juste au-dessus de la barre d'onglets. Masqué dans Telegram. */
   .pwa-mainbtn { position: fixed; left: 0; right: 0; z-index: 20; border: 0;
     bottom: calc(56px + env(safe-area-inset-bottom));
     padding: 15px; font-size: 16px; font-weight: 600;
-    background: #2ea6ff; color: #fff; }
+    background: #2f6bff; color: #fff; }
   .pwa-mainbtn:disabled { opacity: .55; }
   /* Panneau de saisie du jeton (première ouverture PWA). */
   #tokgate { position: fixed; inset: 0; z-index: 100; display: none;
-    background: #111; color: #eee; padding: 40px 24px; text-align: center; }
+    background: #f4f5f7; color: #16171a; padding: 48px 24px; text-align: center; }
   #tokgate.on { display: block; }
   #tokgate input { width: 100%; max-width: 420px; margin: 16px auto; display: block;
-    padding: 13px; border-radius: 10px; border: 1px solid #333; background: #1c1c1e;
-    color: #eee; font-size: 15px; }
-  #tokgate button { padding: 13px 22px; border: 0; border-radius: 10px;
-    background: #2ea6ff; color: #fff; font-size: 15px; font-weight: 600; }
+    padding: 14px; border-radius: 12px; border: 1px solid #d7dae0; background: #fff;
+    color: #16171a; font-size: 15px; }
+  #tokgate button { padding: 14px 24px; border: 0; border-radius: 12px;
+    background: #2f6bff; color: #fff; font-size: 15px; font-weight: 600; }
   /* Toast de confirmation (surtout en PWA, où l'app ne se ferme pas). */
   #toast { position: fixed; left: 50%; z-index: 200; max-width: 88vw; text-align: center;
     bottom: calc(74px + env(safe-area-inset-bottom)); transform: translate(-50%, 20px);
@@ -378,7 +390,8 @@ _STUDIO_HTML = r"""<!doctype html>
   #v-status .s-mini { border: 1.5px solid #d6dae1; background: #fff; color: #2f6bff;
     font-size: 13px; font-weight: 700; padding: 7px 15px; border-radius: 10px; cursor: pointer; }
   #v-status .s-mini.on { background: #2f6bff; color: #fff; border-color: #2f6bff; }
-  #v-status .s-actions { display: flex; gap: 8px; }
+  #v-status .s-actions { display: flex; gap: 9px; align-items: center; }
+  #v-status .s-mini.renew { color: #6b6f76; border-color: #d6dae1; }
   #v-status .s-note { font-size: 13px; color: #6b6f76; white-space: pre-wrap; line-height: 1.5;
     margin: 8px 0 0; }
   #v-status .hint { color: #6b6f76; }
@@ -386,24 +399,24 @@ _STUDIO_HTML = r"""<!doctype html>
 <header class="appbar">APP Studio Agent</header>
 <button id="pwa-mainbtn" class="pwa-mainbtn" hidden></button>
 <div id="tokgate">
-  <h1 style="justify-content:center">🔒 Studio</h1>
+  <h1 style="justify-content:center">Studio</h1>
   <p class="hint">Colle ton code d'accès personnel pour ouvrir le Studio.</p>
   <input id="tokgate-input" type="password" autocomplete="off" placeholder="Code d'accès">
   <button onclick="saveToken()">Ouvrir</button>
 </div>
 
 <section id="v-gal">
-  <h1>🎨 Studio</h1>
+  <h1>Studio</h1>
   <p class="hint">Choisis une galerie pour publier ou composer un Reel.</p>
   <div id="gal-state" class="state">Chargement des galeries…</div>
   <div id="gal-list"></div>
 </section>
 
 <section id="v-photos" hidden>
-  <h1><button class="back" onclick="show('v-gal');Main.hide()">‹</button><span id="ph-title"></span></h1>
+  <h1><button class="back" onclick="show('v-gal');Main.hide()">Retour</button><span id="ph-title"></span></h1>
   <div class="seg" id="mode-seg">
-    <button id="seg-pub" class="on" onclick="setMode('pub')">📤 Publier</button>
-    <button id="seg-reel" onclick="setMode('reel')">🎬 Reel</button>
+    <button id="seg-pub" class="on" onclick="setMode('pub')">Publier</button>
+    <button id="seg-reel" onclick="setMode('reel')">Reel</button>
   </div>
   <p class="hint" id="ph-hint"></p>
   <div id="ph-state" class="state">Chargement…</div>
@@ -411,38 +424,38 @@ _STUDIO_HTML = r"""<!doctype html>
 </section>
 
 <section id="v-caption" hidden>
-  <h1><button class="back" onclick="show('v-photos');refreshMain()">‹</button>Publier <span id="cap-count" class="pill"></span></h1>
+  <h1><button class="back" onclick="show('v-photos');refreshMain()">Retour</button>Publier <span id="cap-count" class="pill"></span></h1>
   <div style="display:flex;gap:10px;margin-bottom:12px;align-items:center">
     <img id="cap-cover" class="cover">
     <div class="hint" style="margin:0">La 1ʳᵉ photo sélectionnée = couverture.<br>Plusieurs photos = carrousel Instagram.</div>
   </div>
-  <button class="btn sec" id="cap-gen" onclick="genCaption()">✨ Générer la légende (IA)</button>
-  <textarea id="cap-text" placeholder="La légende apparaîtra ici — tu peux l'éditer."></textarea>
+  <button class="btn sec" id="cap-gen" onclick="genCaption()">Générer la légende (IA)</button>
+  <textarea id="cap-text" placeholder="La légende apparaîtra ici, tu peux l'éditer."></textarea>
   <div class="seg" style="margin-top:10px">
     <button id="m-both" class="on" onclick="setPubMode('both')">Tous</button>
     <button id="m-ig" onclick="setPubMode('ig')">Insta</button>
     <button id="m-th" onclick="setPubMode('th')">Threads</button>
     <button id="m-fb" onclick="setPubMode('fb')">Facebook</button>
   </div>
-  <button class="btn" id="cap-pub" onclick="publishNow()">🚀 Publier maintenant</button>
-  <button class="btn sec" id="cap-pin" onclick="publishPinterest()">📌 Publier sur Pinterest (test)</button>
+  <button class="btn" id="cap-pub" onclick="publishNow()">Publier maintenant</button>
+  <button class="btn sec" id="cap-pin" onclick="publishPinterest()">Publier sur Pinterest</button>
   <input type="datetime-local" id="cap-when">
-  <button class="btn sec" onclick="scheduleIt()">📅 Programmer</button>
+  <button class="btn sec" onclick="scheduleIt()">Programmer</button>
 </section>
 
 <section id="v-sched" hidden>
-  <h1>📅 Posts programmés</h1>
+  <h1>Posts programmés</h1>
   <div id="sched-state" class="state">Chargement…</div>
   <div id="sched-list"></div>
 </section>
 
 <section id="v-stats" hidden>
-  <h1>📊 Stats</h1>
-  <button class="btn sec" onclick="loadReport()">📬 Rapport de la semaine</button>
-  <div id="report-box" hidden style="white-space:pre-wrap;background:var(--tg-theme-secondary-bg-color,#1c1c1e);border-radius:12px;padding:14px;margin:8px 0;font-size:14px"></div>
-  <button class="btn sec" onclick="loadPlan()">📅 Plan de la semaine</button>
-  <div id="plan-box" hidden style="white-space:pre-wrap;background:var(--tg-theme-secondary-bg-color,#1c1c1e);border-radius:12px;padding:14px;margin:8px 0;font-size:14px"></div>
-  <button id="plan-go" class="btn" hidden onclick="schedulePlan()">✅ Tout programmer</button>
+  <h1>Stats</h1>
+  <button class="btn sec" onclick="loadReport()">Rapport de la semaine</button>
+  <div id="report-box" hidden style="white-space:pre-wrap;background:var(--tg-theme-secondary-bg-color,#fff);border:1px solid var(--line,#e7e9ee);border-radius:14px;padding:14px;margin:8px 0;font-size:14px"></div>
+  <button class="btn sec" onclick="loadPlan()">Plan de la semaine</button>
+  <div id="plan-box" hidden style="white-space:pre-wrap;background:var(--tg-theme-secondary-bg-color,#fff);border:1px solid var(--line,#e7e9ee);border-radius:14px;padding:14px;margin:8px 0;font-size:14px"></div>
+  <button id="plan-go" class="btn" hidden onclick="schedulePlan()">Tout programmer</button>
   <div id="stats-state" class="state">Chargement…</div>
   <iframe id="stats-frame" hidden></iframe>
 </section>
@@ -479,10 +492,10 @@ _STUDIO_HTML = r"""<!doctype html>
 </section>
 
 <nav>
-  <button id="t-gal" class="on" onclick="tab('v-gal')"><span class="ico">🖼</span>Galeries</button>
-  <button id="t-sched" onclick="tab('v-sched');loadSched()"><span class="ico">📅</span>Programmés</button>
-  <button id="t-stats" onclick="tab('v-stats');loadStats()"><span class="ico">📊</span>Stats</button>
-  <button id="t-status" onclick="tab('v-status');loadStatus()"><span class="ico">⚙︎</span>Paramètres</button>
+  <button id="t-gal" class="on" onclick="tab('v-gal')">Galeries</button>
+  <button id="t-sched" onclick="tab('v-sched');loadSched()">Programmés</button>
+  <button id="t-stats" onclick="tab('v-stats');loadStats()">Stats</button>
+  <button id="t-status" onclick="tab('v-status');loadStatus()">Paramètres</button>
 </nav>
 
 <script>
@@ -600,7 +613,7 @@ _STUDIO_HTML = r"""<!doctype html>
         const el = document.createElement("div");
         el.className = "ph"; el.dataset.url = p.url;
         el.innerHTML = '<img loading="lazy" src="' + p.thumb + '"><span class="num"></span>' +
-                       (p.sent ? '<span class="pub">✓ publiée</span>' : "");
+                       (p.sent ? '<span class="pub">publiée</span>' : "");
         el.onclick = () => toggle(p.url);
         grid.appendChild(el);
       });
@@ -662,7 +675,7 @@ _STUDIO_HTML = r"""<!doctype html>
   }
   function finishAction(msg){
     if (RealTG) { tg.close(); return; }            // Telegram : le message arrive dans le chat
-    toast(msg || "✅ C'est fait !");               // PWA : confirmation + retour aux galeries
+    toast(msg || "C'est fait.");                   // PWA : confirmation + retour aux galeries
     try { Main.hideProgress(); } catch(e){}
     if ($("cap-pub")) $("cap-pub").disabled = false;
     selected = [];
@@ -675,7 +688,7 @@ _STUDIO_HTML = r"""<!doctype html>
     fetch("/api/reel", { method: "POST", headers: HJ(),
       body: JSON.stringify({ galerie: galerie, urls: selected }) })
       .then(r => { if (!r.ok) throw new Error("HTTP " + r.status);
-        haptic("success"); finishAction("🎬 Reel en cours de montage — il arrivera dans Telegram."); })
+        haptic("success"); finishAction("Reel en cours de montage, il arrivera dans Telegram."); })
       .catch(e => { Main.hideProgress(); alert("Échec : " + e.message); });
   }
 
@@ -695,13 +708,13 @@ _STUDIO_HTML = r"""<!doctype html>
     $({ both:"m-both", ig:"m-ig", th:"m-th", fb:"m-fb" }[m]).classList.add("on");
   }
   async function genCaption() {
-    $("cap-gen").disabled = true; $("cap-gen").textContent = "✨ Génération… (~15 s)";
+    $("cap-gen").disabled = true; $("cap-gen").textContent = "Génération… (~15 s)";
     try {
       const d = await api("/api/caption", { method: "POST", headers: HJ(),
         body: JSON.stringify({ galerie: galerie, url: selected[0] }) });
       $("cap-text").value = d.visible; alt = d.alt; haptic("success");
     } catch (e) { alert("Échec génération : " + e.message); }
-    $("cap-gen").disabled = false; $("cap-gen").textContent = "✨ Générer la légende (IA)";
+    $("cap-gen").disabled = false; $("cap-gen").textContent = "Générer la légende (IA)";
   }
   async function publishNow() {
     if (!$("cap-text").value.trim()) { alert("Génère ou écris une légende d'abord."); return; }
@@ -710,13 +723,13 @@ _STUDIO_HTML = r"""<!doctype html>
       await api("/api/publish", { method: "POST", headers: HJ(),
         body: JSON.stringify({ galerie: galerie, urls: selected, mode: pubMode,
                                visible: $("cap-text").value, alt: alt }) });
-      haptic("success"); finishAction("🚀 Publication lancée !");
+      haptic("success"); finishAction("Publication lancée.");
     } catch (e) { alert("Échec : " + e.message); $("cap-pub").disabled = false; }
   }
   async function publishPinterest() {
     if (!$("cap-text").value.trim()) { alert("Génère ou écris une légende d'abord."); return; }
     const btn = $("cap-pin"); btn.disabled = true; const lbl = btn.textContent;
-    btn.textContent = "📌 Épinglage…";
+    btn.textContent = "Épinglage…";
     try {
       const d = await api("/api/pinterest/publish", { method: "POST", headers: HJ(),
         body: JSON.stringify({ galerie: galerie, urls: selected, visible: $("cap-text").value }) });
@@ -732,7 +745,7 @@ _STUDIO_HTML = r"""<!doctype html>
         body: JSON.stringify({ galerie: galerie, urls: selected,
                                visible: $("cap-text").value, alt: alt,
                                when: $("cap-when").value }) });
-      haptic("success"); finishAction("📅 Post programmé !");
+      haptic("success"); finishAction("Post programmé.");
     } catch (e) { alert("Échec : " + e.message); }
   }
 
@@ -755,7 +768,7 @@ _STUDIO_HTML = r"""<!doctype html>
           "<img src='" + p.thumb + "' style='width:44px;height:44px;border-radius:8px;object-fit:cover'>" +
           "<div style='flex:1'><b>" + p.when_local + "</b><br><span class='cnt'>" +
           (p.count > 1 ? "carrousel ×" + p.count : "post simple") + "</span></div>" +
-          "<span class='chev' style='opacity:.6;font-size:13px'>Voir ▾</span>";
+          "<span class='chev' style='color:#2f6bff;font-size:13px;font-weight:600'>Voir</span>";
 
         // Corps : grille des photos + légende + bouton Annuler (replié par défaut)
         const body = document.createElement("div");
@@ -782,7 +795,7 @@ _STUDIO_HTML = r"""<!doctype html>
 
         head.onclick = () => {
           body.hidden = !body.hidden;
-          head.querySelector(".chev").textContent = body.hidden ? "Voir ▾" : "Masquer ▴";
+          head.querySelector(".chev").textContent = body.hidden ? "Voir" : "Masquer";
           if (tg.HapticFeedback) tg.HapticFeedback.selectionChanged();
         };
 
@@ -821,11 +834,11 @@ _STUDIO_HTML = r"""<!doctype html>
     } catch (e) { box.textContent = "Erreur : " + e.message; }
   }
   async function schedulePlan() {
-    const btn = $("plan-go"); btn.disabled = true; const l = btn.textContent; btn.textContent = "⏳ Programmation…";
+    const btn = $("plan-go"); btn.disabled = true; const l = btn.textContent; btn.textContent = "Programmation…";
     try {
       await api("/api/plan/schedule", { method: "POST", headers: HJ(), body: "{}" });
-      haptic("success"); toast("📅 Plan en cours de programmation !");
-      btn.textContent = "✅ Programmé";
+      haptic("success"); toast("Plan en cours de programmation.");
+      btn.textContent = "Programmé";
     } catch (e) { alert("Échec : " + e.message); btn.disabled = false; btn.textContent = l; }
   }
 
@@ -838,35 +851,37 @@ _STUDIO_HTML = r"""<!doctype html>
     const cls = days > 14 ? "ok" : days >= 5 ? "warn" : "bad";
     return "<span class='s-chip " + cls + "'>" + days + " j</span>";
   }
+  // Une ligne de compte : titre à gauche, pastille + bouton d'action à droite (compact).
+  function acctLine(label, chip, action) {
+    return "<div class='s-line'><span class='s-label'>" + label + "</span>"
+      + "<div class='s-actions'>" + chip + (action || "") + "</div></div>";
+  }
   async function loadStatus() {
     try {
       const d = await api("/api/status", { headers: H() });
-      let h = "";
-      h += "<div class='s-line'><span class='s-label'>Instagram</span>" + tokChip(d.ig_days) + "</div>";
-      h += "<div class='s-line'><span class='s-label'>Threads</span>" + tokChip(d.th_days) + "</div>";
-      h += "<div class='s-line'><span class='s-label'>Facebook</span>"
-         + tokChip(d.facebook ? d.fb_days : null, d.facebook ? undefined : false) + "</div>";
+      let h = "", pinExtra = "";
+      h += acctLine("Instagram", tokChip(d.ig_days),
+        "<button class='s-mini renew' onclick=\"renew('IG')\">Renouveler</button>");
+      h += acctLine("Threads", tokChip(d.th_days),
+        "<button class='s-mini renew' onclick=\"renew('TH')\">Renouveler</button>");
+      h += acctLine("Facebook",
+        tokChip(d.facebook ? d.fb_days : null, d.facebook ? undefined : false),
+        d.facebook ? "<button class='s-mini renew' onclick=\"renew('FB')\">Renouveler</button>" : "");
 
-      let pinChip, pinBtns = "";
       if (d.pinterest && d.pinterest.connected) {
-        pinChip = "<span class='s-chip ok'>connecté</span>";
-        pinBtns = "<button class='s-btn ghost' onclick='testPinterest(false)'>Tester Pinterest seul</button>"
-          + (d.pinterest.sandbox
-              ? "<button class='s-btn ghost' onclick='testPinterest(true)'>Tester en sandbox (démo)</button>"
-              : "<button class='s-btn ghost' onclick='connectPinterest(true)'>Connecter le sandbox (démo)</button>")
+        h += acctLine("Pinterest", "<span class='s-chip ok'>connecté</span>",
+          "<button class='s-mini' onclick='testPinterest(false)'>Tester</button>");
+        pinExtra = (d.pinterest.sandbox
+            ? "<button class='s-btn ghost' onclick='testPinterest(true)'>Tester en sandbox (démo)</button>"
+            : "<button class='s-btn ghost' onclick='connectPinterest(true)'>Connecter le sandbox (démo)</button>")
           + "<div id='pin-test-result' class='s-note'></div>";
       } else if (d.pinterest && d.pinterest.configured) {
-        pinChip = "<span class='s-chip off'>à connecter</span>";
-        pinBtns = "<button class='s-btn' onclick='connectPinterest()'>Connecter Pinterest</button>";
+        h += acctLine("Pinterest", "<span class='s-chip off'>à connecter</span>",
+          "<button class='s-mini on' onclick='connectPinterest()'>Connecter</button>");
       } else {
-        pinChip = "<span class='s-chip off'>non configuré</span>";
+        h += acctLine("Pinterest", "<span class='s-chip off'>non configuré</span>", "");
       }
-      h += "<div class='s-line'><span class='s-label'>Pinterest</span>" + pinChip + "</div>";
-      h += pinBtns;
-      h += "<button class='s-btn neutral' onclick=\"renew('IG')\">Renouveler Instagram</button>";
-      h += "<button class='s-btn neutral' onclick=\"renew('TH')\">Renouveler Threads</button>";
-      if (d.facebook) h += "<button class='s-btn neutral' onclick=\"renew('FB')\">Renouveler Facebook</button>";
-      $("status-tokens").innerHTML = h;
+      $("status-tokens").innerHTML = h + pinExtra;
 
       const dl = $("status-daily"); dl.classList.remove("s-note"); dl.innerHTML = "";
       d.galleries.forEach(g => {
@@ -1048,7 +1063,7 @@ def register_miniapp(app, hooks) -> None:
     @app.route("/sw.js")            # servi à la racine → portée "/" (couvre /studio + /api)
     def studio_sw():
         sw = (
-            "const C='studio-v4';\n"
+            "const C='studio-v5';\n"
             "self.addEventListener('install',e=>{self.skipWaiting();});\n"
             "self.addEventListener('activate',e=>{e.waitUntil((async()=>{\n"
             "  const ks=await caches.keys();\n"
@@ -1310,14 +1325,14 @@ def register_miniapp(app, hooks) -> None:
         ok, total, env = _pin.pin_best_effort(urls, caption)
         if ok > 0 and env == "production":
             return jsonify({"ok": True,
-                            "msg": f"✅ {ok}/{total} épingle(s) créée(s) sur ton Pinterest (production) !"})
+                            "msg": f"{ok}/{total} épingle(s) créée(s) sur ton Pinterest (production)."})
         if ok > 0 and env == "sandbox":
             return jsonify({"ok": True,
-                            "msg": f"✅ {ok}/{total} épingle(s) créée(s) — via SANDBOX (production "
+                            "msg": f"{ok}/{total} épingle(s) créée(s) via le sandbox (production "
                                    "bloquée en Trial), avec le vrai titre et la vraie description."})
         return jsonify({"ok": False,
-                        "msg": "❌ Aucune épingle créée. Vérifie que Pinterest (et le Sandbox) est "
-                               "connecté dans l'onglet État, ou attends l'accès Standard."})
+                        "msg": "Aucune épingle créée. Vérifie que Pinterest (et le sandbox) est "
+                               "connecté dans l'onglet Paramètres, ou attends l'accès Standard."})
 
     @app.route("/api/pinterest/test", methods=["POST"])
     def api_pinterest_test():
@@ -1350,11 +1365,11 @@ def register_miniapp(app, hooks) -> None:
         ok, total = _pin.pin_photos(photos, caption)
         if ok > 0:
             return jsonify({"ok": True,
-                            "msg": f"✅ {ok}/{total} épingle(s) créée(s) sur Pinterest "
+                            "msg": f"{ok}/{total} épingle(s) créée(s) sur Pinterest "
                                    f"(galerie {galerie}). Va voir ton tableau « Street {galerie.title()} »."})
         # Échec : diagnostic exact (tableau + épingle avec une vraie image).
         return jsonify({"ok": False,
-                        "msg": f"❌ 0/{total} épingle créée. Diagnostic — {_pin.diagnose(photos[0])}"})
+                        "msg": f"0/{total} épingle créée. Diagnostic : {_pin.diagnose(photos[0])}"})
 
     @app.route("/api/daily", methods=["POST"])
     def api_daily():
