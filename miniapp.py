@@ -1193,6 +1193,33 @@ def register_miniapp(app, hooks) -> None:
             abort(400)
         return jsonify({"url": _pin.authorize_url(f"{APP_BASE_URL}/pinterest/callback")})
 
+    @app.route("/api/pinterest/test", methods=["POST"])
+    def api_pinterest_test():
+        """Test ISOLÉ de pins:write : épingle 2 photos d'une galerie sur Pinterest
+        SANS publier sur IG/Threads/FB. Vérifie que la connexion écrit vraiment."""
+        _require_user()
+        import pinterest as _pin
+        from gallery import fetch_gallery_photos
+        if not _pin.connected():
+            return jsonify({"ok": False, "error": "Pinterest non connecté"}), 400
+        config = load_yaml_config()
+        gals = config.get("galeries") or []
+        data = request.get_json(force=True, silent=True) or {}
+        galerie = str(data.get("galerie", "") or "").strip()
+        if galerie not in gals:
+            galerie = "rotterdam" if "rotterdam" in gals else (gals[0] if gals else "")
+        try:
+            photos = fetch_gallery_photos(config["site_url"], galerie)[:2]
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"scrape KO : {e}"}), 500
+        if not photos:
+            return jsonify({"ok": False, "error": "aucune photo récupérée"}), 500
+        # Légende avec le lien → pin_photos déduit le tableau (ville) automatiquement.
+        caption = f"Street photography — https://davidmertens.com/{galerie}"
+        ok, total = _pin.pin_photos(photos, caption)
+        return jsonify({"ok": ok > 0, "pinned": ok, "attempted": total,
+                        "galerie": galerie})
+
     @app.route("/api/daily", methods=["POST"])
     def api_daily():
         user = _require_user()
