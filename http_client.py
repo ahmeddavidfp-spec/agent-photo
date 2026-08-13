@@ -67,8 +67,11 @@ SESSION = build_session(Retry(
 # échec de CONNEXION (la requête n'a jamais atteint le serveur → sûr de rejouer).
 # JAMAIS sur read-timeout ni 5xx : le serveur a pu traiter la requête et une
 # 2e tentative publierait en double (cas confirmé sur FB /photos, Telegram…).
+# connect=3 + backoff : encaisse un hoquet réseau passager vers graph.facebook.com
+# (vu le 13/08 : « Max retries exceeded » sur un post programmé, Threads OK au même
+# instant → blip TCP ponctuel). Sûr : un échec de CONNEXION n'a jamais atteint Meta.
 _SESSION_POST = build_session(Retry(
-    total=1, connect=1, read=0, status=0,
+    total=3, connect=3, read=0, status=0, backoff_factor=0.5,
     status_forcelist=(), allowed_methods=frozenset(["POST"]),
     raise_on_status=False,
 ))

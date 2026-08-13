@@ -41,8 +41,15 @@ EXPIRY_KEY = "pinterest_token_expiry"   # timestamp unix (str)
 _MAX_PINS_PER_POST = 4
 _STATE_MAX_AGE = 15 * 60
 
-# Cache mémoire {nom_de_tableau: board_id}
+# Cache mémoire {(base, nom_minuscule): board_id}
 _BOARDS_CACHE: dict = {}
+
+# Production bloquée en Trial (les pins renvoient code 29). On le mémorise pour
+# NE PAS retenter la production à CHAQUE publication (4 appels perdus + bruit de
+# logs), et on bascule direct sur le sandbox. Re-sondé après 24h → le jour où
+# l'accès Standard est accordé, la production reprend toute seule.
+_prod_blocked_until = 0.0
+_PROD_BLOCK_TTL = 24 * 3600
 
 
 # =========================================================================
@@ -176,24 +183,38 @@ def exchange_code(code: str, redirect_uri: str, sandbox: bool = False) -> bool:
 def _get_or_create_board(display_name: str, base: str = API,
                          headers: Optional[dict] = None) -> Optional[str]:
     """Retourne l'id du tableau 'Street <Ville>' (créé si absent). `base`/`headers`
-    permettent de viser la PRODUCTION ou le SANDBOX (cache indexé par base)."""
+    permettent de viser la PRODUCTION ou le SANDBOX (cache indexé par base).
+    Robuste au doublon (code 58) : le listing Pinterest peut ne pas renvoyer un
+    tableau qui existe pourtant → on matche par nom SANS casse et on récupère
+    l'existant plutôt que de rejouer une création qui échouerait."""
     h = headers or _headers()
     if not h:
         return None
     name = f"Street {display_name}"
-    ck = (base, name)
+    ck = (base, name.lower())              # clé insensible à la casse
     if ck in _BOARDS_CACHE:
         return _BOARDS_CACHE[ck]
+
+    def _find_existing() -> Optional[str]:
+        """Liste les tableaux et remplit le cache (nom en minuscules)."""
+        try:
+            r = safe_get(f"{base}/boards", headers=h, params={"page_size": 250}, timeout=15)
+            for b in (r.json() or {}).get("items", []):
+                bn = (b.get("name") or "").strip().lower()
+                _BOARDS_CACHE[(base, bn)] = b.get("id")
+            return _BOARDS_CACHE.get(ck)
+        except Exception as e:
+            logger.warning("Pinterest : lecture tableaux KO : %s", e)
+            return None
+
+    found = _find_existing()
+    if found:
+        return found
     try:
-        r = safe_get(f"{base}/boards", headers=h, params={"page_size": 100}, timeout=15)
-        for b in (r.json() or {}).get("items", []):
-            _BOARDS_CACHE[(base, b.get("name", ""))] = b.get("id")
-        if ck in _BOARDS_CACHE:
-            return _BOARDS_CACHE[ck]
         r = safe_post(f"{base}/boards", headers=h, json={
             "name": name,
-            "description": f"Street photography in {display_name} by David Mertens "
-                           f"— fine art prints at davidmertens.com",
+            "description": f"Street photography in {display_name} by David Mertens, "
+                           f"fine art prints at davidmertens.com",
             "privacy": "PUBLIC",
         }, timeout=15)
         data = r.json() or {}
@@ -201,6 +222,13 @@ def _get_or_create_board(display_name: str, base: str = API,
             _BOARDS_CACHE[ck] = data["id"]
             logger.info("Pinterest : tableau créé « %s »", name)
             return data["id"]
+        # Le tableau existe déjà mais le listing ne l'avait pas renvoyé
+        # (code 58) → on relit et on récupère l'existant.
+        if data.get("code") == 58 or "already have a board" in str(data).lower():
+            found = _find_existing()
+            if found:
+                logger.info("Pinterest : tableau « %s » déjà existant, réutilisé", name)
+                return found
         logger.warning("Pinterest : création tableau KO : %s", str(data)[:150])
     except Exception as e:
         logger.warning("Pinterest : tableaux KO : %s", e)
@@ -254,6 +282,7 @@ def pin_photos(image_urls: List[str], ig_caption: str,
     names = (load_yaml_config().get("gallery_names") or {})
     display_name = names.get(slug) or (slug.replace("-", " ").title() if slug else "Photography")
     link = f"https://davidmertens.com/{slug}" if slug else "https://davidmertens.com"
+    global _prod_blocked_until
     board_id = _get_or_create_board(display_name, base=base, headers=h)
     if not board_id:
         return 0, len(urls)
@@ -270,8 +299,19 @@ def pin_photos(image_urls: List[str], ig_caption: str,
                 "media_source": {"source_type": "image_url",
                                  "url": u.split("?")[0] + "?format=1500w"},
             }, timeout=20)
-            if r.status_code in (200, 201) and (r.json() or {}).get("id"):
+            try:
+                j = r.json() or {}
+            except Exception:
+                j = {}
+            if r.status_code in (200, 201) and j.get("id"):
                 ok += 1
+            elif not sandbox and j.get("code") == 29:
+                # Trial ne peut pas épingler en production → inutile de tenter les
+                # 3 autres photos : on mémorise le blocage et on sort.
+                _prod_blocked_until = time.time() + _PROD_BLOCK_TTL
+                logger.info("Pinterest : production bloquée (Trial, code 29) → "
+                            "bascule sandbox pendant 24h")
+                break
             else:
                 logger.warning("Pinterest%s : pin KO (%s) : %s", tag, u[:60], r.text[:150])
         except Exception as e:
@@ -284,7 +324,9 @@ def pin_best_effort(image_urls: List[str], ig_caption: str) -> Tuple[int, int, s
     """Épingle en PRODUCTION d'abord (marchera dès l'accès Standard obtenu) ; si le
     Trial bloque (0 épingle), repli automatique sur le SANDBOX. Titre/description
     SEO identiques dans les deux cas. Retourne (ok, tentées, environnement)."""
-    if connected():
+    # On saute la production tant qu'on la sait bloquée (Trial, code 29) → pas de
+    # 4 appels perdus à chaque publication. Re-sondée après 24h (accès Standard).
+    if connected() and time.time() >= _prod_blocked_until:
         ok, total = pin_photos(image_urls, ig_caption, sandbox=False)
         if ok > 0:
             return ok, total, "production"
