@@ -1040,6 +1040,14 @@ def _reel_flow(chat_id: int, galerie: str, urls=None) -> None:
         os.remove(path)
     except Exception:
         pass
+    # Mémorise les photos de ce Reel → elles ne reviendront pas les jours suivants
+    # (historique dédié, séparé des carrousels). On marque dès que le montage a
+    # abouti (même si l'upload Telegram a échoué : les photos ONT été « utilisées »).
+    try:
+        from db import mark_reel_photos
+        mark_reel_photos(urls, galerie)
+    except Exception as e:
+        logger.warning("[reel] mark_reel_photos KO : %s", e)
     if not sent:
         # Honnête : le montage a réussi mais l'upload vidéo a échoué (Render →
         # Telegram capricieux). On le DIT (au lieu de laisser croire que c'est ok).

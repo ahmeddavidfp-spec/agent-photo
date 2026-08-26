@@ -238,11 +238,29 @@ def pick_reel_photos(site_url: str, galerie: str, n_color: int = 4,
     et prend le groupe majoritaire (égalité → N&B, l'ADN du compte).
     Retourne (urls, "bw"|"color"|"mixed"|"none").
     """
-    from gallery import fetch_gallery_photos  # import local (pas de cycle)
+    from gallery import fetch_gallery_photos, _canonical  # import local (pas de cycle)
     allp = fetch_gallery_photos(site_url, galerie)
     if len(allp) < 2:
         return [], "none"
-    cands = allp[:]
+
+    # Évite de reprendre les mêmes photos plusieurs jours de suite : on écarte
+    # celles déjà passées dans un Reel ET celles déjà publiées en carrousel. Si
+    # la galerie est presque épuisée (moins de 2 fraîches), on retombe sur tout
+    # le catalogue pour ne jamais bloquer le montage.
+    pool = allp
+    try:
+        from db import already_sent_urls, reel_used_urls
+        used = {_canonical(u) for u in reel_used_urls()} | {_canonical(u) for u in already_sent_urls()}
+        fresh = [u for u in allp if _canonical(u) not in used]
+        if len(fresh) >= 2:
+            pool = fresh
+        else:
+            logger.info("Reel %s : galerie presque épuisée (%d fraîches) → catalogue complet",
+                        galerie, len(fresh))
+    except Exception as e:
+        logger.warning("Reel : filtre 'déjà utilisées' KO, pool complet : %s", e)
+
+    cands = pool[:]
     random.shuffle(cands)
     cands = cands[:sample]
 

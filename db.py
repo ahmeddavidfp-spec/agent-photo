@@ -379,6 +379,14 @@ def init_db() -> None:
             "CREATE TABLE IF NOT EXISTS sent_photos ("
             "url TEXT PRIMARY KEY, galerie TEXT, date_envoi TEXT)"
         )
+        # Historique SÉPARÉ des photos déjà passées dans un Reel. Distinct de
+        # sent_photos pour NE PAS gonfler les compteurs « publiées » des carrousels :
+        # un Reel n'est pas une publication IG, mais on veut quand même éviter de
+        # réutiliser les mêmes photos plusieurs jours de suite.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS reel_photos ("
+            "url TEXT PRIMARY KEY, galerie TEXT, date_envoi TEXT)"
+        )
         conn.execute(
             "CREATE TABLE IF NOT EXISTS current_session ("
             "chat_id INTEGER PRIMARY KEY, last_url TEXT, last_caption TEXT)"
@@ -475,6 +483,24 @@ def mark_photo_as_sent(url: str, galerie: str) -> None:
 def already_sent_urls() -> set[str]:
     with connection() as conn:
         return {row[0] for row in conn.execute("SELECT url FROM sent_photos")}
+
+
+# --- Historique des photos passées dans un Reel (séparé des carrousels) ---
+
+def mark_reel_photos(urls: list[str], galerie: str) -> None:
+    """Enregistre les photos d'un Reel monté → évite de les réutiliser les jours
+    suivants. Table dédiée (pas sent_photos) pour ne pas fausser les compteurs."""
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with connection() as conn:
+        conn.executemany(
+            "INSERT OR IGNORE INTO reel_photos (url, galerie, date_envoi) VALUES (?, ?, ?)",
+            [(u, galerie, now) for u in urls if u],
+        )
+
+
+def reel_used_urls() -> set[str]:
+    with connection() as conn:
+        return {row[0] for row in conn.execute("SELECT url FROM reel_photos")}
 
 
 def galerie_last_use(galerie: str) -> Optional[dt.datetime]:
