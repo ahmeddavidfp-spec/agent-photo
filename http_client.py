@@ -1,15 +1,32 @@
 """Client HTTP partagé avec retry automatique et timeouts par défaut."""
 import logging
 import os
+import socket
 import threading
 import time
 from urllib.parse import quote, urlparse
 
 import requests
+import urllib3.util.connection as _u3_conn
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
+
+# --- Forçage IPv4 (contourne un IPv6 d'egress défaillant chez l'hébergeur) ---
+# Symptôme (13/08, 11h ET 13h) : POST vers graph.facebook.com →
+# ConnectionError « Max retries exceeded », alors que graph.threads.net (autre
+# hôte/route) passait au même instant. Signature classique sur Render/cloud : la
+# résolution renvoie une adresse IPv6 (AAAA) injoignable → le connect pend puis
+# échoue, et les retries retombent sur la même IPv6 cassée (donc « plus de
+# retries » ne suffit pas). On force IPv4 pour TOUTES les connexions urllib3
+# (Meta/Telegram/OpenAI/Pinterest sont tous joignables en IPv4).
+# Désactivable via FORCE_IPV4=0 si un jour l'IPv6 redevient nécessaire.
+if os.environ.get("FORCE_IPV4", "1") != "0":
+    def _ipv4_only():
+        return socket.AF_INET
+    _u3_conn.allowed_gai_family = _ipv4_only
+    logger.info("http_client : IPv4 forcé (FORCE_IPV4)")
 
 # --- Relais optionnel (contourne un blocage d'IP côté Squarespace) -----------
 # Si FETCH_PROXY est défini (URL d'un Worker Cloudflare relais), les requêtes
