@@ -154,6 +154,20 @@ def stats_page():
     return render_stats_html()
 
 
+@app.route("/admin/db-export", methods=["GET"])
+def admin_db_export():
+    """Export TEMPORAIRE de la base (migration Render -> R2). Protégé par
+    X-Cron-Secret. A RETIRER juste après la migration."""
+    if not CRON_SECRET or request.headers.get("X-Cron-Secret") != CRON_SECRET:
+        abort(403)
+    import os
+    from flask import send_file
+    from settings import DB_PATH
+    if not os.path.exists(DB_PATH):
+        return jsonify({"ok": False, "error": "DB absente"}), 404
+    return send_file(DB_PATH, as_attachment=True, download_name="photos_backup.db")
+
+
 @app.route("/cron/reset-ig-token", methods=["POST", "GET"])
 def cron_reset_ig_token():
     """Supprime le token IG stocké en DB pour forcer le fallback sur l'env var."""
