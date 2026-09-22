@@ -388,31 +388,47 @@ def _run_due_posts_bg() -> None:
         _due_posts_running = False
 
 
-def scheduler_loop() -> None:
+def run_scheduler_once() -> None:
+    """UNE itération des tâches périodiques : posts dus, tokens, insights, reel
+    quotidien, rapport hebdo, scan, sauvegarde DB. Chaque sous-tâche porte sa
+    propre garde (1x/jour, rate-limit...) → l'appeler en doublon est sans effet.
+
+    Appelée en boucle par scheduler_loop (Render), OU une fois par requête
+    /cron/tick (Cloudflare : le conteneur dort, un Cron Trigger la déclenche)."""
     global _due_posts_running
+    if not _due_posts_running:
+        _due_posts_running = True   # posé ici → pas de course
+        threading.Thread(target=_run_due_posts_bg, daemon=True,
+                         name="due-posts").start()
+    _run_daily_token_check()
+    _collect_pending_insights()
+    _run_daily_autopubs()
+    _run_daily_reel()
+    _run_weekly_report()
+    _run_gallery_scan()
+    # Sauvegarde DB (rate-limitée 5 min, thread isolé, seulement si la DB a
+    # changé — voir db.maybe_backup_db). Cible /data (Render) ou R2 (Cloudflare).
+    from db import maybe_backup_db
+    maybe_backup_db()
+
+
+def scheduler_loop() -> None:
     while True:
         try:
-            if not _due_posts_running:
-                _due_posts_running = True   # posé ici (thread scheduler) → pas de course
-                threading.Thread(target=_run_due_posts_bg, daemon=True,
-                                 name="due-posts").start()
-            _run_daily_token_check()
-            _collect_pending_insights()
-            _run_daily_autopubs()
-            _run_daily_reel()
-            _run_weekly_report()
-            _run_gallery_scan()
-            # Sauvegarde DB locale → /data (rate-limitée 5 min, thread isolé,
-            # seulement si la DB a changé — voir db.maybe_backup_db)
-            from db import maybe_backup_db
-            maybe_backup_db()
+            run_scheduler_once()
         except Exception as e:
             logger.exception("Scheduler loop error: %s", e)
         time.sleep(POLL_SECONDS)
 
 
 def start_scheduler() -> None:
-    """Démarre le scheduler en thread démon si on est en process web unique."""
+    """Démarre le scheduler en thread démon. Sur Cloudflare (conteneur qui dort),
+    DISABLE_INPROCESS_SCHEDULER=1 le coupe : c'est un Cron Trigger qui appelle
+    /cron/tick à la place (la boucle en mémoire ne tournerait pas de toute façon)."""
+    import os
+    if os.environ.get("DISABLE_INPROCESS_SCHEDULER") == "1":
+        logger.info("Scheduler en mémoire désactivé (piloté par Cron Trigger /cron/tick).")
+        return
     t = threading.Thread(target=scheduler_loop, daemon=True, name="scheduler")
     t.start()
     logger.info("Scheduler démarré en thread démon.")

@@ -25,17 +25,22 @@
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["AgentPhotoContainer"] }
-  ]
+  ],
 
-  // --- Phase 2 (a activer apres decision sur la frequence de reveil) ---
-  // Cron Triggers : reveillent le conteneur pour traiter les posts dus et lancer
-  // le Reel quotidien (la boucle scheduler en memoire ne tourne pas quand le
-  // conteneur dort). Compromis cout/ponctualite : reveiller souvent = payer plus.
-  // "triggers": { "crons": ["*/15 * * * *"] },
+  // Variables NON secretes transmises au conteneur (le Worker forwarde toutes
+  // les valeurs texte de env). Les SECRETS (tokens Telegram/Meta/OpenAI...,
+  // R2_ACCOUNT_ID/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY, STUDIO_TOKEN,
+  // CRON_SECRET) se posent a part via `wrangler secret put` ou le dashboard.
+  "vars": {
+    "APP_BASE_URL": "https://agent-photo.mertens-david-1972.workers.dev",
+    "DISABLE_INPROCESS_SCHEDULER": "1",
+    "R2_BUCKET": "agent-photo-backup",
+    "R2_KEY": "photos_backup.db"
+  },
 
-  // --- Phase 1 (a activer avant la bascule) ---
-  // R2 : persistance de la sauvegarde SQLite (le disque du conteneur est ephemere).
-  // "r2_buckets": [
-  //   { "binding": "BACKUP", "bucket_name": "agent-photo-backup" }
-  // ]
+  // Cron Trigger : reveille le conteneur toutes les 15 min et appelle /cron/tick
+  // (posts dus + reel quotidien). Compromis cout/ponctualite ajustable ici.
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  }
 }

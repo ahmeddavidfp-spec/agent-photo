@@ -166,6 +166,23 @@ def cron_reset_ig_token():
     return jsonify({"ok": True, "message": "Token IG réinitialisé depuis env var"})
 
 
+@app.route("/cron/tick", methods=["POST", "GET"])
+def cron_tick():
+    """Battement du scheduler pour Cloudflare (conteneur scale-to-zero) : un Cron
+    Trigger appelle cet endpoint, qui exécute UNE itération des tâches périodiques
+    (posts dus, reel quotidien, sauvegarde...). Sur Render c'est la boucle en
+    mémoire qui s'en charge ; ici l'appel est idempotent (gardes par sous-tâche)."""
+    if CRON_SECRET and request.headers.get("X-Cron-Secret") != CRON_SECRET:
+        abort(403)
+    from scheduler import run_scheduler_once
+    try:
+        run_scheduler_once()
+        return jsonify({"ok": True})
+    except Exception as e:
+        logger.exception("/cron/tick KO: %s", e)
+        return jsonify({"ok": False, "error": str(e)[:200]}), 500
+
+
 @app.route("/cron/refresh-tokens", methods=["POST", "GET"])
 def cron_refresh_tokens():
     """À appeler tous les 45 jours via un Cron Job Render.

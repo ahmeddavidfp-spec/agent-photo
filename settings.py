@@ -69,8 +69,10 @@ ALLOWED_CHAT_ID = os.environ.get("ALLOWED_CHAT_ID") or os.environ.get("TELEGRAM_
 
 # URL publique de l'app (Render la fournit via RENDER_EXTERNAL_URL).
 # Utilisée par la Mini App Telegram (boutons web_app).
-APP_BASE_URL = os.environ.get(
-    "RENDER_EXTERNAL_URL", "https://agent-photo.onrender.com"
+APP_BASE_URL = (
+    os.environ.get("APP_BASE_URL")
+    or os.environ.get("RENDER_EXTERNAL_URL")
+    or "https://agent-photo.onrender.com"
 ).rstrip("/")
 
 # Pinterest (épinglage automatique) — vides = fonctionnalité inerte.
@@ -121,12 +123,22 @@ TH_API = "https://graph.threads.net/v1.0/"
 # isolé : si /data gèle, seule la sauvegarde attend — jamais le bot).
 # Au boot, db.py restaure depuis la sauvegarde /data la plus récente.
 # Trade-off assumé : un crash peut perdre les toutes dernières minutes d'écritures.
+# Cloudflare Containers : disque EPHEMERE → la persistance passe par R2 (voir
+# r2_backup.py). Détecté par la présence des variables R2_*.
+_R2_ON = bool(
+    os.environ.get("R2_BUCKET") and os.environ.get("R2_ACCOUNT_ID")
+    and os.environ.get("R2_ACCESS_KEY_ID") and os.environ.get("R2_SECRET_ACCESS_KEY")
+)
 if Path("/data").exists():
-    DB_PATH = "/tmp/photos_live.db"            # DB vive : disque local
+    DB_PATH = "/tmp/photos_live.db"            # DB vive : disque local (Render)
     BACKUP_DB_PATH = "/data/photos_backup.db"  # sauvegarde persistante
     # Sources de restauration au boot, par ordre de préférence (les deux
     # derniers = anciens emplacements, pour la première migration).
     RESTORE_SOURCES = ["/data/photos_backup.db", "/data/photos_v2.db", "/data/photos.db"]
+elif _R2_ON:
+    DB_PATH = "/tmp/photos_live.db"            # DB vive locale (conteneur Cloudflare)
+    BACKUP_DB_PATH = None                      # la cible de sauvegarde est R2
+    RESTORE_SOURCES = []                       # restauration via r2_backup au boot
 else:
     DB_PATH = "photos_v2.db"                   # dev local : inchangé
     BACKUP_DB_PATH = None

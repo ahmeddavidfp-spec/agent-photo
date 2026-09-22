@@ -84,7 +84,39 @@ def _restore_at_boot() -> None:
     DÉSACTIVÉES pour ce boot (on n'écrase jamais un bon backup avec du vide).
     """
     global _BACKUPS_ENABLED
-    if os.path.exists(DB_PATH) or not RESTORE_SOURCES:
+    if os.path.exists(DB_PATH):
+        return
+
+    # Cloudflare Containers : restauration depuis R2 (disque éphémère). Bornée à
+    # 60s dans un thread jetable (comme la restauration NFS). Échec/gel → DB
+    # vierge + sauvegardes coupées ce boot (on n'écrase jamais un bon backup).
+    try:
+        import r2_backup
+        if r2_backup.enabled():
+            r2res: dict = {}
+
+            def r2work():
+                try:
+                    r2res["ok"] = r2_backup.download(DB_PATH)
+                except Exception as e:
+                    r2res["err"] = str(e)
+            rt = threading.Thread(target=r2work, daemon=True, name="db-restore-r2")
+            rt.start()
+            rt.join(timeout=60)
+            if rt.is_alive() or "err" in r2res:
+                _BACKUPS_ENABLED = False
+                logger.error("⚠️ Restore R2 impossible (%s) — démarrage sur DB VIERGE, "
+                             "sauvegardes désactivées ce boot (protection du backup).",
+                             r2res.get("err", "R2 gelé/timeout"))
+            elif r2res.get("ok"):
+                logger.info("DB restaurée depuis R2 → %s", DB_PATH)
+            else:
+                logger.info("Aucun backup R2 — nouvelle DB (première installation)")
+            return
+    except Exception as e:
+        logger.warning("R2 restore ignoré : %s", e)
+
+    if not RESTORE_SOURCES:
         return
     result: dict = {}
 
@@ -161,6 +193,16 @@ def _do_backup() -> None:
         if not row or row[0] != "ok":
             logger.warning("Backup : snapshot incohérent (copié pendant une écriture ?), ignoré.")
             return
+        # Cible : R2 (Cloudflare Containers) si configuré, sinon fichier /data (Render).
+        try:
+            import r2_backup
+            if r2_backup.enabled():
+                if r2_backup.upload(snap):
+                    _backup_state["last_ts"] = time.time()
+                    _backup_state["last_commit"] = commits_at_snap
+                return
+        except Exception as e:
+            logger.warning("Backup R2 ignoré : %s", e)
         tmp = BACKUP_DB_PATH + ".tmp"
         shutil.copyfile(snap, tmp)           # upload NFS (peut être lent, mais HORS verrou)
         os.replace(tmp, BACKUP_DB_PATH)      # remplacement atomique
@@ -183,7 +225,12 @@ def maybe_backup_db(force: bool = False) -> None:
 
     Conditions : activé + pas déjà en cours + ≥5 min depuis la dernière +
     au moins un commit depuis. `force=True` ignore l'intervalle (shutdown)."""
-    if not (BACKUP_DB_PATH and _BACKUPS_ENABLED):
+    try:
+        import r2_backup
+        _r2 = r2_backup.enabled()
+    except Exception:
+        _r2 = False
+    if not ((BACKUP_DB_PATH or _r2) and _BACKUPS_ENABLED):
         return
     if not force and time.time() - _backup_state["last_ts"] < _BACKUP_MIN_INTERVAL:
         return
