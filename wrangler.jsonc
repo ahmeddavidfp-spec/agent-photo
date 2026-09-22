@@ -38,9 +38,10 @@
     "R2_KEY": "photos_backup.db"
   },
 
-  // Cron Trigger : DESACTIVE tant que Render est encore la prod (sinon les DEUX
-  // instances enverraient reels/rapports en double). On le REACTIVE au moment de
-  // la bascule, en meme temps qu'on pointe le webhook Telegram sur Cloudflare.
-  // Reveille le conteneur toutes les 15 min et appelle /cron/tick.
-  // "triggers": { "crons": ["*/15 * * * *"] }
+  // Cron Trigger (BASCULE faite) : reveille le conteneur toutes les 15 min et
+  // appelle /cron/tick (posts dus + reel quotidien). Le scheduler Render est
+  // coupe en meme temps (DISABLE_INPROCESS_SCHEDULER=1) pour eviter les doublons.
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  }
 }
