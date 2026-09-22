@@ -1,0 +1,25 @@
+# Ce qui ne doit PAS entrer dans l'image du conteneur.
+.git
+.gitignore
+.claude
+node_modules
+worker
+wrangler.jsonc
+package.json
+package-lock.json
+
+# Dossier prive + gros fichiers (jamais dans l'image)
+JOURNAL.html
+DOCUMENTATION.md
+*.zip
+agent-photo-snapshot-*
+_push.command
+
+# Artefacts Python / locaux
+__pycache__
+*.pyc
+.venv
+venv
+*.db
+*.sqlite
+.DS_Store

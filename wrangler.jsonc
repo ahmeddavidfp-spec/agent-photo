@@ -1,0 +1,41 @@
+{
+  // Worker + Container Cloudflare pour Agent Photo.
+  // Deploiement : `npx wrangler deploy` (necessite le plan Workers Paid).
+  "name": "agent-photo",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-09-01",
+  "observability": { "enabled": true },
+
+  // Le conteneur = l'image Docker (app Flask + ffmpeg), inchangee.
+  // instance_type "basic" : plus de RAM que "lite" pour l'encodage ffmpeg 720p.
+  "containers": [
+    {
+      "class_name": "AgentPhotoContainer",
+      "image": "./Dockerfile",
+      "instance_type": "basic",
+      "max_instances": 1
+    }
+  ],
+
+  // Objet durable qui pilote le cycle de vie du conteneur.
+  "durable_objects": {
+    "bindings": [
+      { "class_name": "AgentPhotoContainer", "name": "AGENT_PHOTO" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["AgentPhotoContainer"] }
+  ]
+
+  // --- Phase 2 (a activer apres decision sur la frequence de reveil) ---
+  // Cron Triggers : reveillent le conteneur pour traiter les posts dus et lancer
+  // le Reel quotidien (la boucle scheduler en memoire ne tourne pas quand le
+  // conteneur dort). Compromis cout/ponctualite : reveiller souvent = payer plus.
+  // "triggers": { "crons": ["*/15 * * * *"] },
+
+  // --- Phase 1 (a activer avant la bascule) ---
+  // R2 : persistance de la sauvegarde SQLite (le disque du conteneur est ephemere).
+  // "r2_buckets": [
+  //   { "binding": "BACKUP", "bucket_name": "agent-photo-backup" }
+  // ]
+}

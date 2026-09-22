@@ -178,6 +178,14 @@ def _ffmpeg_exe() -> str:
     global _FFMPEG_PATH
     if _FFMPEG_PATH:
         return _FFMPEG_PATH
+    # Binaire ffmpeg fourni par le système (ex. conteneur Cloudflare : ffmpeg
+    # installé via apt, avec xfade). Évite tout téléchargement au runtime sur un
+    # disque éphémère. Sur Render la variable n'existe pas → comportement inchangé.
+    _env_ff = os.environ.get("FFMPEG_BINARY", "").strip()
+    if _env_ff and os.path.isfile(_env_ff) and os.access(_env_ff, os.X_OK):
+        _FFMPEG_PATH = _env_ff
+        logger.info("ffmpeg : binaire système (%s)", _env_ff)
+        return _FFMPEG_PATH
     try:
         from static_ffmpeg import run as _sf
         _FFMPEG_PATH = _sf.get_or_fetch_platform_executables_else_raise()[0]

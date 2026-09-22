@@ -1,0 +1,16 @@
+{
+  "name": "agent-photo-worker",
+  "private": true,
+  "description": "Worker + Container Cloudflare pour Agent Photo (front du conteneur Flask/ffmpeg).",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "tail": "wrangler tail"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "latest"
+  },
+  "devDependencies": {
+    "wrangler": "latest"
+  }
+}

@@ -13,3 +13,9 @@ DOCUMENTATION.md
 
 # Dossier technique privé (contient des secrets) — jamais sur GitHub
 JOURNAL.html
+
+# Cloudflare / Node
+node_modules/
+.wrangler/
+.dev.vars
+package-lock.json
